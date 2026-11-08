@@ -1,0 +1,38 @@
+VidGrab for Mac - download videos from YouTube, Facebook, Instagram and TikTok
+==============================================================================
+
+1. Install the helper
+   - Right-click "Install VidGrab.command" and choose Open.
+     (A normal double-click will say it's from an unidentified developer.
+     If you only get a Done button: open System Settings > Privacy & Security,
+     scroll down and click "Open Anyway".)
+   - A Terminal window shows the progress. It downloads about 120 MB.
+     Wait until it says "Done!".
+
+2. Add the extension to Chrome
+   - In Chrome, go to:  chrome://extensions
+   - Turn on "Developer mode" (top right).
+   - Click "Load unpacked" and choose the folder  VidGrab > extension
+     in your home folder (the installer opens it in Finder for you).
+   - Quit Chrome completely (Cmd+Q) and open it again.
+
+3. Use it
+   - Open a video, click the VidGrab icon (pin it from the puzzle-piece menu),
+     pick a quality and click Download.
+   - Files are saved in  Downloads > VidGrab.
+   - For Instagram, and Facebook posts that need a login, tick
+     "Use my Chrome login".
+
+Something stopped working?  Run "Install VidGrab.command" again. That gets
+the newest version of the downloader, which fixes most problems.
+
+Chrome may sometimes show "Disable developer mode extensions". Click the X
+to keep VidGrab working.
+
+COPYRIGHT: only download videos you own or have permission to save.
+Downloading, re-uploading or sharing copyrighted videos without permission
+can be illegal. You are responsible for how you use VidGrab. VidGrab asks
+you to accept its legal notice the first time you open it.
+
+----
+VidGrab - made by Shahidul H Tareq

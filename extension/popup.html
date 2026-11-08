@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="brand"><img src="icons/icon32.png" alt="" /><strong>VidGrab</strong></span>
+    <span id="site" class="pill"></span>
+  </header>
+
+  <section id="main">
+    <div id="state" class="muted">Loading…</div>
+
+    <div id="media" hidden>
+      <div class="media">
+        <img id="thumb" alt="" />
+        <div>
+          <div id="title" class="title"></div>
+          <div id="meta" class="muted small"></div>
+        </div>
+      </div>
+      <label class="small">Quality
+        <select id="format"></select>
+      </label>
+      <button id="dl" class="primary">Download</button>
+    </div>
+
+    <div id="pageVideos" hidden>
+      <div class="row">
+        <strong class="small" id="pvTitle">Ads on this page</strong>
+        <button id="pvAll" class="link small">Download all</button>
+      </div>
+      <div class="small muted" id="pvNote"></div>
+      <ul id="pvList"></ul>
+    </div>
+
+    <label class="small check">
+      <input type="checkbox" id="cookies" /> Use my Chrome login (for private / login-only posts)
+    </label>
+  </section>
+
+  <section>
+    <div class="row">
+      <strong class="small">Downloads</strong>
+      <button id="clear" class="link small">Clear finished</button>
+    </div>
+    <ul id="jobs"></ul>
+  </section>
+
+  <footer><img src="icons/author.png" alt="" />Made by <b>Shahidul H Tareq</b> · <a href="#" id="legal">Legal</a></footer>
+
+  <!-- First-use agreement: nothing works until it's accepted -->
+  <div id="terms" class="terms" hidden>
+    <img src="icons/icon128.png" alt="" class="terms-logo" />
+    <h2>Before you start</h2>
+    <p class="warn">Only download videos you own or have permission to save. Downloading or reusing copyrighted
+      videos without permission can be illegal, and may break the website's terms of service.</p>
+    <p class="small muted">You are responsible for how you use VidGrab. It is not affiliated with YouTube, Meta or TikTok,
+      and it collects no data.</p>
+    <label class="check agree"><input type="checkbox" id="agree" /> I'll only download videos I have the right to save, and I accept the legal notice.</label>
+    <button id="accept" class="primary" disabled>Agree &amp; continue</button>
+    <a href="#" id="legal2" class="small">Read the full legal notice</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

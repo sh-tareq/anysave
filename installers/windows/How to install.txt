@@ -1,0 +1,42 @@
+VidGrab for Windows - download videos from YouTube, Facebook, Instagram and TikTok
+==================================================================================
+
+1. Unzip first
+   - Right-click the VidGrab zip file and choose "Extract All...".
+     (Running the installer from inside the zip won't work.)
+
+2. Install the helper
+   - Double-click "Install VidGrab.bat" in the extracted folder.
+   - If Windows says "Windows protected your PC": click "More info",
+     then "Run anyway".
+   - A window shows the progress. It downloads about 130 MB.
+     Wait until it says "Done!", then press any key.
+
+3. Add the extension to Chrome (or Edge)
+   - In Chrome, go to:  chrome://extensions   (Edge: edge://extensions)
+   - Turn on "Developer mode".
+   - Click "Load unpacked" and choose the folder
+     C:\Users\<your name>\VidGrab\extension
+     (the installer opens it in Explorer for you).
+   - Close Chrome completely and open it again.
+
+4. Use it
+   - Open a video, click the VidGrab icon (pin it from the puzzle-piece menu),
+     pick a quality and click Download.
+   - Files are saved in  Downloads\VidGrab.
+   - For Instagram, and Facebook posts that need a login, tick
+     "Use my Chrome login".
+
+Something stopped working?  Run "Install VidGrab.bat" again. That gets the
+newest version of the downloader, which fixes most problems.
+
+Chrome may sometimes show "Disable developer mode extensions". Click the X
+to keep VidGrab working.
+
+COPYRIGHT: only download videos you own or have permission to save.
+Downloading, re-uploading or sharing copyrighted videos without permission
+can be illegal. You are responsible for how you use VidGrab. VidGrab asks
+you to accept its legal notice the first time you open it.
+
+----
+VidGrab - made by Shahidul H Tareq

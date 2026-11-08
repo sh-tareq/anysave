@@ -1,0 +1,19 @@
+VidGrab - download videos from YouTube, Facebook, Instagram and TikTok
+=======================================================================
+
+Open the folder for your computer:
+
+  Mac      ->  VidGrab-mac      (start with "How to install.txt")
+  Windows  ->  VidGrab-windows  (start with "How to install.txt")
+
+Android phones: install VidGrab.apk instead (sent separately).
+
+IMPORTANT - COPYRIGHT
+Only download videos you own or have permission to save. Downloading,
+re-uploading or sharing copyrighted videos without permission can be
+illegal and can break the website's terms of service. You are solely
+responsible for how you use VidGrab. VidGrab is provided "as is", with no
+warranty, and is not affiliated with YouTube, Meta or TikTok.
+Full details: "Legal notice.txt".
+
+Made by Shahidul H Tareq

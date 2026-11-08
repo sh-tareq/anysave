@@ -1,0 +1,24 @@
+# Secrets: never commit
+# private key behind the extension ID
+keys/
+android/keystore.properties
+android/*.jks
+*.jks
+*.keystore
+
+# Build output
+dist/
+dist-assets/r8-mapping-*.txt
+host-go/vidgrab-host
+host-go/*.exe
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+
+# Local / OS
+.DS_Store
+*.log
+.idea/
+.vscode/
