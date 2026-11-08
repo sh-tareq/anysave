@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Download
@@ -70,6 +71,7 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
         }
         item { LinkInput(vm) }
         item { SiteRow() }
+        item { AdLibrariesCard() }
 
         if (engine == Engine.State.STARTING) item {
             Card(Modifier.pulse(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
@@ -151,6 +153,41 @@ private fun SiteRow() {
                 SiteIcon(name, 22.dp)
                 Spacer(Modifier.width(7.dp))
                 Text(name, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+            }
+        }
+    }
+}
+
+/** Opens Meta Ad Library / TikTok Creative Center in the built-in ad browser. */
+@Composable
+private fun AdLibrariesCard() {
+    val ctx = LocalContext.current
+    ElevatedCard {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Campaign, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Ad libraries", fontWeight = FontWeight.SemiBold)
+                    Text("Browse ads and save their videos", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.META)) },
+                    modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
+                ) {
+                    SiteIcon("Facebook", 20.dp); Spacer(Modifier.width(8.dp))
+                    Text("Meta Ad Library", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                }
+                OutlinedButton(
+                    onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.TIKTOK)) },
+                    modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
+                ) {
+                    SiteIcon("TikTok", 20.dp); Spacer(Modifier.width(8.dp))
+                    Text("TikTok Creative", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }

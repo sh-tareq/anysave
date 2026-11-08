@@ -189,6 +189,7 @@ object Engine {
     fun siteOf(url: String): String? {
         val host = runCatching { android.net.Uri.parse(url).host.orEmpty().lowercase() }.getOrDefault("")
         return when {
+            host == "ads.tiktok.com" -> "TikTok"
             host.endsWith("youtube.com") || host.endsWith("youtu.be") -> "YouTube"
             host.endsWith("facebook.com") || host.endsWith("fb.watch") -> "Facebook"
             host.endsWith("instagram.com") -> "Instagram"

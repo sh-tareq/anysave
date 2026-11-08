@@ -106,7 +106,7 @@ class DownloadService : Service() {
             val req = YoutubeDLRequest(job.url)
                 .addOption("-f", job.format)
                 .addOption("-S", job.sort ?: Engine.H264_SORT)
-                .addOption("-o", File(workDir, "%(title).100B [%(id)s]%(height& {}p|)s.%(ext)s").absolutePath)
+                .addOption("-o", File(workDir, outputTemplate(job)).absolutePath)
                 .addOption("--no-playlist")
                 .addOption("--no-warnings")
                 .addOption("--newline")
@@ -130,7 +130,7 @@ class DownloadService : Service() {
                 when {
                     line.startsWith("VGP ") -> onProgress(id, line.removePrefix("VGP "))
                     line.startsWith("VGF ") -> finalPath = line.removePrefix("VGF ").trim()
-                    line.startsWith("VGT ") -> {
+                    line.startsWith("VGT ") && !job.fixedName -> {
                         val t = line.removePrefix("VGT ").trim()
                         if (t.isNotEmpty() && t != "NA") Downloads.update(id) { it.copy(title = t) }
                     }
@@ -164,6 +164,13 @@ class DownloadService : Service() {
             running = null
             workDir.deleteRecursively()
         }
+    }
+
+    /** File name pattern: yt-dlp's title + ID, or our own name for ad videos. */
+    private fun outputTemplate(job: Job): String {
+        if (!job.fixedName) return "%(title).100B [%(id).40B]%(height& {}p|)s.%(ext)s"
+        val safe = job.title.replace(Regex("""[\\/:*?"<>|\n\r\t]+"""), " ").replace("%", "%%").trim().take(90)
+        return "${safe.ifBlank { "video" }}.%(ext)s"
     }
 
     private fun onProgress(id: String, raw: String) {

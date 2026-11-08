@@ -62,6 +62,12 @@
             android:name=".LoginActivity"
             android:exported="false" />
 
+        <!-- Built-in browser for Meta Ad Library and TikTok Creative Center -->
+        <activity
+            android:name=".AdLibraryActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
         <service
             android:name=".DownloadService"
             android:exported="false"

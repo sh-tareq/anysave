@@ -70,10 +70,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Set when a link belongs to an ad library; the screen opens the in-app ad browser for it. */
+    var openAdLibrary by mutableStateOf<Pair<AdLibraryActivity.Library, String>?>(null)
+
     fun lookUp(newUrl: String? = null) {
         newUrl?.let { url = it }
         val link = Engine.extractUrl(url) ?: run { error = "Paste a video link first."; return }
         url = link
+        // Ad library pages list many ads: open them in the built-in ad browser instead.
+        // (A single Meta ad link with ?id= still goes through the normal lookup, in HD.)
+        AdLibraryActivity.libraryOf(link)?.let { lib ->
+            if (!(lib == AdLibraryActivity.Library.META && link.contains("id="))) {
+                openAdLibrary = lib to link; return
+            }
+        }
         info = null; error = null; loading = true; tab = MainActivity.TAB_HOME
         viewModelScope.launch {
             try {
@@ -104,6 +114,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun quickDownload(link: String) {
+        AdLibraryActivity.libraryOf(link)?.let { lib ->
+            if (!(lib == AdLibraryActivity.Library.META && link.contains("id="))) { openAdLibrary = lib to link; return }
+        }
         if (DownloadService.startQuick(ctx, link)) messages.tryEmit("Downloading copied link (${Settings.quality.value.label})")
         clipboardLink = null
     }
@@ -183,6 +196,14 @@ fun AppShell(vm: MainViewModel) {
     var showWelcome by remember { mutableStateOf(!Settings.onboarded || !Settings.acceptedTerms) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+
+    // Open the built-in ad browser when a link belongs to an ad library
+    LaunchedEffect(vm.openAdLibrary) {
+        vm.openAdLibrary?.let { (lib, link) ->
+            ctx.startActivity(AdLibraryActivity.intent(ctx, lib, link))
+            vm.openAdLibrary = null; vm.url = ""
+        }
+    }
 
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {

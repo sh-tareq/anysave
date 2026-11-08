@@ -30,6 +30,8 @@ data class Job(
     val sizeBytes: Long = 0,
     val error: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Save under [title] instead of the name yt-dlp picks (ad videos, whose links make huge names). */
+    val fixedName: Boolean = false,
 ) {
     val finished get() = status == JobStatus.DONE || status == JobStatus.ERROR || status == JobStatus.CANCELLED
     val active get() = !finished
@@ -40,6 +42,7 @@ data class Job(
         put("site", site); put("thumbnail", thumbnail); put("status", status.name)
         put("uri", uri?.toString()); put("mime", mime); put("fileName", fileName)
         put("sizeBytes", sizeBytes); put("error", error); put("createdAt", createdAt)
+        put("fixedName", fixedName)
     }
 
     companion object {
@@ -57,6 +60,7 @@ data class Job(
                 qualityLabel = o.optString("qualityLabel"), site = s("site"), thumbnail = s("thumbnail"),
                 status = status, uri = s("uri")?.let(Uri::parse), mime = s("mime"), fileName = s("fileName"),
                 sizeBytes = o.optLong("sizeBytes"), error = error, createdAt = o.optLong("createdAt"),
+                fixedName = o.optBoolean("fixedName"),
             )
         }
     }

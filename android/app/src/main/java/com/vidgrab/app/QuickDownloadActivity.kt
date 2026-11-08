@@ -40,6 +40,13 @@ class QuickDownloadActivity : ComponentActivity() {
             finish()
             return
         }
+        // Ad library pages: open the built-in ad browser so the user can pick ads.
+        val lib = url?.let { AdLibraryActivity.libraryOf(it) }
+        if (lib != null && !(lib == AdLibraryActivity.Library.META && url.contains("id="))) {
+            startActivity(AdLibraryActivity.intent(this, lib, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            finish()
+            return
+        }
         when {
             url == null -> toast(if (fromClipboard) "Copy a video link first" else "No link found in what was shared")
             Engine.siteOf(url) == null && fromClipboard -> toast("The copied link isn't a YouTube, Instagram, TikTok or Facebook video")
