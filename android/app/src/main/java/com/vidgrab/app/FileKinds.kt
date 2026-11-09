@@ -5,7 +5,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 
-/** Folder names inside Downloads/VidGrab, plus helpers to tell file links from video pages. */
+/** Folder names inside Downloads/AnySave, plus helpers to tell file links from video pages. */
 object FileKinds {
     enum class Category(val folder: String) {
         VIDEOS("Videos"), MUSIC("Music"), PICTURES("Pictures"), DOCUMENTS("Documents"),
@@ -84,7 +84,7 @@ object FileKinds {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(extOf(name))
 
     /** Honest name for direct file downloads; some servers block fake browser names. */
-    const val FILE_USER_AGENT = "VidGrab/2.0 (Android; +https://github.com/sh-tareq/vid-grab)"
+    const val FILE_USER_AGENT = "AnySave/2.1 (Android; +https://github.com/sh-tareq/anysave)"
 
     const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36"

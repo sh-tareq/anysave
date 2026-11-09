@@ -11,7 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class VidGrabApp : Application(), ImageLoaderFactory {
+class AnySaveApp : Application(), ImageLoaderFactory {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -26,7 +26,7 @@ class VidGrabApp : Application(), ImageLoaderFactory {
                 NotificationChannel(CH_DONE, "Finished downloads", NotificationManager.IMPORTANCE_DEFAULT)
             )
         }
-        scope.launch { Engine.start(this@VidGrabApp) }
+        scope.launch { Engine.start(this@AnySaveApp) }
     }
 
     /** Coil image loader that can also show a frame from downloaded videos. */

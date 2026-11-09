@@ -13,13 +13,13 @@
         android:maxSdkVersion="28" />
 
     <application
-        android:name=".VidGrabApp"
-        android:label="VidGrab"
+        android:name=".AnySaveApp"
+        android:label="AnySave"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
-        android:theme="@style/Theme.VidGrab">
+        android:theme="@style/Theme.AnySave">
 
         <activity
             android:name=".MainActivity"
@@ -46,7 +46,7 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:label="Download"
-            android:theme="@style/Theme.VidGrab.Invisible">
+            android:theme="@style/Theme.AnySave.Invisible">
             <intent-filter android:label="Download">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -78,7 +78,7 @@
             android:name=".DownloadTileService"
             android:exported="true"
             android:icon="@drawable/ic_stat_download"
-            android:label="VidGrab"
+            android:label="AnySave"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />

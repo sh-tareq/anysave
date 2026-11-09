@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleIntent(intent)
-        setContent { VidGrabTheme { AppShell(vm) } }
+        setContent { AnySaveTheme { AppShell(vm) } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -310,15 +310,15 @@ private fun WelcomeDialog(onAccept: () -> Unit) {
         properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = false, dismissOnBackPress = false),
         confirmButton = { Button(onClick = onAccept, enabled = agreed) { Text("Agree & continue") } },
         icon = { AnimatedLogo(72.dp) },
-        title = { Text("Welcome to VidGrab", fontWeight = FontWeight.Bold) },
+        title = { Text("Welcome to AnySave", fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Tip(Icons.Outlined.ContentCopy, "Copy a link, open VidGrab",
-                    "VidGrab spots the copied video link and starts downloading by itself.")
+                Tip(Icons.Outlined.ContentCopy, "Copy a link, open AnySave",
+                    "AnySave spots the copied video link and starts downloading by itself.")
                 Tip(Icons.Outlined.Share, "Share → Download",
-                    "In YouTube, Instagram, TikTok or Facebook tap Share, then VidGrab \"Download\". You stay in the app you were using.")
+                    "In YouTube, Instagram, TikTok or Facebook tap Share, then AnySave \"Download\". You stay in the app you were using.")
                 Tip(Icons.Outlined.TouchApp, "Quick Settings tile",
-                    "Add the VidGrab tile to your quick settings: copy a link, swipe down, tap it.")
+                    "Add the AnySave tile to your quick settings: copy a link, swipe down, tap it.")
                 CopyrightNotice()
                 Row(
                     Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))

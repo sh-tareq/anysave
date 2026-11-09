@@ -96,7 +96,7 @@ function collectPageVideos() {
 
 async function scanPage(tab) {
   try {
-    // Start the TikTok recorder on pages that were open before VidGrab was installed/updated.
+    // Start the TikTok recorder on pages that were open before AnySave was installed/updated.
     if (adLibraryOf(tab.url) === "TikTok Creative Center") {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["capture.js"] });
     }
@@ -170,10 +170,10 @@ async function loadInfo() {
   if (library) {
     setState("Finding ad videos on this page…");
     const videos = await scanPage(tab);
-    const tiktokHint = "Move your mouse over the ads you want so each one starts playing. VidGrab remembers them, even after they stop. Then click VidGrab again.";
+    const tiktokHint = "Move your mouse over the ads you want so each one starts playing. AnySave remembers them, even after they stop. Then click AnySave again.";
     if (!videos.length) {
       setState(library === "TikTok Creative Center" ? tiktokHint
-        : "No ad videos found yet. Scroll so the ads load (filter Media type: Videos), then open VidGrab again.");
+        : "No ad videos found yet. Scroll so the ads load (filter Media type: Videos), then open AnySave again.");
       return;
     }
     $("state").hidden = true;
@@ -184,7 +184,7 @@ async function loadInfo() {
 
   if (!site) {
     if (!/^https?:/.test(tab?.url || "")) {
-      setState("Open a page with a video, then click VidGrab. Or open the download manager to add any link.");
+      setState("Open a page with a video, then click AnySave. Or open the download manager to add any link.");
       return;
     }
     // Any other site: yt-dlp knows 1,000+ video sites; fall back to video files the page plays.
@@ -203,16 +203,16 @@ async function loadInfo() {
   }
   if (!res?.ok) {
     if (res?.hostMissing) {
-      setState('Helper app not found. Run the VidGrab installer again, then restart Chrome.<br><span class="small">' + escapeHtml(res.error) + "</span>");
+      setState('Helper app not found. Run the AnySave installer again, then restart Chrome.<br><span class="small">' + escapeHtml(res.error) + "</span>");
     } else {
       if (!site) {
-        setState("No video found on this page. Play the video and open VidGrab again, or right-click a link → Download link with VidGrab.");
+        setState("No video found on this page. Play the video and open AnySave again, or right-click a link → Download link with AnySave.");
         return;
       }
       setState('<span class="err">' + escapeHtml(res?.error || "Unknown error") + "</span>" +
         (site === "Instagram" || site === "Facebook"
           ? '<br><span class="small">' + ($("cookies").checked
-              ? "Make sure you're logged in to " + site + " in this Chrome window, then reopen VidGrab."
+              ? "Make sure you're logged in to " + site + " in this Chrome window, then reopen AnySave."
               : 'Tip: tick "Use my Chrome login" below and try again.') + "</span>"
           : ""));
     }

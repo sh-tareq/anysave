@@ -59,7 +59,7 @@ class AdLibraryActivity : ComponentActivity() {
             "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ALL&media_type=video"),
         TIKTOK("TikTok Creative Center",
             "https://ads.tiktok.com/business/creativecenter/inspiration/topads/mobile/en?period=30"),
-        /** Any website: open a page, play the video, VidGrab lists what it finds. */
+        /** Any website: open a page, play the video, AnySave lists what it finds. */
         WEB("Browser", "https://www.google.com"),
     }
 
@@ -73,7 +73,7 @@ class AdLibraryActivity : ComponentActivity() {
         val script = assets.open("adlib.js").bufferedReader().use { it.readText() }
 
         setContent {
-            VidGrabTheme {
+            AnySaveTheme {
                 var web by remember { mutableStateOf<WebView?>(null) }
                 var ads by remember { mutableStateOf<List<AdItem>>(emptyList()) }
                 var showList by remember { mutableStateOf(false) }

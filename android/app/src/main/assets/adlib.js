@@ -1,4 +1,4 @@
-// VidGrab: injected into Meta Ad Library and TikTok Creative Center pages in the in-app browser.
+// AnySave: injected into Meta Ad Library and TikTok Creative Center pages in the in-app browser.
 // Records every ad video as it appears or plays (TikTok removes a video when it stops playing),
 // and window.__vgList() returns them all as JSON for the app's "Ads found" list.
 (() => {

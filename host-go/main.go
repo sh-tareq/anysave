@@ -1,4 +1,4 @@
-// VidGrab native messaging host (macOS + Windows).
+// AnySave native messaging host (macOS + Windows).
 //
 // Chrome launches this program and talks to it over stdin/stdout using the
 // native messaging protocol (4-byte little-endian length + UTF-8 JSON).
@@ -122,7 +122,7 @@ func findTool(name string) string {
 func baseArgs(cookieFile string) (string, []string, error) {
 	ytdlp := findTool("yt-dlp")
 	if ytdlp == "" {
-		return "", nil, errors.New("yt-dlp not found. Re-run the VidGrab installer.")
+		return "", nil, errors.New("yt-dlp not found. Re-run the AnySave installer.")
 	}
 	args := []string{"--no-playlist", "--no-warnings", "--color", "never", "--encoding", "utf-8"}
 	if ff := findTool("ffmpeg"); ff != "" {
@@ -189,10 +189,10 @@ func friendlyError(msg string) string {
 	l := strings.ToLower(msg)
 	switch {
 	case strings.Contains(l, "cloudflare") || strings.Contains(l, "anti-bot") || strings.Contains(l, "captcha"):
-		return "This website blocks automated downloads, so VidGrab can't download from it. " +
+		return "This website blocks automated downloads, so AnySave can't download from it. " +
 			"Use the site's own download button if it has one."
 	case strings.Contains(l, "unsupported url"):
-		return "No downloadable video found on this page. Open it, play the video, then use the VidGrab popup."
+		return "No downloadable video found on this page. Open it, play the video, then use the AnySave popup."
 	case strings.Contains(l, "drm"):
 		return "This video is DRM-protected, so it can't be downloaded."
 	case strings.Contains(l, "http error 404"):
@@ -394,7 +394,7 @@ func actionDownload(msg map[string]any) {
 		fail(err.Error())
 		return
 	}
-	// Sorted into Downloads/VidGrab/Videos or /Music, like the Android app.
+	// Sorted into Downloads/AnySave/Videos or /Music, like the Android app.
 	outDir := downloadDir
 	if folder := str(msg, "folder"); folder == "Videos" || folder == "Music" {
 		outDir = filepath.Join(downloadDir, folder)
@@ -545,7 +545,7 @@ func main() {
 		appDir = filepath.Dir(self)
 	}
 	home, _ := os.UserHomeDir()
-	downloadDir = filepath.Join(home, "Downloads", "VidGrab")
+	downloadDir = filepath.Join(home, "Downloads", "AnySave")
 
 	// `vidgrab-host --check` prints which tools were found (used by installers).
 	if len(os.Args) > 1 && os.Args[1] == "--check" {

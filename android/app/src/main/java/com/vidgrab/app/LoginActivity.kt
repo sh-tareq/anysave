@@ -37,7 +37,7 @@ class LoginActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val site = Site.valueOf(intent.getStringExtra(EXTRA_SITE) ?: Site.INSTAGRAM.name)
         setContent {
-            VidGrabTheme {
+            AnySaveTheme {
                 Scaffold(topBar = {
                     TopAppBar(
                         title = { Text("Log in to ${site.label}") },
@@ -49,7 +49,7 @@ class LoginActivity : ComponentActivity() {
                 }) { pad ->
                     Column(Modifier.padding(pad).fillMaxSize()) {
                         Text(
-                            "Log in as usual, then tap Done. Your password stays in this page; VidGrab only keeps the login cookie on this phone.",
+                            "Log in as usual, then tap Done. Your password stays in this page; AnySave only keeps the login cookie on this phone.",
                             Modifier.padding(12.dp)
                         )
                         AndroidView(factory = { ctx ->

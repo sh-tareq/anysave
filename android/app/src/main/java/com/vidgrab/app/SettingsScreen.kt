@@ -61,7 +61,7 @@ fun SettingsScreen(vm: MainViewModel) {
         SettingRow(Icons.Outlined.HighQuality, "Default quality", quality.label,
             "Used for one-tap downloads (copied links, Share → Download, Quick Settings tile)") { pickQuality = true }
         SwitchRow(Icons.Outlined.ContentCopy, "Auto-download copied links",
-            "Open VidGrab after copying a video link and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
+            "Open AnySave after copying a video link and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
         SwitchRow(Icons.Outlined.Wifi, "Wi-Fi only", "Wait for Wi-Fi instead of using mobile data", wifiOnly) {
             Settings.setWifiOnly(it)
         }
@@ -87,14 +87,14 @@ fun SettingsScreen(vm: MainViewModel) {
             "Videos, Music, Pictures, Documents, Archives, Apps, Converted", sortFolders) { Settings.setSortIntoFolders(it) }
 
         Section("Quick Settings tile")
-        SettingRow(Icons.Outlined.TouchApp, "Add the VidGrab tile",
+        SettingRow(Icons.Outlined.TouchApp, "Add the AnySave tile",
             if (Build.VERSION.SDK_INT >= 33) "Tap to add it now"
-            else "Swipe down twice, tap the pencil (Edit), and drag VidGrab into your tiles",
-            "Copy a link anywhere, swipe down, tap VidGrab"
+            else "Swipe down twice, tap the pencil (Edit), and drag AnySave into your tiles",
+            "Copy a link anywhere, swipe down, tap AnySave"
         ) {
             if (Build.VERSION.SDK_INT >= 33) {
                 ctx.getSystemService(StatusBarManager::class.java).requestAddTileService(
-                    ComponentName(ctx, DownloadTileService::class.java), "VidGrab",
+                    ComponentName(ctx, DownloadTileService::class.java), "AnySave",
                     AndroidIcon.createWithResource(ctx, R.drawable.ic_stat_download), ctx.mainExecutor
                 ) { }
             }
@@ -108,7 +108,7 @@ fun SettingsScreen(vm: MainViewModel) {
             val on = site.label in loggedIn
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .clickable { login.launch(LoginActivity.intent(ctx, site)) }.padding(12.dp),
+                    .clickable { login.launch(LoginActivity.intent(ctx, site)) }.padding(horizontal = 12.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SiteIcon(site.label, 26.dp)
@@ -132,7 +132,7 @@ fun SettingsScreen(vm: MainViewModel) {
 
         Section("Storage")
         SettingRow(Icons.Outlined.Folder, "Save location",
-            if (sortFolders) "Downloads/VidGrab/<type>" else "Downloads/VidGrab", null) {}
+            if (sortFolders) "Downloads/AnySave/<type>" else "Downloads/AnySave", null) {}
         SettingRow(Icons.Outlined.DeleteSweep, "Clear download list", "Files are kept", null) {
             Downloads.clearFinished(); vm.messages.tryEmit("List cleared")
         }
@@ -142,7 +142,7 @@ fun SettingsScreen(vm: MainViewModel) {
             AnimatedLogo(56.dp)
             Spacer(Modifier.width(16.dp))
             Column {
-                Text("VidGrab $appVersion", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("AnySave $appVersion", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("Made by $AUTHOR", color = MaterialTheme.colorScheme.primary)
             }
         }
@@ -190,7 +190,7 @@ private fun SettingRow(icon: ImageVector, title: String, value: String, desc: St
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(title)
-            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             desc?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }

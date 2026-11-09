@@ -34,7 +34,7 @@ object Settings {
     /** How many downloads run at the same time. */
     val maxParallel: StateFlow<Int> = _maxParallel
     private val _sortIntoFolders = MutableStateFlow(true)
-    /** Save into Downloads/VidGrab/Videos, Music, Documents… instead of one folder. */
+    /** Save into Downloads/AnySave/Videos, Music, Documents… instead of one folder. */
     val sortIntoFolders: StateFlow<Boolean> = _sortIntoFolders
 
     fun init(ctx: Context) {

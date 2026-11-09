@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
@@ -57,7 +59,10 @@ fun DownloadsScreen(jobs: List<Job>) {
     var addLink by remember { mutableStateOf(false) }
     val active = jobs.filter { it.active }
     val paused = jobs.filter { it.status == JobStatus.PAUSED }
+    var query by remember { mutableStateOf("") }
     val finished = jobs.filter { it.finished }.filter {
+        query.isBlank() || listOfNotNull(it.title, it.fileName, it.site).any { t -> t.contains(query.trim(), ignoreCase = true) }
+    }.filter {
         val done = it.status == JobStatus.DONE
         val cat = it.category
         when (filter) {
@@ -79,17 +84,27 @@ fun DownloadsScreen(jobs: List<Job>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Downloads", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
-                if (jobs.any { it.finished }) TextButton(onClick = { confirmClear = true }) { Text("Clear list") }
+                if (jobs.any { it.finished }) TextButton(onClick = { confirmClear = true }) {
+                    Text("Clear list", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Button(onClick = { addLink = true }, modifier = Modifier.padding(top = 10.dp)) {
                 Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
                 Text("Add download")
             }
-            Text("Saved in Downloads/VidGrab, sorted into folders", style = MaterialTheme.typography.bodyMedium,
+            Text("Saved in Downloads/AnySave, sorted into folders", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (jobs.count { it.finished } > 6) OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text("Search downloads") },
+                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Clear") } },
+                shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            )
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Filter.entries.forEach { f ->
                     FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
                 }
@@ -129,7 +144,7 @@ fun DownloadsScreen(jobs: List<Job>) {
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
         title = { Text("Clear the list?") },
-        text = { Text("This only clears the list. Your downloaded files stay in Downloads/VidGrab.") },
+        text = { Text("This only clears the list. Your downloaded files stay in Downloads/AnySave.") },
         confirmButton = { TextButton(onClick = { Downloads.clearFinished(); confirmClear = false }) { Text("Clear") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
     )
@@ -207,7 +222,7 @@ fun Thumb(job: Job, modifier: Modifier) {
                 FileKinds.Category.DOCUMENTS -> Icons.Outlined.Description
                 FileKinds.Category.ARCHIVES -> Icons.Outlined.FolderZip
                 FileKinds.Category.APPS -> Icons.Outlined.Android
-                FileKinds.Category.CONVERTED -> Icons.Outlined.Transform
+                FileKinds.Category.CONVERTED -> if (job.audioOnly) Icons.Outlined.MusicNote else Icons.Outlined.Transform
                 FileKinds.Category.OTHER -> Icons.Outlined.InsertDriveFile
                 FileKinds.Category.VIDEOS -> Icons.Outlined.Videocam
             }, null, tint = MaterialTheme.colorScheme.outline)
@@ -241,7 +256,8 @@ private fun FinishedRow(job: Job) {
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(job.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
+            Text(if (!failed && job.kind != JobKind.VIDEO) job.fileName ?: job.title else job.title,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
                 style = MaterialTheme.typography.bodyMedium)
             if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
@@ -255,8 +271,7 @@ private fun FinishedRow(job: Job) {
                     DateUtils.getRelativeTimeSpanString(job.createdAt).toString(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    SiteIcon(job.site, 16.dp)
-                    Spacer(Modifier.width(6.dp))
+                    if (job.site != null) { SiteIcon(job.site, 16.dp); Spacer(Modifier.width(6.dp)) }
                     Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -301,7 +316,7 @@ private fun deleteFile(ctx: Context, job: Job) {
     Downloads.remove(job.id)
     Toast.makeText(
         ctx,
-        if (ok) "Deleted" else "Removed from the list. Delete the file from your Files app (Downloads/VidGrab).",
+        if (ok) "Deleted" else "Removed from the list. Delete the file from your Files app (Downloads/AnySave).",
         Toast.LENGTH_LONG
     ).show()
 }

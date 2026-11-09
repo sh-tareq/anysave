@@ -196,7 +196,7 @@ object Engine {
         val l = msg.lowercase()
         return when {
             "cloudflare" in l || "anti-bot" in l || "captcha" in l ->
-                "This website blocks automated downloads, so VidGrab can't download from it. Use the site's own download button if it has one."
+                "This website blocks automated downloads, so AnySave can't download from it. Use the site's own download button if it has one."
             "unsupported url" in l -> "No downloadable video found on this page. Try opening it in the built-in browser and playing the video."
             "drm" in l -> "This video is DRM-protected, so it can't be downloaded."
             "http error 404" in l -> "The video or file wasn't found (404). The link may be broken or removed."

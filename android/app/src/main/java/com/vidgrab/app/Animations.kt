@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * The VidGrab logo, gently floating and turning in 3D, with a shadow on the
+ * The AnySave logo, gently floating and turning in 3D, with a shadow on the
  * "floor" that shrinks as it rises.
  */
 @Composable
@@ -32,17 +32,9 @@ fun AnimatedLogo(size: Dp, modifier: Modifier = Modifier) {
     val lift by t.animateFloat(
         0f, 1f, infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lift"
     )
-    Box(modifier.size(width = size, height = size * 1.18f), contentAlignment = Alignment.TopCenter) {
-        // Floor shadow
-        Box(
-            Modifier.align(Alignment.BottomCenter)
-                .size(width = size * (0.72f - 0.14f * lift), height = size * 0.09f)
-                .graphicsLayer { alpha = 0.28f - 0.12f * lift }
-                .clip(CircleShape)
-                .background(Color.Black)
-        )
+    Box(modifier.size(width = size, height = size * 1.08f), contentAlignment = Alignment.TopCenter) {
         Image(
-            painterResource(R.drawable.vidgrab_logo), contentDescription = "VidGrab",
+            painterResource(R.drawable.vidgrab_logo), contentDescription = "AnySave",
             modifier = Modifier.size(size).graphicsLayer {
                 rotationY = tilt
                 rotationX = 6f * (lift - 0.5f)

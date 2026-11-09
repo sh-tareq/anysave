@@ -1,4 +1,4 @@
-// VidGrab download manager + converter page.
+// AnySave download manager + converter page.
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
 let jobs = {};
@@ -164,7 +164,7 @@ $("pickBtn").onclick = async () => {
   const res = await send({ type: "pickFile" });
   $("pickBtn").disabled = false; $("pickBtn").textContent = "Choose from computer…";
   if (res?.ok) choose({ path: res.path, name: res.name, size: res.size, duration: res.duration });
-  else if (!res?.cancelled) showConvertMsg(res?.hostMissing ? "Helper app not found. Re-run the VidGrab installer." : (res?.error || "Couldn't open the file"), true);
+  else if (!res?.cancelled) showConvertMsg(res?.hostMissing ? "Helper app not found. Re-run the AnySave installer." : (res?.error || "Couldn't open the file"), true);
 };
 
 function fillDownloadsPicker() {
@@ -228,7 +228,11 @@ $("convertBtn").onclick = async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.jobs) { jobs = changes.jobs.newValue || {}; render(); }
 });
+$("captureAll").addEventListener("change", (e) => send({ type: "setCapture", on: e.target.checked }));
+
 (async () => {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  $("captureAll").checked = settings.captureAll !== false;
   jobs = (await chrome.storage.local.get("jobs")).jobs || {};
   render();
   updateLabel();

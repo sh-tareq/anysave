@@ -1,15 +1,15 @@
-# VidGrab installer for Windows. Run via "Install VidGrab.bat".
-#  - Helper app + yt-dlp + ffmpeg -> %LOCALAPPDATA%\VidGrab
-#  - Chrome extension folder      -> %USERPROFILE%\VidGrab\extension
+# AnySave installer for Windows. Run via "Install AnySave.bat".
+#  - Helper app + yt-dlp + ffmpeg -> %LOCALAPPDATA%\AnySave
+#  - Chrome extension folder      -> %USERPROFILE%\AnySave\extension
 #  - Registers the helper with Chrome, Edge, Brave and Chromium (current user only)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # makes Invoke-WebRequest much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Src     = $PSScriptRoot
-$App     = Join-Path $env:LOCALAPPDATA 'VidGrab'
+$App     = Join-Path $env:LOCALAPPDATA 'AnySave'
 $Bin     = Join-Path $App 'bin'
-$ExtDest = Join-Path $env:USERPROFILE 'VidGrab\extension'
+$ExtDest = Join-Path $env:USERPROFILE 'AnySave\extension'
 $HostName = 'com.vidgrab.host'
 $ExtId   = 'jgkodjdjabccfmfbfmiinmppmcpgomai'   # fixed by the "key" in extension\manifest.json
 
@@ -25,9 +25,9 @@ function Get-File($Url, $OutFile) {
   }
 }
 
-Write-Host '=== Installing VidGrab ===' -ForegroundColor Cyan
+Write-Host '=== Installing AnySave ===' -ForegroundColor Cyan
 if (-not (Test-Path (Join-Path $Src 'helper\vidgrab-host.exe')) -or -not (Test-Path (Join-Path $Src 'extension'))) {
-  Write-Host "This installer must be run from the extracted VidGrab-windows folder" -ForegroundColor Red
+  Write-Host "This installer must be run from the extracted AnySave-windows folder" -ForegroundColor Red
   Write-Host "(it needs the 'helper' and 'extension' folders next to it). If you opened it"
   Write-Host "from inside the zip, right-click the zip, choose Extract All, and try again."
   exit 1
@@ -41,6 +41,20 @@ Copy-Item (Join-Path $Src 'helper\vidgrab-host.exe') (Join-Path $App 'vidgrab-ho
 # 2. Extension (kept in a permanent place so the download folder can be deleted)
 if (Test-Path $ExtDest) { Remove-Item $ExtDest -Recurse -Force }
 Copy-Item (Join-Path $Src 'extension') $ExtDest -Recurse
+
+# Upgrading from VidGrab: Chrome still loads %USERPROFILE%\VidGrab\extension, so refresh that copy
+# too (nothing breaks), and reuse the old ffmpeg instead of downloading it again.
+$OldApp = Join-Path $env:LOCALAPPDATA 'VidGrab'
+$OldExt = Join-Path $env:USERPROFILE 'VidGrab\extension'
+$Upgraded = $false
+if (Test-Path $OldExt) {
+  Remove-Item $OldExt -Recurse -Force
+  Copy-Item (Join-Path $Src 'extension') $OldExt -Recurse
+  Get-ChildItem $OldExt -Recurse -File | Unblock-File
+  $Upgraded = $true
+}
+$OldFf = Join-Path $OldApp 'bin\ffmpeg.exe'
+if ((Test-Path $OldFf) -and -not (Test-Path (Join-Path $Bin 'ffmpeg.exe'))) { Copy-Item $OldFf (Join-Path $Bin 'ffmpeg.exe') }
 
 # 3. yt-dlp
 Write-Host 'Downloading yt-dlp...'
@@ -69,7 +83,7 @@ Get-ChildItem $App, $ExtDest -Recurse -File | Unblock-File
 $manifestPath = Join-Path $App "$HostName.json"
 $json = @{
   name            = $HostName
-  description     = 'VidGrab helper'
+  description     = 'AnySave helper'
   path            = (Join-Path $App 'vidgrab-host.exe')
   type            = 'stdio'
   allowed_origins = @("chrome-extension://$ExtId/")
@@ -99,5 +113,12 @@ Write-Host "  2. Click 'Load unpacked' and choose the folder:  $ExtDest"
 Write-Host '     (an Explorer window showing it is opening now)'
 Write-Host '  3. Close Chrome completely and open it again'
 Write-Host ''
-Write-Host 'To update VidGrab later, run this installer again.'
+Write-Host 'To update AnySave later, run this installer again.'
+# The old helper folder isn't used any more (the browser registration now points here).
+if (Test-Path $OldApp) { Remove-Item $OldApp -Recurse -Force -ErrorAction SilentlyContinue }
+if ($Upgraded) {
+  Write-Host ''
+  Write-Host 'Upgraded from VidGrab: just click the reload button on the extension in chrome://extensions.' -ForegroundColor Green
+  Write-Host "(Optional: remove it and 'Load unpacked' from $ExtDest, then delete $env:USERPROFILE\VidGrab.)"
+}
 Start-Process explorer.exe (Split-Path $ExtDest)

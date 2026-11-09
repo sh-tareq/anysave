@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VidGrab"
+rootProject.name = "AnySave"
 include(":app")

@@ -1,4 +1,4 @@
-// Renders the VidGrab logo (glossy red tile + raised 3D white download arrow)
+// Renders the AnySave logo (glossy red tile + raised 3D white download arrow)
 // for every place it's used:
 //   extension/icons/icon{16,32,48,128}.png                 Chrome extension
 //   android/.../mipmap-*/ic_launcher.png                    launchers without adaptive icons (e.g. some MIUI)

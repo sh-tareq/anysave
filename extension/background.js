@@ -1,4 +1,4 @@
-// VidGrab service worker (2.0): video downloads through the native helper (yt-dlp),
+// AnySave service worker (2.0): video downloads through the native helper (yt-dlp),
 // any-file downloads through Chrome's downloader, conversions through the helper (FFmpeg),
 // and a right-click menu. Jobs are kept in chrome.storage.local so the history survives restarts.
 const HOST = "com.vidgrab.host";
@@ -158,7 +158,7 @@ async function startFile({ url, name, title }) {
     status: "starting", percent: 0, qualityLabel: "File" });
   try {
     const downloadId = await chrome.downloads.download({
-      url, filename: `VidGrab/${folder}/${fileName}`, conflictAction: "uniquify",
+      url, filename: `AnySave/${folder}/${fileName}`, conflictAction: "uniquify",
     });
     await updateJob(id, { downloadId, status: "downloading" });
     pollFiles();
@@ -279,7 +279,7 @@ const GATED = new Set(["info", "download", "directDownload", "file", "addLink", 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (GATED.has(msg.type) && !(await agreed())) {
-      return { ok: false, error: "Please accept the legal notice in the VidGrab popup first." };
+      return { ok: false, error: "Please accept the legal notice in the AnySave popup first." };
     }
     switch (msg.type) {
       case "info": {
@@ -312,6 +312,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
       case "openManager": openManager(msg.tab); return { ok: true };
+      case "setCapture": {
+        const { settings = {} } = await chrome.storage.local.get("settings");
+        await chrome.storage.local.set({ settings: { ...settings, captureAll: !!msg.on } });
+        return { ok: true };
+      }
     }
   })().then(sendResponse, (e) => sendResponse({ ok: false, error: String(e) }));
   return true;
@@ -325,10 +330,10 @@ function openManager(tab) {
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "vg-link", title: "Download link with VidGrab", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "vg-media", title: "Download with VidGrab", contexts: ["video", "audio", "image"] });
-    chrome.contextMenus.create({ id: "vg-page", title: "Download this page's video with VidGrab", contexts: ["page"] });
-    chrome.contextMenus.create({ id: "vg-manager", title: "Open VidGrab download manager", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "vg-link", title: "Download link with AnySave", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "vg-media", title: "Download with AnySave", contexts: ["video", "audio", "image"] });
+    chrome.contextMenus.create({ id: "vg-page", title: "Download this page's video with AnySave", contexts: ["page"] });
+    chrome.contextMenus.create({ id: "vg-manager", title: "Open AnySave download manager", contexts: ["action"] });
   });
   // Move pre-2.0 session jobs into the persistent store.
   const old = (await chrome.storage.session.get("jobs")).jobs;
@@ -351,6 +356,49 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
   chrome.action.setBadgeText({ text: "↓" });
   setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2500);
+});
+
+// ---------- catch downloads started by websites ----------
+// When a site's own download button starts a download, Chrome downloads it with the page's
+// login/session. AnySave adopts it: it shows in the manager (pause/resume/cancel) and is
+// saved into Downloads/AnySave/<type>. Switch: "Catch downloads from websites" in the manager.
+
+async function captureOn() {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  return settings.captureAll !== false; // on by default
+}
+let captureCache = true;
+captureOn().then((v) => { captureCache = v; });
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area === "local" && ch.settings) captureCache = ch.settings.newValue?.captureAll !== false;
+});
+
+function isOurs(item) { return item.byExtensionId === chrome.runtime.id; }
+
+chrome.downloads.onCreated.addListener(async (item) => {
+  if (isOurs(item) || !(await captureOn())) return;
+  const url = item.finalUrl || item.url || "";
+  const name = (item.filename || "").split(/[\\/]/).pop() || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
+  const id = newId();
+  await updateJob(id, {
+    kind: "file", url, title: name, fileName: name, site: /^https?:/.test(url) ? siteLabel(url) : "Web",
+    downloadId: item.id, status: item.paused ? "paused" : "downloading", percent: 0,
+    totalBytes: item.totalBytes > 0 ? item.totalBytes : 0, qualityLabel: "From website",
+  });
+  pollFiles();
+});
+
+// Route website downloads into Downloads/AnySave/<type>/ (Chrome asks every listener for a name).
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  if (isOurs(item) || !captureCache) { suggest(); return; }
+  const base = (item.filename || "download").split(/[\\/]/).pop();
+  if (/^AnySave[\\/]/.test(item.filename || "")) { suggest(); return; }
+  suggest({ filename: `AnySave/${categoryOf(base, "file")}/${safeFile(base)}`, conflictAction: "uniquify" });
+  // Update the job's name once Chrome has decided it.
+  getJobs().then((jobs) => {
+    const j = Object.values(jobs).find((x) => x.downloadId === item.id);
+    if (j) updateJob(j.id, { fileName: base, title: base });
+  });
 });
 
 // Resume polling file downloads after the service worker restarts.

@@ -7,7 +7,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
-/** Quick Settings tile: copy a link anywhere, pull down the shade, tap "VidGrab". */
+/** Quick Settings tile: copy a link anywhere, pull down the shade, tap "AnySave". */
 class DownloadTileService : TileService() {
 
     override fun onStartListening() {

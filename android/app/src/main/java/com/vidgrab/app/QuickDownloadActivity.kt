@@ -9,7 +9,7 @@ import androidx.activity.ComponentActivity
 /**
  * Invisible screen behind the one-tap paths:
  *  - Share → "Download" in YouTube / Instagram / TikTok / Facebook
- *  - the "VidGrab" Quick Settings tile (downloads the copied link)
+ *  - the "AnySave" Quick Settings tile (downloads the copied link)
  * It starts the download with the default quality and closes, leaving the user where they were.
  */
 class QuickDownloadActivity : ComponentActivity() {
@@ -35,7 +35,7 @@ class QuickDownloadActivity : ComponentActivity() {
 
     private fun download(url: String?, fromClipboard: Boolean) {
         if (!Settings.acceptedTerms) {
-            toast("Open VidGrab once and accept the terms first")
+            toast("Open AnySave once and accept the terms first")
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
             return
@@ -52,13 +52,13 @@ class QuickDownloadActivity : ComponentActivity() {
             // Direct file links (PDF, ZIP, APK, MP4 file...) download as files.
             FileKinds.looksLikeFile(url) && Engine.siteOf(url) == null -> {
                 if (fromClipboard) Settings.lastClipboardUrl = url
-                if (DownloadService.startFile(this, url)) toast("VidGrab: downloading file")
+                if (DownloadService.startFile(this, url)) toast("AnySave: downloading file")
             }
             // Everything else goes through yt-dlp, which knows 1,000+ video sites.
             else -> {
                 if (fromClipboard) Settings.lastClipboardUrl = url
                 if (DownloadService.startQuick(this, url)) {
-                    toast("VidGrab: downloading from ${Engine.siteLabel(url)} (${Settings.quality.value.label})")
+                    toast("AnySave: downloading from ${Engine.siteLabel(url)} (${Settings.quality.value.label})")
                 }
             }
         }

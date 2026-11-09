@@ -344,9 +344,9 @@ class DownloadService : Service() {
     private fun safeName(s: String) =
         s.replace(Regex("""[\\/:*?"<>|\n\r\t]+"""), " ").replace(Regex("\\s+"), " ").trim().take(120).ifBlank { "download" }
 
-    /** Copies the finished file to Downloads/VidGrab[/folder] where gallery and file apps can see it. */
+    /** Copies the finished file to Downloads/AnySave[/folder] where gallery and file apps can see it. */
     private suspend fun saveToDownloads(file: File, mime: String, folder: String?): Uri {
-        val relDir = Environment.DIRECTORY_DOWNLOADS + "/VidGrab" + (folder?.let { "/$it" } ?: "")
+        val relDir = Environment.DIRECTORY_DOWNLOADS + "/AnySave" + (folder?.let { "/$it" } ?: "")
         if (Build.VERSION.SDK_INT >= 29) {
             val resolver = contentResolver
             var values = ContentValues()
@@ -374,7 +374,7 @@ class DownloadService : Service() {
         // Android 8/9: write to the public folder, then ask the media scanner for a shareable Uri.
         @Suppress("DEPRECATION")
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "VidGrab" + (folder?.let { "/$it" } ?: ""))
+            "AnySave" + (folder?.let { "/$it" } ?: ""))
         dir.mkdirs()
         var dest = File(dir, file.name)
         var n = 1
@@ -409,9 +409,9 @@ class DownloadService : Service() {
 
     private fun progressNotification(job: Job?, text: String?, pct: Float, indeterminate: Boolean): Notification {
         val others = (activeCount.get() - 1).coerceAtLeast(0)
-        val b = NotificationCompat.Builder(this, VidGrabApp.CH_PROGRESS)
+        val b = NotificationCompat.Builder(this, AnySaveApp.CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_download)
-            .setContentTitle(job?.title ?: "VidGrab")
+            .setContentTitle(job?.title ?: "AnySave")
             .setContentText(text ?: listOf("${pct.toInt()}%", job?.speed.orEmpty(), job?.eta?.let { "ETA $it" }.orEmpty(),
                 if (others > 0) "+$others more" else "").filter { it.isNotBlank() }.joinToString(" · "))
             .setOnlyAlertOnce(true)
@@ -435,7 +435,7 @@ class DownloadService : Service() {
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         val pi = PendingIntent.getActivity(this, job.id.hashCode(), view, PendingIntent.FLAG_IMMUTABLE)
-        val n = NotificationCompat.Builder(this, VidGrabApp.CH_DONE)
+        val n = NotificationCompat.Builder(this, AnySaveApp.CH_DONE)
             .setSmallIcon(R.drawable.ic_stat_download)
             .setContentTitle(if (job.kind == JobKind.CONVERT) "Conversion complete" else "Download complete")
             .setContentText(job.fileName ?: job.title)

@@ -1,6 +1,6 @@
-// VidGrab: runs on TikTok Creative Center pages.
+// AnySave: runs on TikTok Creative Center pages.
 // An ad's video only exists while the mouse is over the ad, and it's gone by the time the
-// VidGrab popup opens. So this script records each ad video the moment it starts playing,
+// AnySave popup opens. So this script records each ad video the moment it starts playing,
 // and the popup lists everything recorded on this page.
 (() => {
   if (window.__vgSeen) return;

@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VidGrab Manager</title>
+  <title>AnySave Manager</title>
   <link rel="icon" href="icons/icon32.png" />
   <link rel="stylesheet" href="manager.css" />
 </head>
 <body>
   <header class="top">
-    <div class="brand"><img src="icons/icon48.png" alt="" /><div><strong>VidGrab</strong><span>Download manager &amp; converter</span></div></div>
+    <div class="brand"><img src="icons/icon48.png" alt="" /><div><strong>AnySave</strong><span>Download manager &amp; converter</span></div></div>
     <nav>
       <button class="tab active" data-tab="downloads">Downloads <span id="activeBadge" class="badge" hidden></span></button>
       <button class="tab" data-tab="convert">Convert</button>
@@ -24,8 +24,11 @@
         <button class="primary" type="submit">Download</button>
       </form>
       <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
-        Tip: right-click any link or video → <b>Download with VidGrab</b>.</p>
+        Tip: right-click any link or video → <b>Download with AnySave</b>.</p>
       <div id="addMsg" class="msg" hidden></div>
+      <label class="capture"><input type="checkbox" id="captureAll" />
+        <span><b>Catch downloads from websites</b><br /><span class="muted small">When you click a site's own download button, AnySave manages it and saves it into Downloads/AnySave.</span></span>
+      </label>
 
       <div class="toolbar">
         <div class="chips" id="filters">
@@ -102,7 +105,7 @@
         </div>
 
         <button id="convertBtn" class="primary big">Convert</button>
-        <p class="hint">Saved in Downloads/VidGrab/Converted. Progress shows in the Downloads tab.</p>
+        <p class="hint">Saved in Downloads/AnySave/Converted. Progress shows in the Downloads tab.</p>
       </div>
       <div id="convertMsg" class="msg" hidden></div>
     </section>

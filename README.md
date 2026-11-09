@@ -1,4 +1,4 @@
-# VidGrab
+# AnySave
 
 Made by **Shahidul H Tareq**.
 
@@ -8,7 +8,7 @@ Download videos from **YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ mo
 |---|---|---|
 | macOS | Chrome / Edge / Brave extension + helper | Extension → native helper (Go) → yt-dlp + ffmpeg |
 | Windows | Chrome / Edge / Brave extension + helper | Same as macOS |
-| Android | VidGrab app (APK) | Share a link to VidGrab → yt-dlp + ffmpeg bundled in the app |
+| Android | AnySave app (APK) | Share a link to AnySave → yt-dlp + ffmpeg bundled in the app |
 
 Chrome on Android has no extensions, so Android gets its own app.
 
@@ -35,8 +35,8 @@ Output in `dist/`:
 
 | File | For |
 |---|---|
-| `VidGrab-Desktop-Mac-Windows.zip` | Mac and Windows. Contains `VidGrab-mac/` and `VidGrab-windows/`, each with an installer and "How to install.txt". |
-| `VidGrab.apk` | Android phones (64-bit, R8-minified, signed with `android/vidgrab-release.jks`). |
+| `AnySave-Desktop-Mac-Windows.zip` | Mac and Windows. Contains `AnySave-mac/` and `AnySave-windows/`, each with an installer and "How to install.txt". |
+| `AnySave.apk` | Android phones (64-bit, R8-minified, signed with `android/vidgrab-release.jks`). |
 
 The R8 mapping for each Android release is kept in `dist-assets/r8-mapping-<version>.txt`
 (not shared). Use it to read crash stack traces from that build.
@@ -51,8 +51,8 @@ Building needs Go (`~/.local/go` or on `PATH`) and, for Android, Android Studio'
 ```
 extension/            Chrome extension (MV3). Popup UI + service worker.
 host-go/              Native messaging helper for macOS + Windows (Go, no dependencies).
-installers/mac/       install-mac.sh (packaged as "Install VidGrab.command") + How to install.txt
-installers/windows/   Install VidGrab.bat, install.ps1 + How to install.txt
+installers/mac/       install-mac.sh (packaged as "Install AnySave.command") + How to install.txt
+installers/windows/   Install AnySave.bat, install.ps1 + How to install.txt
 android/              Android app (Kotlin, Compose, youtubedl-android)
 scripts/build.sh      Builds the helper for all platforms and assembles dist/
 ```
@@ -61,10 +61,10 @@ scripts/build.sh      Builds the helper for all platforms and assembles dist/
 
 | | macOS | Windows |
 |---|---|---|
-| Helper, yt-dlp, ffmpeg | `~/Library/Application Support/VidGrab` | `%LOCALAPPDATA%\VidGrab` |
-| Extension to load in Chrome | `~/VidGrab/extension` | `%USERPROFILE%\VidGrab\extension` |
+| Helper, yt-dlp, ffmpeg | `~/Library/Application Support/AnySave` | `%LOCALAPPDATA%\AnySave` |
+| Extension to load in Chrome | `~/AnySave/extension` | `%USERPROFILE%\AnySave\extension` |
 | Browser registration | NativeMessagingHosts JSON files | `HKCU\Software\…\NativeMessagingHosts` |
-| Downloads | `~/Downloads/VidGrab` | `Downloads\VidGrab` |
+| Downloads | `~/Downloads/AnySave` | `Downloads\AnySave` |
 
 Re-running the installer updates yt-dlp, which fixes most "stopped working" problems.
 

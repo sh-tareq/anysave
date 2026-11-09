@@ -211,7 +211,7 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
                     Icon(Icons.Outlined.Transform, null); Spacer(Modifier.width(8.dp))
                     Text("Convert · ${spec.label()}", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Text("Saved in Downloads/VidGrab/Converted", style = MaterialTheme.typography.bodySmall,
+                Text("Saved in Downloads/AnySave/Converted", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
             }
         }

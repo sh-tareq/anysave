@@ -14,7 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 private val Brand = Color(0xFFE5484D)
 
 @Composable
-fun VidGrabTheme(content: @Composable () -> Unit) {
+fun AnySaveTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val ctx = LocalContext.current
     val scheme = when {

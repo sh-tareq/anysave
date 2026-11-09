@@ -20,8 +20,8 @@ const val TERMS_VERSION = 1
 
 /** Same content as LEGAL.md in the repository. */
 val LegalSections = listOf(
-    "What VidGrab is for" to
-        "VidGrab is a personal tool for saving videos you are allowed to save: videos you made yourself, videos whose " +
+    "What AnySave is for" to
+        "AnySave is a personal tool for saving videos you are allowed to save: videos you made yourself, videos whose " +
         "owner has given you permission, videos under a licence that allows downloading (such as Creative Commons) or in " +
         "the public domain, and uses your local law allows, such as personal backup or fair use.",
     "Copyright warning" to
@@ -31,28 +31,28 @@ val LegalSections = listOf(
         "the site's terms of service and get your account suspended.\n\nCopyright laws differ by country. If you are not " +
         "sure whether you may download a video, don't. Ask the owner, or ask a lawyer.",
     "Your responsibility" to
-        "By using VidGrab you agree that you are solely responsible for what you download and how you use it; that you will " +
-        "only download content you have the right to download; that you will not use VidGrab to infringe anyone's rights " +
+        "By using AnySave you agree that you are solely responsible for what you download and how you use it; that you will " +
+        "only download content you have the right to download; that you will not use AnySave to infringe anyone's rights " +
         "or to get around paywalls, DRM or other access restrictions; and that you will follow each website's terms of service.",
     "No warranty, no liability" to
-        "VidGrab is provided \"as is\", free of charge, without any warranty. Websites change often and VidGrab may stop " +
+        "AnySave is provided \"as is\", free of charge, without any warranty. Websites change often and AnySave may stop " +
         "working at any time. To the fullest extent the law allows, the author ($AUTHOR) is not liable for any loss, " +
-        "damage, claim or legal consequence arising from your use or misuse of VidGrab or of any downloaded content.",
+        "damage, claim or legal consequence arising from your use or misuse of AnySave or of any downloaded content.",
     "Not affiliated" to
-        "VidGrab is an independent project. It is not affiliated with, endorsed by or sponsored by YouTube or Google, " +
-        "Meta (Facebook, Instagram), TikTok or ByteDance. Their names are used only to say which websites VidGrab works " +
+        "AnySave is an independent project. It is not affiliated with, endorsed by or sponsored by YouTube or Google, " +
+        "Meta (Facebook, Instagram), TikTok or ByteDance. Their names are used only to say which websites AnySave works " +
         "with. All trademarks belong to their owners.",
     "Privacy" to
         "No account, no analytics, no ads, no tracking. The author's servers receive nothing from you. Videos go straight " +
-        "from the website to your phone. If you log in to a site in VidGrab, the login stays on this phone and is sent " +
-        "only to that same website. VidGrab contacts GitHub to update its downloader (yt-dlp).",
+        "from the website to your phone. If you log in to a site in AnySave, the login stays on this phone and is sent " +
+        "only to that same website. AnySave contacts GitHub to update its downloader (yt-dlp).",
     "Copyright complaints" to
-        "If you believe VidGrab is being used to infringe your rights, contact the author. VidGrab hosts no videos: " +
+        "If you believe AnySave is being used to infringe your rights, contact the author. AnySave hosts no videos: " +
         "downloaded copies exist only on the user's own device.",
     "Open-source software" to
-        "VidGrab is built on yt-dlp (Unlicense), youtubedl-android (GPL-3.0), FFmpeg (LGPL/GPL), Python (PSF License), " +
+        "AnySave is built on yt-dlp (Unlicense), youtubedl-android (GPL-3.0), FFmpeg (LGPL/GPL), Python (PSF License), " +
         "QuickJS (MIT), Jetpack Compose and AndroidX (Apache-2.0) and Coil (Apache-2.0).\n\nBecause it includes " +
-        "youtubedl-android, the VidGrab Android app is distributed under the GNU General Public License v3.0. You may get " +
+        "youtubedl-android, the AnySave Android app is distributed under the GNU General Public License v3.0. You may get " +
         "its complete source code from the author, and you may use, study, change and share it under that licence.",
 )
 
@@ -98,7 +98,7 @@ fun CopyrightNotice(modifier: Modifier = Modifier) {
             Spacer(Modifier.width(10.dp))
             Text(
                 "Only download videos you own or have permission to save. Downloading or reusing copyrighted " +
-                    "videos without permission can be illegal. You are responsible for how you use VidGrab.",
+                    "videos without permission can be illegal. You are responsible for how you use AnySave.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer
             )
         }

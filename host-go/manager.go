@@ -1,4 +1,4 @@
-// Download-manager and converter actions for the VidGrab helper (2.0):
+// Download-manager and converter actions for the AnySave helper (2.0):
 //
 //	probe     -> is a link a file or a web page?  {ok, isFile, name, mime, length}
 //	pickFile  -> native "choose a file" dialog     {ok, path, name, size}
@@ -24,7 +24,7 @@ import (
 
 // ---------- probe ----------
 
-const fileUA = "VidGrab/2.0 (+https://github.com/sh-tareq/vid-grab)"
+const fileUA = "AnySave/2.1 (+https://github.com/sh-tareq/anysave)"
 
 func actionProbe(msg map[string]any) map[string]any {
 	raw := str(msg, "url")
@@ -145,7 +145,7 @@ func actionConvert(msg map[string]any) {
 	fail := func(m string) { send(map[string]any{"type": "error", "message": m}) }
 	ff := findTool("ffmpeg")
 	if ff == "" {
-		fail("ffmpeg not found. Re-run the VidGrab installer.")
+		fail("ffmpeg not found. Re-run the AnySave installer.")
 		return
 	}
 	in := str(msg, "path")

@@ -17,7 +17,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.TravelExplore
+import androidx.compose.material.icons.outlined.Transform
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Download
@@ -66,14 +67,14 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
                 AnimatedLogo(64.dp)
                 Spacer(Modifier.width(14.dp))
                 Column {
-                    Text("VidGrab", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                    Text("Save videos from your favourite apps", style = MaterialTheme.typography.bodyMedium,
+                    Text("AnySave", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Text("Download videos & files. Convert anything.", style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         item { LinkInput(vm) }
-        item { SiteRow() }
+        item { SiteRowWrapped() }
         item { AdLibrariesCard() }
 
         if (engine == Engine.State.STARTING) item {
@@ -144,9 +145,10 @@ private fun LinkInput(vm: MainViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SiteRow() {
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun SiteRowWrapped() {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SiteColors.keys.forEach { name ->
             Row(
                 Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceVariant)
@@ -163,7 +165,7 @@ private fun SiteRow() {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("+ 1,000 more sites", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+            Text("+ 1,000 more", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
                 color = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
@@ -176,7 +178,7 @@ private fun AdLibrariesCard() {
     ElevatedCard {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Campaign, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Outlined.TravelExplore, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text("Browse & ad libraries", fontWeight = FontWeight.SemiBold)
@@ -192,14 +194,14 @@ private fun AdLibrariesCard() {
                 Text("Browse any website")
             }
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.META)) },
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                 ) {
                     SiteIcon("Facebook", 20.dp); Spacer(Modifier.width(8.dp))
                     Text("Meta Ad Library", maxLines = 1, style = MaterialTheme.typography.labelLarge)
                 }
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.TIKTOK)) },
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                 ) {
@@ -258,8 +260,8 @@ private fun LookupError(vm: MainViewModel, err: String) {
     if (vm.errorIsWebPage && !needsLogin) {
         // Not a site yt-dlp knows: the built-in browser can often still see the video.
         ErrorCard(
-            "VidGrab can't read this page directly.",
-            "Open it in the built-in browser and play the video: VidGrab will list the video files it finds.",
+            "AnySave can't read this page directly.",
+            "Open it in the built-in browser and play the video: AnySave will list the video files it finds.",
             actionLabel = "Open in browser",
             onAction = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.WEB, vm.url)) }
         )
@@ -452,9 +454,10 @@ private fun HowToCard() {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Faster ways to download", style = MaterialTheme.typography.titleMedium)
-            Tip(Icons.Outlined.ContentCopy, "Copy, then open VidGrab", "A copied video link starts downloading by itself.")
-            Tip(Icons.Outlined.Share, "Share → Download", "From YouTube, Instagram, TikTok or Facebook. You stay in that app.")
-            Tip(Icons.Outlined.TouchApp, "Quick Settings tile", "Copy a link, swipe down, tap VidGrab. Add it in Settings.")
+            Tip(Icons.Outlined.ContentCopy, "Copy, then open AnySave", "A copied video or file link is picked up automatically.")
+            Tip(Icons.Outlined.Share, "Share → Download", "From any app or browser. You stay where you were.")
+            Tip(Icons.Outlined.TouchApp, "Quick Settings tile", "Copy a link, swipe down, tap AnySave. Add it in Settings.")
+            Tip(Icons.Outlined.Transform, "Convert", "Turn videos into MP3, shrink them for WhatsApp, or trim them, in the Convert tab.")
         }
     }
 }
