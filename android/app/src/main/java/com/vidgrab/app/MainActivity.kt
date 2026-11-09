@@ -23,6 +23,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Transform
+import androidx.compose.material.icons.outlined.Transform
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Home
@@ -72,6 +74,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Set when a link belongs to an ad library; the screen opens the in-app ad browser for it. */
     var openAdLibrary by mutableStateOf<Pair<AdLibraryActivity.Library, String>?>(null)
+    /** The failed link is a normal web page: offer to open it in the built-in browser. */
+    var errorIsWebPage by mutableStateOf(false)
 
     fun lookUp(newUrl: String? = null) {
         newUrl?.let { url = it }
@@ -84,12 +88,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 openAdLibrary = lib to link; return
             }
         }
-        info = null; error = null; loading = true; tab = MainActivity.TAB_HOME
+        // A direct file link (PDF, ZIP, APK, MP4 file...) downloads straight away.
+        if (FileKinds.looksLikeFile(link) && Engine.siteOf(link) == null) {
+            if (DownloadService.startFile(ctx, link)) messages.tryEmit("Downloading file")
+            url = ""; tab = MainActivity.TAB_DOWNLOADS
+            return
+        }
+        info = null; error = null; errorIsWebPage = false; loading = true; tab = MainActivity.TAB_HOME
         viewModelScope.launch {
             try {
                 Engine.state.first { it != Engine.State.STARTING } // wait for setup / update
                 if (Engine.state.value == Engine.State.FAILED) throw Exception("Setup failed: ${Engine.startError}")
-                val i = Engine.info(ctx, link)
+                // Unknown site: ask the server what the link is first (a quick HEAD request).
+                // Files download directly; only web pages go to yt-dlp, which would otherwise
+                // read a big file just to find out it isn't a page.
+                val probe = if (Engine.siteOf(link) == null) withContext(Dispatchers.IO) { FileKinds.probe(link) } else null
+                if (probe?.isFile == true) {
+                    DownloadService.startFile(ctx, link, probe.name, probe.mime)
+                    messages.tryEmit("Downloading ${probe.name ?: "file"}")
+                    url = ""; tab = MainActivity.TAB_DOWNLOADS
+                    return@launch
+                }
+                val i = try {
+                    Engine.info(ctx, link)
+                } catch (e: Exception) {
+                    // Only an unsupported page goes to the built-in browser; a login error is shown as is.
+                    val m = e.message.orEmpty()
+                    errorIsWebPage = probe != null && !needsLogin(m)
+                    throw e
+                }
                 info = i
                 // Pre-select the option matching the default quality
                 val q = Settings.quality.value
@@ -114,6 +141,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun quickDownload(link: String) {
+        if (FileKinds.looksLikeFile(link) && Engine.siteOf(link) == null) {
+            if (DownloadService.startFile(ctx, link)) messages.tryEmit("Downloading file")
+            clipboardLink = null; return
+        }
         AdLibraryActivity.libraryOf(link)?.let { lib ->
             if (!(lib == AdLibraryActivity.Library.META && link.contains("id="))) { openAdLibrary = lib to link; return }
         }
@@ -121,15 +152,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         clipboardLink = null
     }
 
+    fun needsLogin(msg: String) = Regex("log(ged)?[ -]?in|sign in|cookies|private|account", RegexOption.IGNORE_CASE).containsMatchIn(msg)
+
     /** Called when the app window gets focus: Android only allows clipboard reads then. */
     fun checkClipboard(context: Context) {
         if (!Settings.acceptedTerms) return
         val clip = runCatching { context.getSystemService(ClipboardManager::class.java).primaryClip }.getOrNull()
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
         val link = Engine.extractUrl(text) ?: return
-        if (Engine.siteOf(link) == null || link == Settings.lastClipboardUrl) return
+        if (link == Settings.lastClipboardUrl) return
+        val known = Engine.siteOf(link) != null
+        val file = FileKinds.looksLikeFile(link)
+        // Ordinary web links (articles, shops...) are ignored; videos and files are offered.
+        if (!known && !file) return
         Settings.lastClipboardUrl = link
-        if (Settings.autoClipboard.value) quickDownload(link) else clipboardLink = link
+        if (known && Settings.autoClipboard.value) quickDownload(link) else clipboardLink = link
     }
 
     fun updateDownloader() {
@@ -181,7 +218,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_TAB = "tab"
         const val TAB_HOME = 0
         const val TAB_DOWNLOADS = 1
-        const val TAB_SETTINGS = 2
+        const val TAB_CONVERT = 2
+        const val TAB_SETTINGS = 3
     }
 }
 
@@ -222,6 +260,7 @@ fun AppShell(vm: MainViewModel) {
     val items = listOf(
         NavItem("Home", Icons.Outlined.Home, Icons.Filled.Home),
         NavItem("Downloads", Icons.Outlined.Download, Icons.Filled.Download),
+        NavItem("Convert", Icons.Outlined.Transform, Icons.Filled.Transform),
         NavItem("Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
     )
 
@@ -250,6 +289,7 @@ fun AppShell(vm: MainViewModel) {
             when (vm.tab) {
                 MainActivity.TAB_HOME -> HomeScreen(vm, jobs)
                 MainActivity.TAB_DOWNLOADS -> DownloadsScreen(jobs)
+                MainActivity.TAB_CONVERT -> ConvertScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
                 else -> SettingsScreen(vm)
             }
         }

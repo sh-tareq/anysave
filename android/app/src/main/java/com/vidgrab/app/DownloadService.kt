@@ -15,7 +15,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.provider.MediaStore
-import android.webkit.MimeTypeMap
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -26,154 +26,195 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
-/** Runs downloads one after another in the foreground, so they continue when the app is closed. */
+/**
+ * Runs downloads (videos through yt-dlp, any file directly) and conversions (FFmpeg) in the
+ * foreground, several at once, so they continue when the app is closed. Downloads can be paused
+ * and resumed: partial files are kept in filesDir/partial/<id> until finished or cancelled.
+ */
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val queue = Channel<String>(Channel.UNLIMITED)
-    @Volatile private var running: String? = null
-    private var pending = 0
+    private lateinit var slots: Semaphore
+    private val activeCount = AtomicInteger(0)
     @Volatile private var lastStartId = 0
     private var lastNotify = 0L
+
+    private class Stopped : Exception()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        slots = Semaphore(Settings.maxParallel.value.coerceIn(1, 5))
         ServiceCompat.startForeground(
             this, NOTIF_PROGRESS, progressNotification(null, "Starting…", 0f, true),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
-        scope.launch {
-            for (id in queue) {
-                runJob(id)
-                val left = synchronized(this@DownloadService) { --pending }
-                if (left == 0 && stopSelfResult(lastStartId)) {
-                    // Only stops if no newer download was queued in the meantime.
-                    ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                }
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val id = intent?.getStringExtra(EXTRA_ID) ?: return START_NOT_STICKY
         when (intent.action) {
             ACTION_START -> {
-                synchronized(this) { pending++; lastStartId = startId }
-                queue.trySend(id)
+                lastStartId = startId
+                activeCount.incrementAndGet()
+                scope.launch {
+                    try { slots.withPermit { runJob(id) } }
+                    finally {
+                        if (activeCount.decrementAndGet() == 0 && stopSelfResult(lastStartId)) {
+                            ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                        }
+                    }
+                }
             }
-            ACTION_CANCEL -> cancelJob(id)
+            ACTION_CANCEL -> stopJob(id, JobStatus.CANCELLED)
+            ACTION_PAUSE -> stopJob(id, JobStatus.PAUSED)
         }
         return START_NOT_STICKY
     }
 
-    private fun cancelJob(id: String) {
-        Downloads.update(id) { if (it.finished) it else it.copy(status = JobStatus.CANCELLED) }
-        if (running == id) YoutubeDL.getInstance().destroyProcessById(id)
+    /** Pause keeps the partial file; cancel deletes it. */
+    private fun stopJob(id: String, to: JobStatus) {
+        val job = Downloads.get(id) ?: return
+        if (job.finished) return
+        Downloads.update(id) { it.copy(status = to, speed = "", eta = "") }
+        when (job.kind) {
+            JobKind.VIDEO -> YoutubeDL.getInstance().destroyProcessById(id)
+            JobKind.CONVERT -> Converter.cancel(id)
+            JobKind.FILE -> {} // the download loop sees the new status and stops
+        }
+        if (to == JobStatus.CANCELLED) partialDir(id).deleteRecursively()
     }
 
-    private fun isMetered() =
-        getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
+    private fun partialDir(id: String) = File(filesDir, "partial/$id")
+
+    private fun isMetered() = getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
+
+    private fun stillWanted(id: String) = Downloads.get(id)?.status.let {
+        it != JobStatus.PAUSED && it != JobStatus.CANCELLED && it != null
+    }
 
     private suspend fun runJob(id: String) {
-        var job = Downloads.get(id) ?: return
-        if (job.status != JobStatus.QUEUED) return // cancelled while waiting
+        val job = Downloads.get(id) ?: return
+        if (job.status != JobStatus.QUEUED) return // paused or cancelled while waiting
 
-        // Wait for setup / yt-dlp update to finish before running it.
-        Engine.state.first { it != Engine.State.STARTING }
+        Engine.state.first { it != Engine.State.STARTING } // setup / yt-dlp update first
 
-        if (Settings.wifiOnly.value && isMetered()) {
+        if (job.kind != JobKind.CONVERT && Settings.wifiOnly.value && isMetered()) {
             Downloads.update(id) { it.copy(status = JobStatus.WAITING_WIFI) }
             notifyProgress(job, "Waiting for Wi-Fi…", 0f, true, force = true)
             while (isMetered()) {
                 delay(5000)
-                if (Downloads.get(id)?.status != JobStatus.WAITING_WIFI) return // cancelled
+                if (Downloads.get(id)?.status != JobStatus.WAITING_WIFI) return
             }
         }
 
-        running = id
-        val workDir = File(cacheDir, "dl/$id").apply { deleteRecursively(); mkdirs() }
+        val dir = partialDir(id).apply { mkdirs() }
+        var keepPartial = false
         try {
             Downloads.update(id) { it.copy(status = JobStatus.DOWNLOADING) }
-            val req = YoutubeDLRequest(job.url)
-                .addOption("-f", job.format)
-                .addOption("-S", job.sort ?: Engine.H264_SORT)
-                .addOption("-o", File(workDir, outputTemplate(job)).absolutePath)
-                .addOption("--no-playlist")
-                .addOption("--no-warnings")
-                .addOption("--newline")
-                .addOption("--progress")
-                .addOption("--no-simulate")
-                .addOption(
-                    "--progress-template",
-                    "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|" +
-                        "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
-                )
-                // Title/thumbnail for one-tap downloads that skipped the lookup
-                .addOption("--print", "video:VGT %(title)s")
-                .addOption("--print", "video:VGI %(thumbnail)s")
-                .addOption("--print", "after_move:VGF %(filepath)s")
-            if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
-            else req.addOption("--merge-output-format", "mp4")
-            Engine.applyCookies(this, req)
-
-            var finalPath: String? = null
-            YoutubeDL.getInstance().execute(req, id) { _, _, line ->
-                when {
-                    line.startsWith("VGP ") -> onProgress(id, line.removePrefix("VGP "))
-                    line.startsWith("VGF ") -> finalPath = line.removePrefix("VGF ").trim()
-                    line.startsWith("VGT ") && !job.fixedName -> {
-                        val t = line.removePrefix("VGT ").trim()
-                        if (t.isNotEmpty() && t != "NA") Downloads.update(id) { it.copy(title = t) }
-                    }
-                    line.startsWith("VGI ") -> {
-                        val t = line.removePrefix("VGI ").trim()
-                        if (t.startsWith("http")) Downloads.update(id) { it.copy(thumbnail = t) }
-                    }
+            val file = when (job.kind) {
+                JobKind.VIDEO -> downloadVideo(job, dir)
+                JobKind.FILE -> downloadFile(job, dir)
+                JobKind.CONVERT -> convert(job, dir)
+            }
+            if (!stillWanted(id)) throw Stopped()
+            Downloads.update(id) { it.copy(status = JobStatus.SAVING, percent = 100f) }
+            val current = Downloads.get(id) ?: job
+            val mime = current.mime?.takeIf { it.contains('/') && it != "application/octet-stream" }
+                ?: FileKinds.mimeFromName(file.name) ?: "application/octet-stream"
+            val size = file.length()
+            val folder = FileKinds.categoryOf(file.name, mime, job.kind, job.audioOnly).folder
+            val uri = saveToDownloads(file, mime, if (Settings.sortIntoFolders.value) folder else null)
+            Downloads.update(id) {
+                it.copy(status = JobStatus.DONE, uri = uri, mime = mime, fileName = file.name, sizeBytes = size,
+                    percent = 100f, speed = "", eta = "")
+            }
+            doneNotification(Downloads.get(id) ?: job, uri, mime)
+        } catch (e: Throwable) {
+            val now = Downloads.get(id)?.status
+            when {
+                now == JobStatus.PAUSED -> keepPartial = true
+                now == JobStatus.CANCELLED -> {}
+                e is Stopped || e is YoutubeDL.CanceledException -> {}
+                else -> {
+                    val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else (e.message ?: e.toString())
+                    Downloads.update(id) { it.copy(status = JobStatus.ERROR, error = msg, speed = "", eta = "") }
+                    keepPartial = job.kind == JobKind.FILE // a file download can be resumed with Retry
                 }
             }
-            val file = finalPath?.let(::File)?.takeIf { it.exists() }
-                ?: workDir.walkTopDown().filter { it.isFile }.maxByOrNull { it.length() }
-                ?: throw Exception("Download finished but no file was found")
-
-            Downloads.update(id) { it.copy(status = JobStatus.SAVING, percent = 100f) }
-            val mime = mimeOf(file)
-            val size = file.length()
-            val uri = saveToDownloads(file, mime)
-            Downloads.update(id) {
-                it.copy(status = JobStatus.DONE, uri = uri, mime = mime, fileName = file.name, sizeBytes = size, percent = 100f)
-            }
-            job = Downloads.get(id) ?: job
-            doneNotification(job, uri, mime)
-        } catch (e: YoutubeDL.CanceledException) {
-            Downloads.update(id) { it.copy(status = JobStatus.CANCELLED) }
-        } catch (e: Throwable) {
-            if (Downloads.get(id)?.status != JobStatus.CANCELLED) {
-                val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else (e.message ?: e.toString())
-                Downloads.update(id) { it.copy(status = JobStatus.ERROR, error = msg) }
-            }
         } finally {
-            running = null
-            workDir.deleteRecursively()
+            if (!keepPartial) dir.deleteRecursively()
         }
+    }
+
+    // ---------- videos (yt-dlp) ----------
+
+    private fun downloadVideo(job: Job, dir: File): File {
+        val id = job.id
+        val req = YoutubeDLRequest(job.url)
+            .addOption("-f", job.format.ifBlank { "bv*+ba/b" })
+            .addOption("-S", job.sort ?: Engine.H264_SORT)
+            .addOption("-o", File(dir, outputTemplate(job)).absolutePath)
+            .addOption("--no-playlist")
+            .addOption("--no-warnings")
+            .addOption("--newline")
+            .addOption("--progress")
+            .addOption("--no-simulate")
+            .addOption("--continue") // resume .part files after a pause
+            .addOption(
+                "--progress-template",
+                "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|" +
+                    "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
+            )
+            // Title/thumbnail for one-tap downloads that skipped the lookup
+            .addOption("--print", "video:VGT %(title)s")
+            .addOption("--print", "video:VGI %(thumbnail)s")
+            .addOption("--print", "after_move:VGF %(filepath)s")
+        if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
+        else req.addOption("--merge-output-format", "mp4")
+        Engine.applyCookies(this, req)
+
+        var finalPath: String? = null
+        YoutubeDL.getInstance().execute(req, id) { _, _, line ->
+            when {
+                line.startsWith("VGP ") -> onVideoProgress(id, line.removePrefix("VGP "))
+                line.startsWith("VGF ") -> finalPath = line.removePrefix("VGF ").trim()
+                line.startsWith("VGT ") && !job.fixedName -> {
+                    val t = line.removePrefix("VGT ").trim()
+                    if (t.isNotEmpty() && t != "NA") Downloads.update(id) { it.copy(title = t) }
+                }
+                line.startsWith("VGI ") -> {
+                    val t = line.removePrefix("VGI ").trim()
+                    if (t.startsWith("http")) Downloads.update(id) { it.copy(thumbnail = t) }
+                }
+            }
+        }
+        return finalPath?.let(::File)?.takeIf { it.exists() }
+            ?: dir.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.maxByOrNull { it.length() }
+            ?: throw Exception("Download finished but no file was found")
     }
 
     /** File name pattern: yt-dlp's title + ID, or our own name for ad videos. */
     private fun outputTemplate(job: Job): String {
         if (!job.fixedName) return "%(title).100B [%(id).40B]%(height& {}p|)s.%(ext)s"
-        val safe = job.title.replace(Regex("""[\\/:*?"<>|\n\r\t]+"""), " ").replace("%", "%%").trim().take(90)
-        return "${safe.ifBlank { "video" }}.%(ext)s"
+        return "${safeName(job.title).replace("%", "%%")}.%(ext)s"
     }
 
-    private fun onProgress(id: String, raw: String) {
+    private fun onVideoProgress(id: String, raw: String) {
         val p = raw.split("|") + List(5) { "" }
         fun n(s: String) = s.trim().toDoubleOrNull() ?: 0.0
         val done = n(p[0])
@@ -183,24 +224,129 @@ class DownloadService : Service() {
         Downloads.get(id)?.let { notifyProgress(it, null, pct, total <= 0) }
     }
 
-    private fun notifyProgress(job: Job, text: String?, pct: Float, indeterminate: Boolean, force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        if (!force && now - lastNotify < 700) return
-        lastNotify = now
-        runCatching {
-            getSystemService(NotificationManager::class.java)
-                .notify(NOTIF_PROGRESS, progressNotification(job, text, pct, indeterminate))
+    // ---------- any file (direct HTTP, resumable) ----------
+
+    private fun downloadFile(job: Job, dir: File): File {
+        var attempt = 0
+        while (true) {
+            try {
+                return fetchFile(job.id, dir)
+            } catch (e: IOException) {
+                if (!stillWanted(job.id)) throw Stopped()
+                // Network hiccup: wait and continue from where it stopped.
+                if (++attempt >= 5) throw Exception("Network error: ${e.message ?: "connection lost"}")
+                Downloads.update(job.id) { it.copy(speed = "", eta = "Retrying ($attempt)…") }
+                Thread.sleep(2000L * attempt)
+            }
         }
     }
 
+    private fun open(url: String, already: Long, ua: String) = (URL(url).openConnection() as HttpURLConnection).apply {
+        instanceFollowRedirects = true
+        connectTimeout = 15000; readTimeout = 30000
+        setRequestProperty("User-Agent", ua)
+        if (already > 0) setRequestProperty("Range", "bytes=$already-")
+    }
+
+    private fun fetchFile(id: String, dir: File): File {
+        val job = Downloads.get(id) ?: throw Stopped()
+        val existing = dir.listFiles { f -> f.name.endsWith(".part") }?.firstOrNull()
+        val already = existing?.length() ?: 0L
+        // Identify honestly first; some servers only accept browser names, so try that on 403.
+        var c = open(job.url, already, FileKinds.FILE_USER_AGENT)
+        if (c.responseCode == 403) { c.disconnect(); c = open(job.url, already, FileKinds.USER_AGENT) }
+        try {
+            val code = c.responseCode
+            if (code !in 200..299) throw Exception("Server answered $code ${c.responseMessage.orEmpty()}".trim())
+            val resumed = code == 206 && already > 0
+            val name = safeName(
+                job.fileName
+                    ?: c.getHeaderField("Content-Disposition")?.let(FileKinds::fileNameFromDisposition)
+                    ?: java.net.URLDecoder.decode(c.url.path.substringAfterLast('/'), "UTF-8").ifBlank { null }
+                    ?: job.title
+            ).let { n ->
+                // Give it an extension from the content type if it has none.
+                if (FileKinds.extOf(n).isNotEmpty()) n
+                else android.webkit.MimeTypeMap.getSingleton()
+                    .getExtensionFromMimeType(c.contentType?.substringBefore(';')?.trim())?.let { "$n.$it" } ?: n
+            }
+            val mime = c.contentType?.substringBefore(';')?.trim()
+            val total = if (c.contentLengthLong > 0) c.contentLengthLong + (if (resumed) already else 0) else 0L
+            Downloads.update(id) { it.copy(fileName = name, title = if (it.title.isBlank() || it.title == it.url) name else it.title,
+                mime = mime ?: it.mime, totalBytes = total) }
+
+            val part = existing ?: File(dir, "$name.part")
+            RandomAccessFile(part, "rw").use { out ->
+                if (resumed) out.seek(already) else out.setLength(0)
+                var done = if (resumed) already else 0L
+                val buf = ByteArray(64 * 1024)
+                var tickTime = System.currentTimeMillis(); var tickBytes = done
+                c.inputStream.use { input ->
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        val now = System.currentTimeMillis()
+                        if (now - tickTime >= 600) {
+                            if (!stillWanted(id)) throw Stopped()
+                            val bps = (done - tickBytes) * 1000.0 / (now - tickTime)
+                            tickTime = now; tickBytes = done
+                            val pct = if (total > 0) (done * 100f / total).coerceIn(0f, 100f) else 0f
+                            val eta = if (total > 0 && bps > 0) humanEta(((total - done) / bps).toString()) else "?"
+                            Downloads.update(id) { it.copy(percent = pct, doneBytes = done, speed = humanSpeed(bps), eta = eta) }
+                            Downloads.get(id)?.let { notifyProgress(it, null, pct, total <= 0) }
+                        }
+                    }
+                }
+                if (total > 0 && done < total) throw IOException("connection closed early")
+                Downloads.update(id) { it.copy(doneBytes = done) }
+            }
+            val final = File(dir, name)
+            if (!part.renameTo(final)) throw Exception("Couldn't finish the file")
+            return final
+        } finally { c.disconnect() }
+    }
+
+    // ---------- conversion (FFmpeg) ----------
+
+    private fun convert(job: Job, dir: File): File {
+        val spec = ConvertSpec.fromJson(job.spec)
+        val src = Uri.parse(job.url)
+        val inName = displayName(src) ?: job.title
+        val input = File(dir, "input.${FileKinds.extOf(inName).ifBlank { "mp4" }}")
+        Downloads.update(job.id) { it.copy(eta = "Preparing…") }
+        contentResolver.openInputStream(src)?.use { inp -> input.outputStream().use { inp.copyTo(it) } }
+            ?: throw Exception("Couldn't open the file")
+        val base = safeName(inName.substringBeforeLast('.'))
+        val suffix = listOfNotNull(spec.height?.let { "${it}p" }, spec.targetMb?.let { "${it}MB" },
+            if (spec.startSec != null || spec.endSec != null) "trim" else null).joinToString(" ")
+        val output = File(dir, "$base${if (suffix.isNotEmpty()) " ($suffix)" else ""}.${spec.format}")
+        val started = System.currentTimeMillis()
+        Converter.convert(this, job.id, input, output, spec) { pct ->
+            val secs = (System.currentTimeMillis() - started) / 1000.0
+            val eta = if (pct > 2) humanEta((secs / pct * (100 - pct)).toString()) else "?"
+            Downloads.update(job.id) { it.copy(percent = pct, eta = eta, speed = "") }
+            Downloads.get(job.id)?.let { notifyProgress(it, "Converting · ${pct.toInt()}%", pct, false) }
+        }
+        input.delete()
+        return output
+    }
+
+    private fun displayName(uri: Uri): String? = runCatching {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull()
+
     // ---------- saving ----------
 
-    private fun mimeOf(f: File): String =
-        MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase())
-            ?: if (f.extension.equals("mp3", true)) "audio/mpeg" else "video/mp4"
+    private fun safeName(s: String) =
+        s.replace(Regex("""[\\/:*?"<>|\n\r\t]+"""), " ").replace(Regex("\\s+"), " ").trim().take(120).ifBlank { "download" }
 
-    /** Copies the finished file to Downloads/VidGrab where gallery and file apps can see it. */
-    private suspend fun saveToDownloads(file: File, mime: String): Uri {
+    /** Copies the finished file to Downloads/VidGrab[/folder] where gallery and file apps can see it. */
+    private suspend fun saveToDownloads(file: File, mime: String, folder: String?): Uri {
+        val relDir = Environment.DIRECTORY_DOWNLOADS + "/VidGrab" + (folder?.let { "/$it" } ?: "")
         if (Build.VERSION.SDK_INT >= 29) {
             val resolver = contentResolver
             var values = ContentValues()
@@ -212,7 +358,7 @@ class DownloadService : Service() {
                 values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, name)
                     put(MediaStore.Downloads.MIME_TYPE, mime)
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/VidGrab")
+                    put(MediaStore.Downloads.RELATIVE_PATH, relDir)
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 uri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) }.getOrNull()
@@ -226,7 +372,9 @@ class DownloadService : Service() {
             return uri
         }
         // Android 8/9: write to the public folder, then ask the media scanner for a shareable Uri.
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "VidGrab")
+        @Suppress("DEPRECATION")
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "VidGrab" + (folder?.let { "/$it" } ?: ""))
         dir.mkdirs()
         var dest = File(dir, file.name)
         var n = 1
@@ -241,6 +389,16 @@ class DownloadService : Service() {
 
     // ---------- notifications ----------
 
+    private fun notifyProgress(job: Job, text: String?, pct: Float, indeterminate: Boolean, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastNotify < 700) return
+        lastNotify = now
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIF_PROGRESS, progressNotification(job, text, pct, indeterminate))
+        }
+    }
+
     private fun openAppIntent() = PendingIntent.getActivity(
         this, 0,
         Intent(this, MainActivity::class.java)
@@ -250,25 +408,28 @@ class DownloadService : Service() {
     )
 
     private fun progressNotification(job: Job?, text: String?, pct: Float, indeterminate: Boolean): Notification {
+        val others = (activeCount.get() - 1).coerceAtLeast(0)
         val b = NotificationCompat.Builder(this, VidGrabApp.CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_download)
             .setContentTitle(job?.title ?: "VidGrab")
-            .setContentText(text ?: listOf("${pct.toInt()}%", job?.speed.orEmpty(), job?.eta?.let { "ETA $it" }.orEmpty())
-                .filter { it.isNotBlank() }.joinToString(" · "))
+            .setContentText(text ?: listOf("${pct.toInt()}%", job?.speed.orEmpty(), job?.eta?.let { "ETA $it" }.orEmpty(),
+                if (others > 0) "+$others more" else "").filter { it.isNotBlank() }.joinToString(" · "))
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setProgress(100, pct.toInt(), indeterminate)
             .setContentIntent(openAppIntent())
         if (job != null) {
-            val cancel = PendingIntent.getService(
-                this, job.id.hashCode(),
-                Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra(EXTRA_ID, job.id),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            b.addAction(0, "Cancel", cancel)
+            if (job.kind != JobKind.CONVERT) b.addAction(0, "Pause", serviceIntent(ACTION_PAUSE, job.id))
+            b.addAction(0, "Cancel", serviceIntent(ACTION_CANCEL, job.id))
         }
         return b.build()
     }
+
+    private fun serviceIntent(action: String, id: String) = PendingIntent.getService(
+        this, (action + id).hashCode(),
+        Intent(this, DownloadService::class.java).setAction(action).putExtra(EXTRA_ID, id),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
 
     private fun doneNotification(job: Job, uri: Uri, mime: String) {
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
@@ -276,8 +437,8 @@ class DownloadService : Service() {
         val pi = PendingIntent.getActivity(this, job.id.hashCode(), view, PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(this, VidGrabApp.CH_DONE)
             .setSmallIcon(R.drawable.ic_stat_download)
-            .setContentTitle("Download complete")
-            .setContentText(job.title)
+            .setContentTitle(if (job.kind == JobKind.CONVERT) "Conversion complete" else "Download complete")
+            .setContentText(job.fileName ?: job.title)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
@@ -293,6 +454,7 @@ class DownloadService : Service() {
         private const val NOTIF_PROGRESS = 1
         private const val ACTION_START = "start"
         private const val ACTION_CANCEL = "cancel"
+        private const val ACTION_PAUSE = "pause"
         private const val EXTRA_ID = "id"
 
         private fun newId() = System.currentTimeMillis().toString() + (0..999).random()
@@ -304,42 +466,66 @@ class DownloadService : Service() {
         }
 
         private fun enqueue(ctx: Context, id: String) {
-            val i = Intent(ctx, DownloadService::class.java).setAction(ACTION_START).putExtra(EXTRA_ID, id)
-            ctx.startForegroundService(i)
+            ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_START).putExtra(EXTRA_ID, id))
         }
 
-        /** Download a link immediately with the default quality from Settings. Returns false if already running. */
+        /** Download a video page immediately with the default quality from Settings. */
         fun startQuick(ctx: Context, url: String, quality: Quality = Settings.quality.value): Boolean {
             if (Downloads.isActive(url)) {
                 Toast.makeText(ctx, "Already downloading this link", Toast.LENGTH_SHORT).show()
                 return false
             }
             val opt = quality.toOption()
-            start(
-                ctx,
-                Job(
-                    id = newId(), url = url,
-                    title = "${Engine.siteOf(url) ?: "Video"} video",
-                    format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
-                    qualityLabel = quality.label, site = Engine.siteOf(url),
-                )
-            )
+            start(ctx, Job(
+                id = newId(), url = url, title = "${Engine.siteLabel(url)} video",
+                format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
+                qualityLabel = quality.label, site = Engine.siteOf(url) ?: Engine.siteLabel(url),
+            ))
             return true
         }
 
         fun startFromInfo(ctx: Context, info: Engine.Info, opt: Engine.Option) {
-            start(
-                ctx,
-                Job(
-                    id = newId(), url = info.url, title = info.title,
-                    format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
-                    qualityLabel = opt.label, site = Engine.siteOf(info.url), thumbnail = info.thumbnail,
-                )
-            )
+            start(ctx, Job(
+                id = newId(), url = info.url, title = info.title,
+                format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
+                qualityLabel = opt.label, site = Engine.siteOf(info.url) ?: Engine.siteLabel(info.url), thumbnail = info.thumbnail,
+            ))
         }
 
+        /** Any direct file link (PDF, ZIP, APK, image, video file...). */
+        fun startFile(ctx: Context, url: String, name: String? = null, mime: String? = null): Boolean {
+            if (Downloads.isActive(url)) {
+                Toast.makeText(ctx, "Already downloading this link", Toast.LENGTH_SHORT).show()
+                return false
+            }
+            start(ctx, Job(
+                id = newId(), url = url, title = name ?: url.substringAfterLast('/').substringBefore('?').ifBlank { url },
+                kind = JobKind.FILE, fileName = name, mime = mime, site = Engine.siteLabel(url),
+                qualityLabel = "File",
+            ))
+            return true
+        }
+
+        fun startConvert(ctx: Context, input: Uri, name: String, spec: ConvertSpec) {
+            start(ctx, Job(
+                id = newId(), url = input.toString(), title = name, kind = JobKind.CONVERT,
+                spec = spec.toJson(), qualityLabel = spec.label(), audioOnly = spec.isAudio,
+            ))
+        }
+
+        fun pause(ctx: Context, id: String) = send(ctx, ACTION_PAUSE, id)
+
+        fun resume(ctx: Context, id: String) {
+            val job = Downloads.get(id) ?: return
+            if (job.status != JobStatus.PAUSED && job.status != JobStatus.ERROR) return
+            Downloads.update(id) { it.copy(status = JobStatus.QUEUED, error = null) }
+            enqueue(ctx, id)
+        }
+
+        /** Retry: file downloads resume from their partial file; others start over. */
         fun retry(ctx: Context, id: String) {
             val old = Downloads.get(id) ?: return
+            if (old.kind == JobKind.FILE) { resume(ctx, id); return }
             Downloads.remove(id)
             start(ctx, old.copy(id = newId(), status = JobStatus.QUEUED, percent = 0f, error = null,
                 speed = "", eta = "", createdAt = System.currentTimeMillis()))
@@ -348,7 +534,16 @@ class DownloadService : Service() {
         fun cancel(ctx: Context, id: String) {
             val job = Downloads.get(id) ?: return
             if (job.finished) return
-            ctx.startService(Intent(ctx, DownloadService::class.java).setAction(ACTION_CANCEL).putExtra(EXTRA_ID, id))
+            if (job.status == JobStatus.PAUSED) {
+                Downloads.update(id) { it.copy(status = JobStatus.CANCELLED) }
+                File(ctx.filesDir, "partial/$id").deleteRecursively()
+                return
+            }
+            send(ctx, ACTION_CANCEL, id)
+        }
+
+        private fun send(ctx: Context, action: String, id: String) {
+            ctx.startService(Intent(ctx, DownloadService::class.java).setAction(action).putExtra(EXTRA_ID, id))
         }
 
         fun humanSpeed(bps: Double): String {

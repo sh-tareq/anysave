@@ -30,17 +30,27 @@ object Settings {
     val autoClipboard: StateFlow<Boolean> = _autoClipboard
     private val _wifiOnly = MutableStateFlow(false)
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
+    private val _maxParallel = MutableStateFlow(3)
+    /** How many downloads run at the same time. */
+    val maxParallel: StateFlow<Int> = _maxParallel
+    private val _sortIntoFolders = MutableStateFlow(true)
+    /** Save into Downloads/VidGrab/Videos, Music, Documents… instead of one folder. */
+    val sortIntoFolders: StateFlow<Boolean> = _sortIntoFolders
 
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
         _quality.value = runCatching { Quality.valueOf(prefs.getString("quality", null)!!) }.getOrDefault(Quality.BEST)
         _autoClipboard.value = prefs.getBoolean("autoClipboard", true)
         _wifiOnly.value = prefs.getBoolean("wifiOnly", false)
+        _maxParallel.value = prefs.getInt("maxParallel", 3)
+        _sortIntoFolders.value = prefs.getBoolean("sortIntoFolders", true)
     }
 
     fun setQuality(q: Quality) { _quality.value = q; prefs.edit().putString("quality", q.name).apply() }
     fun setAutoClipboard(on: Boolean) { _autoClipboard.value = on; prefs.edit().putBoolean("autoClipboard", on).apply() }
     fun setWifiOnly(on: Boolean) { _wifiOnly.value = on; prefs.edit().putBoolean("wifiOnly", on).apply() }
+    fun setMaxParallel(n: Int) { _maxParallel.value = n; prefs.edit().putInt("maxParallel", n).apply() }
+    fun setSortIntoFolders(on: Boolean) { _sortIntoFolders.value = on; prefs.edit().putBoolean("sortIntoFolders", on).apply() }
 
     /** The last copied link we already acted on, so reopening the app doesn't download it twice. */
     var lastClipboardUrl: String?

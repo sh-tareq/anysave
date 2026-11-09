@@ -14,6 +14,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -115,7 +118,7 @@ private fun LinkInput(vm: MainViewModel) {
         OutlinedTextField(
             value = vm.url,
             onValueChange = { vm.url = it; vm.error = null },
-            placeholder = { Text("Paste a video link") },
+            placeholder = { Text("Paste a video or file link") },
             leadingIcon = { Icon(Icons.Outlined.Link, null) },
             trailingIcon = {
                 if (vm.url.isNotEmpty()) IconButton(onClick = { vm.url = ""; vm.info = null; vm.error = null }) {
@@ -137,7 +140,7 @@ private fun LinkInput(vm: MainViewModel) {
             enabled = !vm.loading && vm.url.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(50.dp),
             shape = RoundedCornerShape(16.dp),
-        ) { Text("Find video", fontWeight = FontWeight.SemiBold) }
+        ) { Text("Download", fontWeight = FontWeight.SemiBold) }
     }
 }
 
@@ -155,6 +158,14 @@ private fun SiteRow() {
                 Text(name, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
             }
         }
+        Row(
+            Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("+ 1,000 more sites", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+                color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
     }
 }
 
@@ -168,12 +179,19 @@ private fun AdLibrariesCard() {
                 Icon(Icons.Outlined.Campaign, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column {
-                    Text("Ad libraries", fontWeight = FontWeight.SemiBold)
-                    Text("Browse ads and save their videos", style = MaterialTheme.typography.bodySmall,
+                    Text("Browse & ad libraries", fontWeight = FontWeight.SemiBold)
+                    Text("Open any website, or browse ads, and save their videos", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(
+                onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.WEB)) },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            ) {
+                Icon(Icons.Outlined.Language, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                Text("Browse any website")
+            }
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.META)) },
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
@@ -201,14 +219,16 @@ private fun ClipboardCard(vm: MainViewModel, link: String) {
                 Icon(Icons.Outlined.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Copied ${Engine.siteOf(link)} link", fontWeight = FontWeight.SemiBold)
+                    Text(if (Engine.siteOf(link) != null) "Copied ${Engine.siteOf(link)} link"
+                        else "Copied file link", fontWeight = FontWeight.SemiBold)
                     Text(link, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { vm.quickDownload(link) }) { Text("Download") }
-                OutlinedButton(onClick = { vm.clipboardLink = null; vm.lookUp(link) }) { Text("Choose quality") }
+                if (Engine.siteOf(link) != null)
+                    OutlinedButton(onClick = { vm.clipboardLink = null; vm.lookUp(link) }) { Text("Choose quality") }
                 TextButton(onClick = { vm.clipboardLink = null }) { Text("Dismiss") }
             }
         }
@@ -230,9 +250,21 @@ private fun LoadingCard() {
 
 @Composable
 private fun LookupError(vm: MainViewModel, err: String) {
-    val site = Engine.siteOf(vm.url)
-    val needsLogin = site == "Instagram" || site == "Facebook"
-    val loggedIn = LoginActivity.loggedInSites(LocalContext.current)
+    val site = Engine.siteOf(vm.url) ?: Engine.siteLabel(vm.url)
+    val canLogIn = LoginActivity.Site.entries.any { it.label == site }
+    val needsLogin = site == "Instagram" || site == "Facebook" || (canLogIn && vm.needsLogin(err))
+    val ctx = LocalContext.current
+    val loggedIn = LoginActivity.loggedInSites(ctx)
+    if (vm.errorIsWebPage && !needsLogin) {
+        // Not a site yt-dlp knows: the built-in browser can often still see the video.
+        ErrorCard(
+            "VidGrab can't read this page directly.",
+            "Open it in the built-in browser and play the video: VidGrab will list the video files it finds.",
+            actionLabel = "Open in browser",
+            onAction = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.WEB, vm.url)) }
+        )
+        return
+    }
     ErrorCard(
         err,
         when {
@@ -370,28 +402,45 @@ fun ActiveJobCard(job: Job) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 Thumb(job, Modifier.size(width = 80.dp, height = 48.dp))
-                DownloadingBadge(Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp))
+                if (job.status != JobStatus.PAUSED)
+                    DownloadingBadge(Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(job.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
-                if (job.percent > 0f) LinearProgressIndicator({ job.percent / 100f }, Modifier.fillMaxWidth())
+                if (job.percent > 0f || job.status == JobStatus.PAUSED) LinearProgressIndicator({ job.percent / 100f }, Modifier.fillMaxWidth())
                 else LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(statusText(job), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            }
+            // Pause / resume (downloads only), then cancel
+            if (job.status == JobStatus.PAUSED) {
+                IconButton(onClick = { DownloadService.resume(ctx, job.id) }) { Icon(Icons.Outlined.PlayArrow, "Resume") }
+            } else if (job.canPause) {
+                IconButton(onClick = { DownloadService.pause(ctx, job.id) }) { Icon(Icons.Outlined.Pause, "Pause") }
             }
             IconButton(onClick = { DownloadService.cancel(ctx, job.id) }) { Icon(Icons.Outlined.Close, "Cancel") }
         }
     }
 }
 
+/** "12 MB of 80 MB" for direct file downloads. */
+private fun sizeProgress(job: Job): String =
+    if (job.kind == JobKind.FILE && job.totalBytes > 0)
+        "${Engine.humanSize(job.doneBytes) ?: "0 MB"} of ${Engine.humanSize(job.totalBytes)}" else ""
+
 fun statusText(job: Job): String = when (job.status) {
     JobStatus.QUEUED -> "Waiting…"
     JobStatus.WAITING_WIFI -> "Waiting for Wi-Fi…"
-    JobStatus.DOWNLOADING ->
-        if (job.percent <= 0f && job.speed.isEmpty()) "Starting…"
-        else listOf("${job.percent.toInt()}%", job.speed, "ETA ${job.eta}").filter { it.isNotBlank() }.joinToString(" · ")
+    JobStatus.DOWNLOADING -> when {
+        job.kind == JobKind.CONVERT && job.percent <= 0f -> job.eta.takeIf { it.endsWith("…") } ?: "Converting…"
+        job.kind == JobKind.CONVERT -> "Converting · ${job.percent.toInt()}% · ETA ${job.eta}"
+        job.percent <= 0f && job.speed.isEmpty() -> job.eta.takeIf { it.endsWith("…") } ?: "Starting…"
+        else -> listOf("${job.percent.toInt()}%", sizeProgress(job), job.speed, "ETA ${job.eta}")
+            .filter { it.isNotBlank() }.joinToString(" · ")
+    }
+    JobStatus.PAUSED -> listOf("Paused", "${job.percent.toInt()}%", sizeProgress(job)).filter { it.isNotBlank() }.joinToString(" · ")
     JobStatus.SAVING -> "Saving to Downloads…"
     JobStatus.DONE -> "Saved"
     JobStatus.CANCELLED -> "Cancelled"

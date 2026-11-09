@@ -6,6 +6,18 @@ import android.text.format.DateUtils
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Android
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Transform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,19 +45,27 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 
-private enum class Filter(val label: String) { ALL("All"), VIDEO("Videos"), AUDIO("Audio"), FAILED("Failed") }
+private enum class Filter(val label: String) {
+    ALL("All"), VIDEO("Videos"), AUDIO("Music"), FILES("Files"), CONVERTED("Converted"), FAILED("Failed")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(jobs: List<Job>) {
     var filter by remember { mutableStateOf(Filter.ALL) }
     var confirmClear by remember { mutableStateOf(false) }
+    var addLink by remember { mutableStateOf(false) }
     val active = jobs.filter { it.active }
+    val paused = jobs.filter { it.status == JobStatus.PAUSED }
     val finished = jobs.filter { it.finished }.filter {
+        val done = it.status == JobStatus.DONE
+        val cat = it.category
         when (filter) {
             Filter.ALL -> it.status != JobStatus.CANCELLED
-            Filter.VIDEO -> it.status == JobStatus.DONE && !it.audioOnly
-            Filter.AUDIO -> it.status == JobStatus.DONE && it.audioOnly
+            Filter.VIDEO -> done && cat == FileKinds.Category.VIDEOS
+            Filter.AUDIO -> done && cat == FileKinds.Category.MUSIC
+            Filter.FILES -> done && cat !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED)
+            Filter.CONVERTED -> done && it.kind == JobKind.CONVERT
             Filter.FAILED -> it.status == JobStatus.ERROR || it.status == JobStatus.CANCELLED
         }
     }
@@ -61,26 +81,50 @@ fun DownloadsScreen(jobs: List<Job>) {
                     modifier = Modifier.weight(1f))
                 if (jobs.any { it.finished }) TextButton(onClick = { confirmClear = true }) { Text("Clear list") }
             }
-            Text("Saved in Downloads/VidGrab", style = MaterialTheme.typography.bodyMedium,
+            Button(onClick = { addLink = true }, modifier = Modifier.padding(top = 10.dp)) {
+                Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
+                Text("Add download")
+            }
+            Text("Saved in Downloads/VidGrab, sorted into folders", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Filter.entries.forEach { f ->
                     FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
                 }
             }
         }
         if (active.isNotEmpty()) {
-            item { SectionLabel("In progress") }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel("In progress (${active.size})")
+                    Spacer(Modifier.weight(1f))
+                    val ctx = LocalContext.current
+                    TextButton(onClick = { active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } }) { Text("Pause all") }
+                }
+            }
             items(active, key = { it.id }) { ActiveJobCard(it) }
+        }
+        if (paused.isNotEmpty()) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel("Paused (${paused.size})")
+                    Spacer(Modifier.weight(1f))
+                    val ctx = LocalContext.current
+                    TextButton(onClick = { paused.forEach { DownloadService.resume(ctx, it.id) } }) { Text("Resume all") }
+                }
+            }
+            items(paused, key = { it.id }) { ActiveJobCard(it) }
         }
         if (finished.isNotEmpty()) {
             item { SectionLabel(if (filter == Filter.FAILED) "Failed or cancelled" else "Saved") }
             items(finished, key = { it.id }) { FinishedRow(it) }
         }
-        if (active.isEmpty() && finished.isEmpty()) item { EmptyState() }
+        if (active.isEmpty() && paused.isEmpty() && finished.isEmpty()) item { EmptyState() }
     }
+
+    if (addLink) AddDownloadDialog { addLink = false }
 
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
@@ -88,6 +132,47 @@ fun DownloadsScreen(jobs: List<Job>) {
         text = { Text("This only clears the list. Your downloaded files stay in Downloads/VidGrab.") },
         confirmButton = { TextButton(onClick = { Downloads.clearFinished(); confirmClear = false }) { Text("Clear") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+    )
+}
+
+/** Paste any link: files download directly, everything else goes through the video downloader. */
+@Composable
+private fun AddDownloadDialog(onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val clip = ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+        Engine.extractUrl(clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())?.let { link = it }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Add download") },
+        text = {
+            Column {
+                Text("Any link: a video page, or a file such as PDF, ZIP, APK, MP3 or image.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
+                    placeholder = { Text("https://…") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(enabled = !busy && Engine.extractUrl(link) != null, onClick = {
+                val url = Engine.extractUrl(link) ?: return@Button
+                busy = true
+                scope.launch {
+                    val known = Engine.siteOf(url) != null
+                    val probe = if (known) null else withContext(Dispatchers.IO) { FileKinds.probe(url) }
+                    if (!known && (FileKinds.looksLikeFile(url) || probe?.isFile == true))
+                        DownloadService.startFile(ctx, url, probe?.name, probe?.mime)
+                    else DownloadService.startQuick(ctx, url)
+                    onClose()
+                }
+            }) { Text(if (busy) "Checking…" else "Download") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
 }
 
@@ -108,12 +193,24 @@ private fun EmptyState() {
 /** Thumbnail: the site's image if we have it, else a frame from the saved video, else an icon. */
 @Composable
 fun Thumb(job: Job, modifier: Modifier) {
-    val model: Any? = job.thumbnail ?: job.uri?.takeIf { !job.audioOnly && job.status == JobStatus.DONE }
+    val cat = job.category
+    // Pictures and videos can show the saved file itself; other types get an icon.
+    val visual = cat == FileKinds.Category.VIDEOS || cat == FileKinds.Category.PICTURES ||
+        (cat == FileKinds.Category.CONVERTED && !job.audioOnly)
+    val model: Any? = job.thumbnail ?: job.uri?.takeIf { visual && job.status == JobStatus.DONE }
     Box(modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center) {
         val icon = @Composable {
-            Icon(if (job.audioOnly) Icons.Outlined.MusicNote else Icons.Outlined.Videocam, null,
-                tint = MaterialTheme.colorScheme.outline)
+            Icon(when (cat) {
+                FileKinds.Category.MUSIC -> Icons.Outlined.MusicNote
+                FileKinds.Category.PICTURES -> Icons.Outlined.Image
+                FileKinds.Category.DOCUMENTS -> Icons.Outlined.Description
+                FileKinds.Category.ARCHIVES -> Icons.Outlined.FolderZip
+                FileKinds.Category.APPS -> Icons.Outlined.Android
+                FileKinds.Category.CONVERTED -> Icons.Outlined.Transform
+                FileKinds.Category.OTHER -> Icons.Outlined.InsertDriveFile
+                FileKinds.Category.VIDEOS -> Icons.Outlined.Videocam
+            }, null, tint = MaterialTheme.colorScheme.outline)
         }
         if (model == null) icon() else SubcomposeAsyncImage(
             model = model, contentDescription = null, contentScale = ContentScale.Crop,
@@ -138,7 +235,8 @@ private fun FinishedRow(job: Job) {
     ) {
         Box {
             Thumb(job, Modifier.size(width = 112.dp, height = 63.dp))
-            if (!failed && !job.audioOnly) Icon(Icons.Outlined.PlayArrow, null, tint = Color.White,
+            if (!failed && (job.category == FileKinds.Category.VIDEOS || (job.kind == JobKind.CONVERT && !job.audioOnly && job.mime?.startsWith("video") == true)))
+                Icon(Icons.Outlined.PlayArrow, null, tint = Color.White,
                 modifier = Modifier.align(Alignment.Center).size(28.dp).background(Color(0x66000000), RoundedCornerShape(50)))
         }
         Spacer(Modifier.width(12.dp))
@@ -171,7 +269,7 @@ private fun FinishedRow(job: Job) {
                     DropdownMenuItem(text = { Text("Retry") }, leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
                         onClick = { menu = false; DownloadService.retry(ctx, job.id) })
                 } else {
-                    DropdownMenuItem(text = { Text("Play") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
+                    DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
                         onClick = { menu = false; open(ctx, job) })
                     DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
                         onClick = { menu = false; share(ctx, job) })

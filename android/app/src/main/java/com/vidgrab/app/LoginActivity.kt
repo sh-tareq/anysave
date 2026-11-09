@@ -80,6 +80,7 @@ class LoginActivity : ComponentActivity() {
         INSTAGRAM("Instagram", "https://www.instagram.com/accounts/login/", "https://www.instagram.com", ".instagram.com"),
         FACEBOOK("Facebook", "https://m.facebook.com/login/", "https://www.facebook.com", ".facebook.com"),
         TIKTOK("TikTok", "https://www.tiktok.com/login", "https://www.tiktok.com", ".tiktok.com"),
+        VIMEO("Vimeo", "https://vimeo.com/log_in", "https://vimeo.com", ".vimeo.com"),
         YOUTUBE("YouTube", "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://m.youtube.com", "https://www.youtube.com", ".youtube.com"),
     }
 

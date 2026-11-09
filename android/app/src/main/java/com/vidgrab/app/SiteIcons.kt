@@ -60,6 +60,11 @@ fun SiteIcon(site: String?, size: Dp = 20.dp, modifier: Modifier = Modifier) {
             contentAlignment = Alignment.Center
         ) { Text("f", color = Color.White, fontWeight = FontWeight.Black, fontSize = (size.value * 0.72f).sp) }
 
+        "Vimeo" -> Box(
+            modifier.size(size).background(Color(0xFF17D5FF), RoundedCornerShape(size * 0.28f)),
+            contentAlignment = Alignment.Center
+        ) { Text("v", color = Color.White, fontWeight = FontWeight.Black, fontSize = (size.value * 0.7f).sp) }
+
         else -> Box(
             modifier.size(size).background(Color(0xFF8A8A8A), CircleShape),
             contentAlignment = Alignment.Center

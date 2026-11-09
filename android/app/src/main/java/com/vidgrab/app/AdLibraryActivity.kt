@@ -59,6 +59,8 @@ class AdLibraryActivity : ComponentActivity() {
             "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ALL&media_type=video"),
         TIKTOK("TikTok Creative Center",
             "https://ads.tiktok.com/business/creativecenter/inspiration/topads/mobile/en?period=30"),
+        /** Any website: open a page, play the video, VidGrab lists what it finds. */
+        WEB("Browser", "https://www.google.com"),
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -76,6 +78,8 @@ class AdLibraryActivity : ComponentActivity() {
                 var ads by remember { mutableStateOf<List<AdItem>>(emptyList()) }
                 var showList by remember { mutableStateOf(false) }
                 var loading by remember { mutableStateOf(true) }
+                var pageUrl by remember { mutableStateOf(startUrl) }
+                var address by remember { mutableStateOf(if (lib == Library.WEB) "" else startUrl) }
                 val started = remember { mutableStateListOf<String>() }
 
                 // Re-inject (harmless if already there) and read the list every 1.5 s.
@@ -99,7 +103,11 @@ class AdLibraryActivity : ComponentActivity() {
                                 Column {
                                     Text(lib.label, maxLines = 1)
                                     Text(
-                                        if (lib == Library.TIKTOK) "Tap play on the ads you want" else "Scroll to load more ads",
+                                        when (lib) {
+                                            Library.TIKTOK -> "Tap play on the ads you want"
+                                            Library.META -> "Scroll to load more ads"
+                                            Library.WEB -> pageUrl.substringAfter("://").substringBefore('/').ifBlank { "Open any page with a video" }
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -121,15 +129,44 @@ class AdLibraryActivity : ComponentActivity() {
                                 if (ads.isEmpty()) Icon(Icons.Outlined.Videocam, null)
                                 else DownloadingBadge(size = 24.dp)
                             },
-                            text = { Text(if (ads.isEmpty()) "No ads yet" else "Ads found: ${ads.size}") },
-                            containerColor = if (ads.isEmpty()) MaterialTheme.colorScheme.surfaceVariant
+                            text = {
+                                Text(when {
+                                    lib == Library.WEB && ads.isEmpty() -> "Download"
+                                    lib == Library.WEB -> "Videos: ${ads.size}"
+                                    ads.isEmpty() -> "No ads yet"
+                                    else -> "Ads found: ${ads.size}"
+                                })
+                            },
+                            containerColor = if (ads.isEmpty() && lib != Library.WEB) MaterialTheme.colorScheme.surfaceVariant
                             else MaterialTheme.colorScheme.primary,
-                            contentColor = if (ads.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                            contentColor = if (ads.isEmpty() && lib != Library.WEB) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onPrimary,
                         )
                     }
                 ) { pad ->
-                    Box(Modifier.padding(pad).fillMaxSize()) {
+                    Column(Modifier.padding(pad).fillMaxSize()) {
+                    if (lib == Library.WEB) {
+                        OutlinedTextField(
+                            value = address, onValueChange = { address = it },
+                            placeholder = { Text("Search or type a web address") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = {
+                                val t = address.trim()
+                                val url = when {
+                                    t.startsWith("http://") || t.startsWith("https://") -> t
+                                    t.contains('.') && !t.contains(' ') -> "https://$t"
+                                    else -> "https://www.google.com/search?q=" + java.net.URLEncoder.encode(t, "UTF-8")
+                                }
+                                web?.loadUrl(url)
+                            }),
+                        )
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
                         AndroidView(factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(-1, -1)
@@ -139,9 +176,17 @@ class AdLibraryActivity : ComponentActivity() {
                                 settings.userAgentString = settings.userAgentString.replace("; wv", "")
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                                 webViewClient = object : WebViewClient() {
+                                    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                                        loading = true
+                                        url?.let { pageUrl = it }
+                                    }
                                     override fun onPageFinished(view: WebView, url: String?) {
                                         loading = false
+                                        url?.let { pageUrl = it }
                                         view.evaluateJavascript(script, null)
+                                    }
+                                    override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                                        url?.let { pageUrl = it } // single-page sites change URL without reloading
                                     }
                                 }
                                 loadUrl(startUrl)
@@ -150,14 +195,19 @@ class AdLibraryActivity : ComponentActivity() {
                         }, modifier = Modifier.fillMaxSize())
                         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
                     }
+                    }
                 }
 
                 if (showList) ModalBottomSheet(onDismissRequest = { showList = false }) {
-                    AdList(ads, lib, started) { item -> download(item, lib); started += item.src }
+                    AdList(ads, lib, started, pageUrl,
+                        onPage = { DownloadService.startQuick(this@AdLibraryActivity, pageUrl); toastMsg("Downloading this page's video") ; showList = false },
+                    ) { item -> download(item, lib); started += item.src }
                 }
             }
         }
     }
+
+    private fun toastMsg(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
 
     private fun parseAds(raw: String?): List<AdItem> = runCatching {
         // evaluateJavascript returns the JSON string as a quoted JS string literal
@@ -176,9 +226,10 @@ class AdLibraryActivity : ComponentActivity() {
 
     /** Meta: by Library ID through yt-dlp (HD). TikTok: the ad's video file directly. */
     private fun download(item: AdItem, lib: Library) {
-        val title = when {
-            item.site == "meta" -> listOfNotNull(item.name ?: "Meta ad", item.id?.let { "ad $it" }).joinToString(" - ")
-            else -> listOfNotNull(item.name ?: "TikTok ad", item.id?.let { "ad $it" }).joinToString(" - ")
+        val title = when (item.site) {
+            "meta" -> listOfNotNull(item.name ?: "Meta ad", item.id?.let { "ad $it" }).joinToString(" - ")
+            "tiktok" -> listOfNotNull(item.name ?: "TikTok ad", item.id?.let { "ad $it" }).joinToString(" - ")
+            else -> (item.name ?: "Video").take(80)
         }
         val metaById = item.site == "meta" && item.id != null
         DownloadService.start(
@@ -190,8 +241,8 @@ class AdLibraryActivity : ComponentActivity() {
                 format = if (metaById) "hd/b/bv*+ba" else "b/bv*+ba",
                 sort = Engine.H264_SORT,
                 audioOnly = false,
-                qualityLabel = if (metaById) "HD" else "Original",
-                site = if (lib == Library.META) "Facebook" else "TikTok",
+                qualityLabel = if (metaById) "HD" else "Best",
+                site = when (lib) { Library.META -> "Facebook"; Library.TIKTOK -> "TikTok"; Library.WEB -> Engine.siteLabel(item.src) },
                 thumbnail = item.poster,
                 fixedName = true,
             )
@@ -221,14 +272,21 @@ class AdLibraryActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AdList(ads: List<AdItem>, lib: AdLibraryActivity.Library, started: List<String>, onDownload: (AdItem) -> Unit) {
+private fun AdList(
+    ads: List<AdItem>, lib: AdLibraryActivity.Library, started: List<String>, pageUrl: String,
+    onPage: () -> Unit, onDownload: (AdItem) -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Ads on this page", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(if (lib == AdLibraryActivity.Library.WEB) "Videos on this page" else "Ads on this page",
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    if (lib == AdLibraryActivity.Library.TIKTOK) "Ads you've played. Play more to add them."
-                    else "Downloaded in HD where available.",
+                    when (lib) {
+                        AdLibraryActivity.Library.TIKTOK -> "Ads you've played. Play more to add them."
+                        AdLibraryActivity.Library.META -> "Downloaded in HD where available."
+                        AdLibraryActivity.Library.WEB -> "Play the video if it isn't listed yet."
+                    },
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -236,11 +294,21 @@ private fun AdList(ads: List<AdItem>, lib: AdLibraryActivity.Library, started: L
                 Text("Download all")
             }
         }
+        if (lib == AdLibraryActivity.Library.WEB) {
+            // Works on 1,000+ video sites (yt-dlp reads the page itself, in the best quality).
+            OutlinedButton(onClick = onPage, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                Icon(Icons.Outlined.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text("Download this page's video", maxLines = 1)
+            }
+        }
         if (ads.isEmpty()) {
             Text(
-                if (lib == AdLibraryActivity.Library.TIKTOK) "No ads yet. Close this, tap play on an ad, then check again."
-                else "No ad videos yet. Scroll the results so the ads load.",
-                Modifier.padding(vertical = 32.dp), color = MaterialTheme.colorScheme.onSurfaceVariant
+                when (lib) {
+                    AdLibraryActivity.Library.TIKTOK -> "No ads yet. Close this, tap play on an ad, then check again."
+                    AdLibraryActivity.Library.META -> "No ad videos yet. Scroll the results so the ads load."
+                    AdLibraryActivity.Library.WEB -> "No video files found yet. Play the video, or use the button above."
+                },
+                Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(vertical = 12.dp),

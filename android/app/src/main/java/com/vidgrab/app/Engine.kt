@@ -174,7 +174,12 @@ object Engine {
     fun humanSize(bytes: Long?): String? {
         if (bytes == null || bytes <= 0) return null
         val mb = bytes / 1_048_576.0
-        return if (mb >= 1024) "%.1f GB".format(mb / 1024) else if (mb >= 10) "%.0f MB".format(mb) else "%.1f MB".format(mb)
+        return when {
+            mb >= 1024 -> "%.1f GB".format(mb / 1024)
+            mb >= 10 -> "%.0f MB".format(mb)
+            mb >= 1 -> "%.1f MB".format(mb)
+            else -> "%.0f KB".format((bytes / 1024.0).coerceAtLeast(1.0))
+        }
     }
 
     /** yt-dlp errors can be long; keep the first ERROR line and a little after it. */
@@ -194,8 +199,18 @@ object Engine {
             host.endsWith("facebook.com") || host.endsWith("fb.watch") -> "Facebook"
             host.endsWith("instagram.com") -> "Instagram"
             host.endsWith("tiktok.com") -> "TikTok"
+            host.endsWith("vimeo.com") -> "Vimeo"
             else -> null
         }
+    }
+
+    /** Known site name, or a readable domain for any other site ("vimeo.com" -> "Vimeo"). */
+    fun siteLabel(url: String): String {
+        siteOf(url)?.let { return it }
+        val host = runCatching { android.net.Uri.parse(url).host.orEmpty().lowercase() }.getOrDefault("")
+            .removePrefix("www.").removePrefix("m.")
+        val name = host.split('.').let { if (it.size >= 2) it[it.size - 2] else it.firstOrNull() }.orEmpty()
+        return name.replaceFirstChar { it.uppercase() }.ifBlank { "Web" }
     }
 
     /** Pulls the first link out of shared text like "Check this out https://…". */

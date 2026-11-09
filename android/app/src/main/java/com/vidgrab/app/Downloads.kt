@@ -8,15 +8,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-enum class JobStatus { QUEUED, WAITING_WIFI, DOWNLOADING, SAVING, DONE, ERROR, CANCELLED }
+enum class JobStatus { QUEUED, WAITING_WIFI, DOWNLOADING, PAUSED, SAVING, DONE, ERROR, CANCELLED }
+
+/** VIDEO: page link through yt-dlp. FILE: any direct file link. CONVERT: a local file through FFmpeg. */
+enum class JobKind { VIDEO, FILE, CONVERT }
 
 data class Job(
     val id: String,
+    /** Page/file URL, or for CONVERT the content:// Uri of the input file. */
     val url: String,
     val title: String,
-    val format: String,
-    val sort: String?,
-    val audioOnly: Boolean,
+    val format: String = "",
+    val sort: String? = null,
+    val audioOnly: Boolean = false,
     val qualityLabel: String = "",
     val site: String? = null,
     val thumbnail: String? = null,
@@ -32,9 +36,17 @@ data class Job(
     val createdAt: Long = System.currentTimeMillis(),
     /** Save under [title] instead of the name yt-dlp picks (ad videos, whose links make huge names). */
     val fixedName: Boolean = false,
+    val kind: JobKind = JobKind.VIDEO,
+    /** Converter settings (JSON) for CONVERT jobs. */
+    val spec: String? = null,
+    /** Bytes downloaded so far / expected (FILE jobs; lets them resume). */
+    val doneBytes: Long = 0,
+    val totalBytes: Long = 0,
 ) {
     val finished get() = status == JobStatus.DONE || status == JobStatus.ERROR || status == JobStatus.CANCELLED
-    val active get() = !finished
+    val active get() = !finished && status != JobStatus.PAUSED
+    val canPause get() = kind != JobKind.CONVERT && (status == JobStatus.DOWNLOADING || status == JobStatus.QUEUED || status == JobStatus.WAITING_WIFI)
+    val category get() = FileKinds.categoryOf(fileName ?: title, mime, kind, audioOnly)
 
     fun toJson() = JSONObject().apply {
         put("id", id); put("url", url); put("title", title); put("format", format)
@@ -42,17 +54,20 @@ data class Job(
         put("site", site); put("thumbnail", thumbnail); put("status", status.name)
         put("uri", uri?.toString()); put("mime", mime); put("fileName", fileName)
         put("sizeBytes", sizeBytes); put("error", error); put("createdAt", createdAt)
-        put("fixedName", fixedName)
+        put("fixedName", fixedName); put("kind", kind.name); put("spec", spec)
+        put("doneBytes", doneBytes); put("totalBytes", totalBytes)
     }
 
     companion object {
         fun fromJson(o: JSONObject): Job {
             fun s(k: String) = if (o.isNull(k)) null else o.optString(k)
+            val kind = runCatching { JobKind.valueOf(o.getString("kind")) }.getOrDefault(JobKind.VIDEO)
             var status = runCatching { JobStatus.valueOf(o.getString("status")) }.getOrDefault(JobStatus.ERROR)
             var error = s("error")
-            if (status != JobStatus.DONE && status != JobStatus.ERROR && status != JobStatus.CANCELLED) {
-                status = JobStatus.ERROR // the app was closed mid-download
-                error = "Interrupted. Tap Retry."
+            if (status != JobStatus.DONE && status != JobStatus.ERROR && status != JobStatus.CANCELLED && status != JobStatus.PAUSED) {
+                // The app was closed mid-download: downloads keep their partial file and can resume.
+                if (kind == JobKind.CONVERT) { status = JobStatus.ERROR; error = "Interrupted. Tap Retry." }
+                else status = JobStatus.PAUSED
             }
             return Job(
                 id = o.getString("id"), url = o.getString("url"), title = o.optString("title"),
@@ -60,7 +75,8 @@ data class Job(
                 qualityLabel = o.optString("qualityLabel"), site = s("site"), thumbnail = s("thumbnail"),
                 status = status, uri = s("uri")?.let(Uri::parse), mime = s("mime"), fileName = s("fileName"),
                 sizeBytes = o.optLong("sizeBytes"), error = error, createdAt = o.optLong("createdAt"),
-                fixedName = o.optBoolean("fixedName"),
+                fixedName = o.optBoolean("fixedName"), kind = kind, spec = s("spec"),
+                doneBytes = o.optLong("doneBytes"), totalBytes = o.optLong("totalBytes"),
             )
         }
     }

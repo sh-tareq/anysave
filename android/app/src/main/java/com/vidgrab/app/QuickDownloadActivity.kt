@@ -49,11 +49,16 @@ class QuickDownloadActivity : ComponentActivity() {
         }
         when {
             url == null -> toast(if (fromClipboard) "Copy a video link first" else "No link found in what was shared")
-            Engine.siteOf(url) == null && fromClipboard -> toast("The copied link isn't a YouTube, Instagram, TikTok or Facebook video")
+            // Direct file links (PDF, ZIP, APK, MP4 file...) download as files.
+            FileKinds.looksLikeFile(url) && Engine.siteOf(url) == null -> {
+                if (fromClipboard) Settings.lastClipboardUrl = url
+                if (DownloadService.startFile(this, url)) toast("VidGrab: downloading file")
+            }
+            // Everything else goes through yt-dlp, which knows 1,000+ video sites.
             else -> {
                 if (fromClipboard) Settings.lastClipboardUrl = url
                 if (DownloadService.startQuick(this, url)) {
-                    toast("VidGrab: downloading (${Settings.quality.value.label})")
+                    toast("VidGrab: downloading from ${Engine.siteLabel(url)} (${Settings.quality.value.label})")
                 }
             }
         }

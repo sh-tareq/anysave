@@ -18,6 +18,8 @@ import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderCopy
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -39,6 +41,8 @@ fun SettingsScreen(vm: MainViewModel) {
     val quality by Settings.quality.collectAsState()
     val autoClip by Settings.autoClipboard.collectAsState()
     val wifiOnly by Settings.wifiOnly.collectAsState()
+    val maxParallel by Settings.maxParallel.collectAsState()
+    val sortFolders by Settings.sortIntoFolders.collectAsState()
     var pickQuality by remember { mutableStateOf(false) }
     var showLegal by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(LoginActivity.loggedInSites(ctx)) }
@@ -61,6 +65,26 @@ fun SettingsScreen(vm: MainViewModel) {
         SwitchRow(Icons.Outlined.Wifi, "Wi-Fi only", "Wait for Wi-Fi instead of using mobile data", wifiOnly) {
             Settings.setWifiOnly(it)
         }
+
+        Section("Download manager")
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Downloads at the same time")
+                    Text("Applies to the next downloads you start", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Row(Modifier.padding(start = 40.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..5).forEach { n ->
+                    FilterChip(selected = maxParallel == n, onClick = { Settings.setMaxParallel(n) }, label = { Text("$n") })
+                }
+            }
+        }
+        SwitchRow(Icons.Outlined.FolderCopy, "Sort into folders",
+            "Videos, Music, Pictures, Documents, Archives, Apps, Converted", sortFolders) { Settings.setSortIntoFolders(it) }
 
         Section("Quick Settings tile")
         SettingRow(Icons.Outlined.TouchApp, "Add the VidGrab tile",
@@ -107,7 +131,8 @@ fun SettingsScreen(vm: MainViewModel) {
             else if (!vm.updating) vm.messages.tryEmit("Wait for downloads to finish first") }
 
         Section("Storage")
-        SettingRow(Icons.Outlined.Folder, "Save location", "Downloads/VidGrab", null) {}
+        SettingRow(Icons.Outlined.Folder, "Save location",
+            if (sortFolders) "Downloads/VidGrab/<type>" else "Downloads/VidGrab", null) {}
         SettingRow(Icons.Outlined.DeleteSweep, "Clear download list", "Files are kept", null) {
             Downloads.clearFinished(); vm.messages.tryEmit("List cleared")
         }
