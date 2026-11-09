@@ -135,7 +135,7 @@ fun DownloadsScreen(jobs: List<Job>) {
     ) { pad ->
         LazyColumn(
             Modifier.fillMaxSize().padding(pad),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (searching) item {

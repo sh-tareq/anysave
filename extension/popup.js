@@ -163,7 +163,7 @@ async function loadInfo() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const site = siteOf(tab?.url || "");
   const library = adLibraryOf(tab?.url || "");
-  $("site").textContent = library || site || "Unsupported site";
+  $("site").textContent = library || site || "";
   $("media").hidden = true;
   $("pageVideos").hidden = true;
 

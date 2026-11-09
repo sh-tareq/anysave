@@ -54,7 +54,7 @@ fun SettingsScreen(vm: MainViewModel) {
     ScreenScaffold(title = "Settings") { pad ->
     Column(
         Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 24.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
 

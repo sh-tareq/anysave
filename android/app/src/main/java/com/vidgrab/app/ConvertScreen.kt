@@ -80,7 +80,7 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
     ScreenScaffold(title = "Convert", subtitle = "Change the format, size or length of any video or audio") { pad ->
     LazyColumn(
         Modifier.fillMaxSize().padding(pad),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 

@@ -60,11 +60,11 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
     ScreenScaffold(
         title = "AnySave",
         subtitle = "Download videos & files. Convert anything.",
-        leading = { AnimatedLogo(40.dp) },
+        leading = { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.vidgrab_logo), null, Modifier.size(34.dp)) },
     ) { pad ->
     LazyColumn(
         Modifier.fillMaxSize().padding(pad),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { LinkInput(vm) }

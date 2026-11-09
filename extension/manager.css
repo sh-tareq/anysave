@@ -67,3 +67,9 @@ footer a { color: var(--muted); }
 
 .capture { display:flex; gap:10px; align-items:flex-start; margin-top: 14px; padding: 10px 12px; border:1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: pointer; }
 .capture input { margin-top: 3px; accent-color: var(--accent); }
+
+.icon { color: var(--muted); }
+.icon svg, .ib svg { display:block; }
+.ib { display:flex; align-items:center; justify-content:center; }
+.tag { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.3px; padding:1px 5px; margin-right:6px; border-radius:4px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
+.top { padding-top: 12px; padding-bottom: 12px; }

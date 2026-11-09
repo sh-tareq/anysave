@@ -53,3 +53,5 @@ li.pv img, .pv-ph { width:54px; height:54px; object-fit:cover; border-radius:6px
 .tools { gap: 8px; margin-top: 8px; }
 .ghost { flex:1; padding:7px; border:1px solid var(--line); border-radius:6px; background: var(--card); color: var(--fg); font-weight:600; font-size:12px; }
 .ghost:hover { border-color: var(--accent); }
+
+.pill:empty { display:none; }
