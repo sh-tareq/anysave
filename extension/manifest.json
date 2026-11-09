@@ -11,7 +11,8 @@
     "cookies",
     "scripting",
     "downloads",
-    "contextMenus"
+    "contextMenus",
+    "downloads.ui"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

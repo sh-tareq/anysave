@@ -368,9 +368,18 @@ async function captureOn() {
   return settings.captureAll !== false; // on by default
 }
 let captureCache = true;
-captureOn().then((v) => { captureCache = v; });
+
+// While AnySave catches downloads, hide Chrome's own download bubble (like other download
+// managers do), so each download shows in one place. It comes back when catching is off.
+function applyChromeBubble(capturing) {
+  try { chrome.downloads.setUiOptions({ enabled: !capturing }).catch(() => {}); } catch {}
+}
+captureOn().then((v) => { captureCache = v; applyChromeBubble(v); });
 chrome.storage.onChanged.addListener((ch, area) => {
-  if (area === "local" && ch.settings) captureCache = ch.settings.newValue?.captureAll !== false;
+  if (area === "local" && ch.settings) {
+    captureCache = ch.settings.newValue?.captureAll !== false;
+    applyChromeBubble(captureCache);
+  }
 });
 
 function isOurs(item) { return item.byExtensionId === chrome.runtime.id; }
@@ -401,5 +410,86 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   });
 });
 
+// ---------- progress on the toolbar icon ----------
+// A ring around the AnySave icon fills as downloads progress, with the percent on the badge
+// (like Chrome's own download icon). A ✓ shows briefly when everything has finished.
+
+let baseIcons = null;
+async function loadBaseIcons() {
+  if (baseIcons) return baseIcons;
+  baseIcons = {};
+  for (const size of [16, 32]) {
+    const blob = await (await fetch(chrome.runtime.getURL(`icons/icon${size}.png`))).blob();
+    baseIcons[size] = await createImageBitmap(blob);
+  }
+  return baseIcons;
+}
+
+function drawRing(img, size, fraction) {
+  const c = new OffscreenCanvas(size, size);
+  const g = c.getContext("2d");
+  const inset = size * 0.16;
+  g.drawImage(img, inset, inset, size - inset * 2, size - inset * 2); // shrink logo to fit inside the ring
+  const r = size / 2 - size * 0.06, cx = size / 2, cy = size / 2;
+  g.lineWidth = Math.max(1.5, size * 0.11);
+  g.strokeStyle = "rgba(128,128,128,0.35)";
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = "#e5484d";
+  g.lineCap = "round";
+  g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.03, fraction)); g.stroke();
+  return g.getImageData(0, 0, size, size);
+}
+
+let lastIconState = "";
+let doneTimer = null;
+let hadActive = false;
+async function updateActionIcon() {
+  const jobs = Object.values(await getJobs());
+  const active = jobs.filter((j) => ["starting", "downloading"].includes(j.status));
+  if (!active.length) {
+    if (lastIconState === "idle" || lastIconState === "done") return;
+    await chrome.action.setIcon({ path: { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png" } });
+    if (hadActive) {
+      lastIconState = "done";
+      chrome.action.setBadgeBackgroundColor({ color: "#2f9e5b" });
+      chrome.action.setBadgeText({ text: "✓" });
+      clearTimeout(doneTimer);
+      doneTimer = setTimeout(() => { chrome.action.setBadgeText({ text: "" }); lastIconState = "idle"; }, 4000);
+    } else {
+      chrome.action.setBadgeText({ text: "" });
+      lastIconState = "idle";
+    }
+    hadActive = false;
+    chrome.action.setTitle({ title: "AnySave" });
+    return;
+  }
+  hadActive = true;
+  // Overall progress: by bytes when known, otherwise the average percent.
+  const withBytes = active.filter((j) => j.totalBytes > 0);
+  const fraction = withBytes.length === active.length
+    ? withBytes.reduce((a, j) => a + (j.doneBytes || 0), 0) / withBytes.reduce((a, j) => a + j.totalBytes, 0)
+    : active.reduce((a, j) => a + (j.percent || 0), 0) / active.length / 100;
+  const pct = Math.min(99, Math.floor(fraction * 100));
+  const state = `${pct}|${active.length}`;
+  if (state === lastIconState) return;
+  lastIconState = state;
+  try {
+    const icons = await loadBaseIcons();
+    await chrome.action.setIcon({ imageData: { 16: drawRing(icons[16], 16, fraction), 32: drawRing(icons[32], 32, fraction) } });
+  } catch {}
+  clearTimeout(doneTimer);
+  chrome.action.setBadgeBackgroundColor({ color: "#e5484d" });
+  chrome.action.setBadgeText({ text: active.length > 1 ? `${active.length}↓` : `${pct}%` });
+  chrome.action.setTitle({ title: `AnySave: ${active.length} downloading · ${pct}%` });
+}
+
+let iconTimer = null;
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area !== "local" || !ch.jobs) return;
+  if (iconTimer) return; // at most every 500 ms
+  iconTimer = setTimeout(() => { iconTimer = null; updateActionIcon(); }, 500);
+});
+
 // Resume polling file downloads after the service worker restarts.
 pollFiles();
+updateActionIcon();
