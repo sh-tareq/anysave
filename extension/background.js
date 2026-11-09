@@ -1,203 +1,357 @@
-// VidGrab service worker: talks to the native host (yt-dlp wrapper) and
-// keeps download jobs alive while the popup is closed.
+// VidGrab service worker (2.0): video downloads through the native helper (yt-dlp),
+// any-file downloads through Chrome's downloader, conversions through the helper (FFmpeg),
+// and a right-click menu. Jobs are kept in chrome.storage.local so the history survives restarts.
 const HOST = "com.vidgrab.host";
-const ports = new Map(); // jobId -> native Port
+const ports = new Map(); // jobId -> native Port (running video downloads and conversions)
+
+// ---------- job store ----------
 
 async function getJobs() {
-  return (await chrome.storage.session.get("jobs")).jobs || {};
+  return (await chrome.storage.local.get("jobs")).jobs || {};
 }
-async function updateJob(id, patch) {
-  const jobs = await getJobs();
-  jobs[id] = { ...(jobs[id] || {}), ...patch };
-  await chrome.storage.session.set({ jobs });
+let writeChain = Promise.resolve();
+function updateJob(id, patch) {
+  // Serialise writes so fast progress updates don't overwrite each other.
+  writeChain = writeChain.then(async () => {
+    const jobs = await getJobs();
+    jobs[id] = { ...(jobs[id] || { id, createdAt: Date.now() }), ...patch };
+    const ids = Object.keys(jobs).sort((a, b) => (jobs[b].createdAt || 0) - (jobs[a].createdAt || 0));
+    for (const old of ids.slice(400)) delete jobs[old]; // keep the newest 400
+    await chrome.storage.local.set({ jobs });
+  });
+  return writeChain;
+}
+function newId() { return String(Date.now()) + Math.floor(Math.random() * 1000); }
+
+// ---------- helpers ----------
+
+const VIDEO_SITES = /(^|\.)(youtube\.com|youtu\.be|facebook\.com|fb\.watch|instagram\.com|tiktok\.com|vimeo\.com)$/;
+const FILE_EXT = /\.(mp4|mkv|webm|mov|avi|m4v|3gp|flv|wmv|ts|mpe?g|mp3|m4a|aac|wav|flac|ogg|opus|wma|jpe?g|png|gif|webp|heic|bmp|svg|tiff?|pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg|apk|exe|msi|pkg|deb|rpm|appimage)$/i;
+
+function extOf(name) {
+  const m = String(name || "").split(/[?#]/)[0].match(/\.([a-z0-9]{1,8})$/i);
+  return m ? m[1].toLowerCase() : "";
+}
+function categoryOf(name, kind, audioOnly) {
+  if (kind === "convert") return "Converted";
+  const e = extOf(name);
+  if (audioOnly || /^(mp3|m4a|aac|wav|flac|ogg|opus|wma|amr)$/.test(e)) return "Music";
+  if (/^(mp4|mkv|webm|mov|avi|m4v|3gp|flv|wmv|ts|mpe?g)$/.test(e) || kind === "video") return "Videos";
+  if (/^(jpe?g|png|gif|webp|heic|bmp|svg|tiff?)$/.test(e)) return "Pictures";
+  if (/^(pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|md|json|xml)$/.test(e)) return "Documents";
+  if (/^(zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg)$/.test(e)) return "Archives";
+  if (/^(apk|xapk|exe|msi|pkg|deb|rpm|appimage)$/.test(e)) return "Apps";
+  return "Other";
+}
+function safeFile(s) {
+  return String(s || "download").replace(/[\\/:*?"<>|\n\r\t~]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || "download";
+}
+function siteLabel(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^(www|m)\./, "");
+    const parts = host.split(".");
+    const name = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch { return "Web"; }
+}
+function native(msg) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendNativeMessage(HOST, msg, (res) => {
+      if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message, hostMissing: true });
+      else resolve(res || { ok: false, error: "No answer from helper" });
+    });
+  });
 }
 
-// Login cookies for the site of `url`, in Netscape cookies.txt format.
-// macOS blocks other programs from reading Chrome's cookie database, so the
-// extension reads them through the chrome.cookies API instead, only for the
-// site being downloaded from.
+// Login cookies for the site of `url`, in Netscape cookies.txt format. macOS blocks other
+// programs from reading Chrome's cookie database, so they're read through chrome.cookies,
+// only for the site being downloaded from.
 const COOKIE_DOMAINS = {
-  "youtube.com": ["youtube.com"],
-  "youtu.be": ["youtube.com"],
-  "facebook.com": ["facebook.com"],
-  "fb.watch": ["facebook.com"],
-  "instagram.com": ["instagram.com"],
-  "tiktok.com": ["tiktok.com"],
+  "youtube.com": ["youtube.com"], "youtu.be": ["youtube.com"],
+  "facebook.com": ["facebook.com"], "fb.watch": ["facebook.com"],
+  "instagram.com": ["instagram.com"], "tiktok.com": ["tiktok.com"], "vimeo.com": ["vimeo.com"],
 };
-
 async function cookiesFor(url) {
-  const host = new URL(url).hostname;
-  const base = host.split(".").slice(-2).join(".");
+  const base = new URL(url).hostname.split(".").slice(-2).join(".");
   const domains = COOKIE_DOMAINS[base] || [];
   const lines = ["# Netscape HTTP Cookie File"];
   for (const domain of domains) {
-    for (const c of await chrome.cookies.getAll({ domain })) {
-      const d = c.hostOnly ? c.domain : (c.domain.startsWith(".") ? c.domain : "." + c.domain);
-      lines.push([
-        (c.httpOnly ? "#HttpOnly_" : "") + d,
-        c.hostOnly ? "FALSE" : "TRUE",
-        c.path,
-        c.secure ? "TRUE" : "FALSE",
-        Math.floor(c.expirationDate || 0),
-        c.name,
-        c.value,
-      ].join("\t"));
-    }
+    try {
+      for (const c of await chrome.cookies.getAll({ domain })) {
+        const d = c.hostOnly ? c.domain : (c.domain.startsWith(".") ? c.domain : "." + c.domain);
+        lines.push([(c.httpOnly ? "#HttpOnly_" : "") + d, c.hostOnly ? "FALSE" : "TRUE", c.path,
+          c.secure ? "TRUE" : "FALSE", Math.floor(c.expirationDate || 0), c.name, c.value].join("\t"));
+      }
+    } catch {}
   }
   return lines.join("\n") + "\n";
 }
 
-async function startDownload({ url, format, sort, audioOnly, title, useCookies }) {
-  const id = String(Date.now());
-  updateJob(id, { id, url, title, status: "starting", percent: 0 });
+// ---------- helper-backed jobs (video downloads and conversions) ----------
 
+function runNative(id, payload, onDone) {
   const port = chrome.runtime.connectNative(HOST);
   ports.set(id, port);
   let finished = false;
-
   port.onMessage.addListener((msg) => {
     if (msg.type === "progress") {
       updateJob(id, { status: "downloading", percent: msg.percent, speed: msg.speed, eta: msg.eta });
-    } else if (msg.type === "status") {
-      updateJob(id, { status: msg.status });
     } else if (msg.type === "done") {
       finished = true;
-      updateJob(id, { status: "done", percent: 100, file: msg.file });
+      updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "",
+        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined });
+      onDone && onDone(msg);
+    } else if (msg.type === "paused") {
+      finished = true;
+      updateJob(id, { status: "paused", speed: "", eta: "" });
     } else if (msg.type === "error") {
       finished = true;
-      updateJob(id, { status: "error", error: msg.message });
+      updateJob(id, { status: msg.message === "Cancelled" ? "cancelled" : "error", error: msg.message, speed: "", eta: "" });
     }
   });
   port.onDisconnect.addListener(() => {
     ports.delete(id);
     if (!finished) {
       const err = chrome.runtime.lastError?.message;
-      updateJob(id, { status: err ? "error" : "cancelled", error: err });
+      getJobs().then((jobs) => {
+        if (jobs[id]?.status === "paused") return;
+        updateJob(id, { status: err ? "error" : "cancelled", error: err });
+      });
     }
   });
+  port.postMessage(payload);
+}
+
+async function startVideo({ url, format, sort, audioOnly, title, useCookies, id }) {
+  id = id || newId();
+  await updateJob(id, {
+    kind: "video", url, title: title || `${siteLabel(url)} video`, site: siteLabel(url),
+    format, sort, audioOnly: !!audioOnly, useCookies: !!useCookies,
+    status: "starting", percent: 0, error: null,
+  });
   const cookies = useCookies ? await cookiesFor(url) : null;
-  port.postMessage({ action: "download", url, format, sort, audioOnly, cookies });
+  runNative(id, { action: "download", url, format, sort, audioOnly, cookies, folder: audioOnly ? "Music" : "Videos" });
   return id;
 }
 
-async function agreed() {
-  const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
-  return acceptedTermsVersion >= 1;
+async function startConvert({ path, name, spec }) {
+  const id = newId();
+  await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0,
+    qualityLabel: specLabel(spec) });
+  runNative(id, { action: "convert", path, spec });
+  return id;
+}
+function specLabel(s) {
+  const fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
+  return [s.format?.toUpperCase(), s.height && `${s.height}p`, s.targetMb && `under ${s.targetMb} MB`,
+    (s.startSec != null || s.endSec != null) && `${fmt(s.startSec || 0)}–${s.endSec != null ? fmt(s.endSec) : "end"}`,
+    s.removeAudio && "no sound"].filter(Boolean).join(" · ");
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  // Nothing is looked up or downloaded before the user accepts the legal notice in the popup.
-  if (msg.type === "info" || msg.type === "download" || msg.type === "directDownload") {
-    agreed().then((ok) => {
-      if (!ok) sendResponse({ ok: false, error: "Please accept the legal notice in the VidGrab popup first." });
-      else handle(msg, sendResponse);
+// ---------- any file (Chrome's downloader: pause/resume built in) ----------
+
+async function startFile({ url, name, title }) {
+  const id = newId();
+  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const folder = categoryOf(fileName, "file");
+  await updateJob(id, { kind: "file", url, title: title || fileName, fileName, site: siteLabel(url),
+    status: "starting", percent: 0, qualityLabel: "File" });
+  try {
+    const downloadId = await chrome.downloads.download({
+      url, filename: `VidGrab/${folder}/${fileName}`, conflictAction: "uniquify",
     });
-    return true;
+    await updateJob(id, { downloadId, status: "downloading" });
+    pollFiles();
+  } catch (e) {
+    await updateJob(id, { status: "error", error: String(e.message || e) });
   }
-  return handle(msg, sendResponse);
-});
-
-function handle(msg, sendResponse) {
-  if (msg.type === "directDownload") {
-    startDirect(msg).then((id) => sendResponse({ ok: true, id }), (e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === "revealDirect") {
-    chrome.downloads.show(msg.downloadId);
-    sendResponse({ ok: true });
-    return;
-  }
-  if (msg.type === "info") {
-    (async () => {
-      const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
-      chrome.runtime.sendNativeMessage(HOST, { action: "info", url: msg.url, cookies }, (res) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ ok: false, error: chrome.runtime.lastError.message, hostMissing: true });
-        } else {
-          sendResponse(res);
-        }
-      });
-    })();
-    return true; // async response
-  }
-  if (msg.type === "download") {
-    startDownload(msg).then((id) => sendResponse({ ok: true, id }));
-    return true;
-  }
-  if (msg.type === "cancel") {
-    getJobs().then((jobs) => { const d = jobs[msg.id]?.downloadId; if (d) chrome.downloads.cancel(d); });
-    ports.get(msg.id)?.disconnect();
-    ports.delete(msg.id);
-    updateJob(msg.id, { status: "cancelled" });
-    sendResponse({ ok: true });
-  }
-  if (msg.type === "clear") {
-    getJobs().then((jobs) => {
-      for (const [k, j] of Object.entries(jobs)) {
-        if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];
-      }
-      chrome.storage.session.set({ jobs }).then(() => sendResponse({ ok: true }));
-    });
-    return true;
-  }
-  if (msg.type === "reveal") {
-    chrome.runtime.sendNativeMessage(HOST, { action: "reveal", file: msg.file }, () => {
-      void chrome.runtime.lastError;
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-}
-
-// ---------- Direct downloads (ad libraries and other pages with plain video files) ----------
-// These are saved by Chrome itself into Downloads/VidGrab, so no helper app is needed.
-
-function safeFile(s) {
-  return String(s || "video").replace(/[\\/:*?"<>|\n\r\t~]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "video";
-}
-
-async function startDirect({ src, title }) {
-  const id = String(Date.now()) + Math.floor(Math.random() * 1000);
-  await updateJob(id, { id, url: src, title, status: "starting", percent: 0 });
-  const downloadId = await chrome.downloads.download({
-    url: src, filename: `VidGrab/${safeFile(title)}.mp4`, conflictAction: "uniquify",
-  });
-  await updateJob(id, { downloadId, status: "downloading" });
-  pollDirect();
   return id;
 }
 
 let polling = null;
-function pollDirect() {
+function pollFiles() {
   if (polling) return;
   polling = setInterval(async () => {
     const jobs = await getJobs();
-    const active = Object.values(jobs).filter((j) => j.downloadId && ["starting", "downloading"].includes(j.status));
-    if (!active.length) { clearInterval(polling); polling = null; return; }
+    const active = Object.values(jobs).filter((j) => j.downloadId && ["starting", "downloading", "paused"].includes(j.status));
+    if (!active.some((j) => j.status !== "paused")) { clearInterval(polling); polling = null; }
     for (const j of active) {
       const [d] = await chrome.downloads.search({ id: j.downloadId });
       if (!d) continue;
-      if (d.state === "complete") await updateJob(j.id, { status: "done", percent: 100, file: d.filename });
-      else if (d.state === "interrupted") await updateJob(j.id, { status: d.error === "USER_CANCELED" ? "cancelled" : "error", error: d.error });
-      else if (d.totalBytes > 0) {
-        const pct = (d.bytesReceived / d.totalBytes) * 100;
-        await updateJob(j.id, { percent: pct, speed: "", eta: d.estimatedEndTime ? Math.max(0, Math.round((new Date(d.estimatedEndTime) - Date.now()) / 1000)) + "s" : "?" });
+      if (d.state === "complete") {
+        await updateJob(j.id, { status: "done", percent: 100, file: d.filename, fileName: d.filename.split(/[\\/]/).pop(),
+          totalBytes: d.totalBytes, doneBytes: d.totalBytes, speed: "", eta: "" });
+      } else if (d.state === "interrupted") {
+        await updateJob(j.id, { status: d.error === "USER_CANCELED" ? "cancelled" : "error", error: d.error, speed: "", eta: "" });
+      } else if (d.paused) {
+        if (j.status !== "paused") await updateJob(j.id, { status: "paused", speed: "", eta: "" });
+      } else {
+        const prev = j.doneBytes || 0;
+        const bps = Math.max(0, (d.bytesReceived - prev) / 0.7);
+        const pct = d.totalBytes > 0 ? (d.bytesReceived / d.totalBytes) * 100 : 0;
+        const etaS = d.estimatedEndTime ? Math.max(0, Math.round((new Date(d.estimatedEndTime) - Date.now()) / 1000)) : null;
+        await updateJob(j.id, { status: "downloading", percent: pct, doneBytes: d.bytesReceived, totalBytes: d.totalBytes,
+          speed: humanSpeed(bps), eta: etaS == null ? "?" : humanEta(etaS) });
       }
     }
   }, 700);
 }
-
 // Finishes are also caught here, in case the service worker slept during a long download.
 chrome.downloads.onChanged.addListener(async (delta) => {
   if (!delta.state) return;
   const jobs = await getJobs();
   const j = Object.values(jobs).find((x) => x.downloadId === delta.id);
   if (!j) return;
+  const [d] = await chrome.downloads.search({ id: delta.id });
   if (delta.state.current === "complete") {
-    const [d] = await chrome.downloads.search({ id: delta.id });
-    await updateJob(j.id, { status: "done", percent: 100, file: d?.filename });
+    await updateJob(j.id, { status: "done", percent: 100, file: d?.filename, fileName: d?.filename?.split(/[\\/]/).pop() });
   } else if (delta.state.current === "interrupted") {
-    const [d] = await chrome.downloads.search({ id: delta.id });
     await updateJob(j.id, { status: d?.error === "USER_CANCELED" ? "cancelled" : "error", error: d?.error || "Download failed" });
   }
 });
+
+function humanSpeed(bps) {
+  if (!bps) return "";
+  for (const u of ["B/s", "KB/s", "MB/s", "GB/s"]) { if (bps < 1024) return `${bps.toFixed(1)} ${u}`; bps /= 1024; }
+  return `${bps.toFixed(1)} TB/s`;
+}
+function humanEta(s) {
+  s = Math.round(s);
+  return s < 3600 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+    : `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// ---------- add any link: video page or file? ----------
+
+async function addLink(url, title) {
+  let host = "";
+  try { host = new URL(url).hostname; } catch { return { ok: false, error: "That isn't a web link." }; }
+  if (VIDEO_SITES.test(host)) return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a" }) };
+  if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title }) };
+  // Unknown: ask the helper what the server says it is.
+  const p = await native({ action: "probe", url });
+  if (p.ok && p.isFile) return { ok: true, id: await startFile({ url, name: p.name, title }) };
+  return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title }) };
+}
+
+// ---------- pause / resume / cancel ----------
+
+async function pause(id) {
+  const j = (await getJobs())[id];
+  if (!j) return;
+  if (j.kind === "file" && j.downloadId) { await chrome.downloads.pause(j.downloadId); await updateJob(id, { status: "paused", speed: "", eta: "" }); }
+  else if (j.kind === "video" && ports.has(id)) { await updateJob(id, { status: "paused", speed: "", eta: "" }); ports.get(id).postMessage({ action: "pause" }); }
+}
+async function resume(id) {
+  const j = (await getJobs())[id];
+  if (!j) return;
+  if (j.kind === "file" && j.downloadId) {
+    const [d] = await chrome.downloads.search({ id: j.downloadId });
+    if (d?.canResume) { await chrome.downloads.resume(j.downloadId); await updateJob(id, { status: "downloading" }); pollFiles(); }
+    else { await updateJob(id, { status: "cancelled" }); await startFile({ url: j.url, name: j.fileName, title: j.title }); }
+  } else if (j.kind === "video") {
+    await startVideo({ ...j, id }); // yt-dlp continues the .part file
+  }
+}
+async function cancel(id) {
+  const j = (await getJobs())[id];
+  if (!j) return;
+  if (j.downloadId) { try { await chrome.downloads.cancel(j.downloadId); } catch {} }
+  if (ports.has(id)) { ports.get(id).disconnect(); ports.delete(id); }
+  await updateJob(id, { status: "cancelled", speed: "", eta: "" });
+}
+async function retry(id) {
+  const j = (await getJobs())[id];
+  if (!j) return;
+  if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title });
+  if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec });
+  return startVideo({ ...j, id: undefined });
+}
+
+// ---------- terms gate + messages ----------
+
+async function agreed() {
+  const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
+  return acceptedTermsVersion >= 1;
+}
+const GATED = new Set(["info", "download", "directDownload", "file", "addLink", "convert"]);
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  (async () => {
+    if (GATED.has(msg.type) && !(await agreed())) {
+      return { ok: false, error: "Please accept the legal notice in the VidGrab popup first." };
+    }
+    switch (msg.type) {
+      case "info": {
+        const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
+        return native({ action: "info", url: msg.url, cookies });
+      }
+      case "download": return { ok: true, id: await startVideo(msg) };
+      case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title }) };
+      case "file": return { ok: true, id: await startFile(msg) };
+      case "addLink": return addLink(msg.url, msg.title);
+      case "convert": return { ok: true, id: await startConvert(msg) };
+      case "pickFile": return native({ action: "pickFile" });
+      case "pause": await pause(msg.id); return { ok: true };
+      case "resume": await resume(msg.id); return { ok: true };
+      case "cancel": await cancel(msg.id); return { ok: true };
+      case "retry": await retry(msg.id); return { ok: true };
+      case "remove": {
+        const jobs = await getJobs(); delete jobs[msg.id];
+        await chrome.storage.local.set({ jobs }); return { ok: true };
+      }
+      case "clear": {
+        const jobs = await getJobs();
+        for (const [k, j] of Object.entries(jobs)) if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];
+        await chrome.storage.local.set({ jobs }); return { ok: true };
+      }
+      case "reveal": {
+        const j = msg.id ? (await getJobs())[msg.id] : null;
+        if (j?.downloadId) { chrome.downloads.show(j.downloadId); return { ok: true }; }
+        return native({ action: "reveal", file: msg.file || j?.file });
+      }
+      case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
+      case "openManager": openManager(msg.tab); return { ok: true };
+    }
+  })().then(sendResponse, (e) => sendResponse({ ok: false, error: String(e) }));
+  return true;
+});
+
+function openManager(tab) {
+  chrome.tabs.create({ url: chrome.runtime.getURL("manager.html" + (tab ? "#" + tab : "")) });
+}
+
+// ---------- right-click menu ----------
+
+chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: "vg-link", title: "Download link with VidGrab", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "vg-media", title: "Download with VidGrab", contexts: ["video", "audio", "image"] });
+    chrome.contextMenus.create({ id: "vg-page", title: "Download this page's video with VidGrab", contexts: ["page"] });
+    chrome.contextMenus.create({ id: "vg-manager", title: "Open VidGrab download manager", contexts: ["action"] });
+  });
+  // Move pre-2.0 session jobs into the persistent store.
+  const old = (await chrome.storage.session.get("jobs")).jobs;
+  if (old) { const jobs = await getJobs(); await chrome.storage.local.set({ jobs: { ...old, ...jobs } }); }
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === "vg-manager") return openManager();
+  if (!(await agreed())) { chrome.action.openPopup?.(); return; }
+  let target = null;
+  if (info.menuItemId === "vg-link") target = info.linkUrl;
+  if (info.menuItemId === "vg-media") target = info.srcUrl?.startsWith("blob:") ? info.pageUrl : info.srcUrl;
+  if (info.menuItemId === "vg-page") target = info.pageUrl;
+  if (!target) return;
+  // Images and plain media files go straight to Chrome's downloader.
+  if (info.mediaType === "image" || (info.srcUrl && FILE_EXT.test(new URL(info.srcUrl).pathname))) {
+    await startFile({ url: target, title: tab?.title });
+  } else {
+    await addLink(target, info.menuItemId === "vg-page" ? tab?.title : undefined);
+  }
+  chrome.action.setBadgeText({ text: "↓" });
+  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2500);
+});
+
+// Resume polling file downloads after the service worker restarts.
+pollFiles();

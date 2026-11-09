@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VidGrab Manager</title>
+  <link rel="icon" href="icons/icon32.png" />
+  <link rel="stylesheet" href="manager.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="icons/icon48.png" alt="" /><div><strong>VidGrab</strong><span>Download manager &amp; converter</span></div></div>
+    <nav>
+      <button class="tab active" data-tab="downloads">Downloads <span id="activeBadge" class="badge" hidden></span></button>
+      <button class="tab" data-tab="convert">Convert</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ================= Downloads ================= -->
+    <section id="downloads" class="panel">
+      <form id="addForm" class="add">
+        <input id="addUrl" type="url" placeholder="Paste any link: a video page, or a file (PDF, ZIP, MP3, image…)" required />
+        <button class="primary" type="submit">Download</button>
+      </form>
+      <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
+        Tip: right-click any link or video → <b>Download with VidGrab</b>.</p>
+      <div id="addMsg" class="msg" hidden></div>
+
+      <div class="toolbar">
+        <div class="chips" id="filters">
+          <button class="chip active" data-f="all">All</button>
+          <button class="chip" data-f="Videos">Videos</button>
+          <button class="chip" data-f="Music">Music</button>
+          <button class="chip" data-f="files">Files</button>
+          <button class="chip" data-f="Converted">Converted</button>
+          <button class="chip" data-f="failed">Failed</button>
+        </div>
+        <div class="actions">
+          <button id="pauseAll" class="link">Pause all</button>
+          <button id="resumeAll" class="link">Resume all</button>
+          <button id="clearDone" class="link">Clear finished</button>
+        </div>
+      </div>
+      <ul id="list" class="list"></ul>
+      <div id="empty" class="empty" hidden>
+        <img src="icons/icon128.png" alt="" />
+        <p>Nothing here yet. Paste a link above, or right-click a link or video on any page.</p>
+      </div>
+    </section>
+
+    <!-- ================= Convert ================= -->
+    <section id="convert" class="panel" hidden>
+      <div class="card">
+        <h3>1. Choose a file</h3>
+        <div id="picked" class="picked muted">No file chosen</div>
+        <div class="row">
+          <button id="pickBtn" class="secondary">Choose from computer…</button>
+          <select id="fromDownloads"><option value="">…or pick one of your downloads</option></select>
+        </div>
+      </div>
+
+      <div id="convertOptions" hidden>
+        <div class="card">
+          <h3>2. Convert to</h3>
+          <div class="label">Video</div>
+          <div class="chips" data-group="format">
+            <button class="chip active" data-v="mp4">MP4</button><button class="chip" data-v="webm">WebM</button>
+            <button class="chip" data-v="mkv">MKV</button><button class="chip" data-v="mov">MOV</button><button class="chip" data-v="gif">GIF</button>
+          </div>
+          <div class="label">Audio</div>
+          <div class="chips" data-group="format">
+            <button class="chip" data-v="mp3">MP3</button><button class="chip" data-v="m4a">M4A</button>
+            <button class="chip" data-v="wav">WAV</button><button class="chip" data-v="opus">Opus</button>
+          </div>
+        </div>
+
+        <div class="card" id="sizeCard">
+          <h3>3. Size</h3>
+          <div class="label">Resolution</div>
+          <div class="chips" data-group="height">
+            <button class="chip active" data-v="">Original</button><button class="chip" data-v="1080">1080p</button>
+            <button class="chip" data-v="720">720p</button><button class="chip" data-v="480">480p</button><button class="chip" data-v="360">360p</button>
+          </div>
+          <div id="targetBox">
+            <div class="label">File size</div>
+            <div class="chips" data-group="targetMb">
+              <button class="chip active" data-v="">Normal</button><button class="chip" data-v="10">Under 10 MB</button>
+              <button class="chip" data-v="25">Under 25 MB</button><button class="chip" data-v="50">Under 50 MB</button><button class="chip" data-v="100">Under 100 MB</button>
+            </div>
+            <label class="check"><input type="checkbox" id="removeAudio" /> Remove sound</label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>4. Trim <span class="muted small">(optional)</span></h3>
+          <div class="row trim">
+            <label>Start <input id="trimStart" placeholder="0:00" /></label>
+            <label>End <input id="trimEnd" placeholder="end" /></label>
+            <span id="duration" class="muted small"></span>
+          </div>
+        </div>
+
+        <button id="convertBtn" class="primary big">Convert</button>
+        <p class="hint">Saved in Downloads/VidGrab/Converted. Progress shows in the Downloads tab.</p>
+      </div>
+      <div id="convertMsg" class="msg" hidden></div>
+    </section>
+  </main>
+
+  <footer><img src="icons/author.png" alt="" />Made by <b>Shahidul H Tareq</b> · <a href="legal.html" target="_blank">Legal</a></footer>
+  <script src="manager.js"></script>
+</body>
+</html>

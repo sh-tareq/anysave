@@ -4,6 +4,7 @@ package main
 
 import (
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -20,4 +21,18 @@ func killTree(cmd *exec.Cmd) {
 
 func revealInFileManager(path string) {
 	exec.Command("open", "-R", path).Run()
+}
+
+// pickFile shows the macOS "choose a file" dialog. Returns "" if the user cancels.
+func pickFile() (string, error) {
+	script := `try
+	POSIX path of (choose file with prompt "Choose a video or audio file to convert" of type {"public.movie", "public.audio"})
+on error number -128
+	return ""
+end try`
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

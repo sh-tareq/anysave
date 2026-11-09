@@ -375,7 +375,12 @@ func actionDownload(msg map[string]any) {
 		fail(err.Error())
 		return
 	}
-	if err := os.MkdirAll(downloadDir, 0o755); err != nil {
+	// Sorted into Downloads/VidGrab/Videos or /Music, like the Android app.
+	outDir := downloadDir
+	if folder := str(msg, "folder"); folder == "Videos" || folder == "Music" {
+		outDir = filepath.Join(downloadDir, folder)
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		fail(err.Error())
 		return
 	}
@@ -388,7 +393,8 @@ func actionDownload(msg map[string]any) {
 	}
 	args = append(args,
 		"-f", fmtSel, "-S", sortSel,
-		"-o", filepath.Join(downloadDir, "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s"),
+		"-o", filepath.Join(outDir, "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s"),
+		"--continue", // resume .part files after a pause
 		"--newline", "--progress", "--no-simulate",
 		"--progress-template", "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|"+
 			"%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
@@ -414,10 +420,17 @@ func actionDownload(msg map[string]any) {
 	}
 
 	// Chrome closes our stdin when the user cancels: stop yt-dlp and its children.
-	var cancelled atomic.Bool
+	// Chrome closes our stdin when the user cancels: stop yt-dlp and its children.
+	// A {"action":"pause"} message first means: stop, but keep the partial files.
+	var cancelled, paused atomic.Bool
 	go func() {
 		for {
-			if _, err := readMessage(); err != nil {
+			m, err := readMessage()
+			if err != nil {
+				break
+			}
+			if str(m, "action") == "pause" {
+				paused.Store(true)
 				break
 			}
 		}
@@ -454,8 +467,10 @@ func actionDownload(msg map[string]any) {
 	}
 
 	switch {
+	case paused.Load() && err != nil:
+		send(map[string]any{"type": "paused"})
 	case cancelled.Load() && err != nil:
-		removePartials(started)
+		removePartials(outDir, started)
 		fail("Cancelled")
 	case err == nil:
 		var file any
@@ -471,8 +486,8 @@ func actionDownload(msg map[string]any) {
 // removePartials deletes the half-finished pieces a cancelled download leaves
 // behind (.part / .ytdl files and per-format video/audio parts like "x.f399.mp4"),
 // only for files written since this download started.
-func removePartials(since time.Time) {
-	entries, err := os.ReadDir(downloadDir)
+func removePartials(dir string, since time.Time) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -484,7 +499,7 @@ func removePartials(since time.Time) {
 		}
 		if strings.HasSuffix(name, ".part") || strings.HasSuffix(name, ".ytdl") ||
 			strings.Contains(name, ".part-Frag") || partFormat.MatchString(name) {
-			os.Remove(filepath.Join(downloadDir, name))
+			os.Remove(filepath.Join(dir, name))
 		}
 	}
 }
@@ -541,6 +556,12 @@ func main() {
 		actionDownload(msg)
 	case "reveal":
 		send(actionReveal(msg))
+	case "probe":
+		send(actionProbe(msg))
+	case "pickFile":
+		send(actionPickFile(msg))
+	case "convert":
+		actionConvert(msg)
 	default:
 		send(map[string]any{"ok": false, "error": "Unknown action: " + action})
 	}

@@ -5,6 +5,7 @@ package main
 import (
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -28,4 +29,21 @@ func killTree(cmd *exec.Cmd) {
 
 func revealInFileManager(path string) {
 	exec.Command("explorer", "/select,", path).Run()
+}
+
+// pickFile shows the Windows "Open" dialog. Returns "" if the user cancels.
+func pickFile() (string, error) {
+	script := `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = "Choose a video or audio file to convert"
+$d.Filter = "Video and audio|*.mp4;*.mkv;*.webm;*.mov;*.avi;*.m4v;*.flv;*.wmv;*.ts;*.mp3;*.m4a;*.wav;*.flac;*.ogg;*.opus;*.aac|All files|*.*"
+$f = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+if ($d.ShowDialog($f) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; Write-Output $d.FileName }`
+	c := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	out, err := c.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

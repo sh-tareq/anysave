@@ -16,6 +16,14 @@ function siteOf(url) {
   } catch { return null; }
 }
 
+function hostLabel(url) {
+  try {
+    const parts = new URL(url).hostname.replace(/^(www|m)\./, "").split(".");
+    const n = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  } catch { return "Web"; }
+}
+
 function fmtDuration(s) {
   if (!s) return "";
   s = Math.round(s);
@@ -175,11 +183,12 @@ async function loadInfo() {
   }
 
   if (!site) {
-    // Any other site: offer plain video files found on the page, if there are any.
-    const videos = tab ? await scanPage(tab) : [];
-    if (videos.length) { $("state").hidden = true; renderPageVideos(videos, null, "Video files found on this page."); return; }
-    setState("Open a video on YouTube, Facebook, Instagram or TikTok, or an ad in Meta Ad Library or TikTok Creative Center, then click VidGrab.");
-    return;
+    if (!/^https?:/.test(tab?.url || "")) {
+      setState("Open a page with a video, then click VidGrab. Or open the download manager to add any link.");
+      return;
+    }
+    // Any other site: yt-dlp knows 1,000+ video sites; fall back to video files the page plays.
+    $("site").textContent = hostLabel(tab.url);
   }
   setState("Looking up video…");
   const res = await chrome.runtime.sendMessage({ type: "info", url: tab.url, useCookies: $("cookies").checked });
@@ -194,8 +203,12 @@ async function loadInfo() {
   }
   if (!res?.ok) {
     if (res?.hostMissing) {
-      setState('Helper app not found. Run <code>./install.sh</code> in the VidGrab folder, then restart Chrome.<br><span class="small">' + escapeHtml(res.error) + "</span>");
+      setState('Helper app not found. Run the VidGrab installer again, then restart Chrome.<br><span class="small">' + escapeHtml(res.error) + "</span>");
     } else {
+      if (!site) {
+        setState("No video found on this page. Play the video and open VidGrab again, or right-click a link → Download link with VidGrab.");
+        return;
+      }
       setState('<span class="err">' + escapeHtml(res?.error || "Unknown error") + "</span>" +
         (site === "Instagram" || site === "Facebook"
           ? '<br><span class="small">' + ($("cookies").checked
@@ -250,9 +263,11 @@ $("cookies").addEventListener("change", async () => {
 });
 
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear" }));
+$("openManager").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager" }); window.close(); });
+$("openConvert").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager", tab: "convert" }); window.close(); });
 
 function renderJobs(jobs) {
-  const list = Object.values(jobs || {}).sort((a, b) => b.id - a.id);
+  const list = Object.values(jobs || {}).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id)).slice(0, 5);
   const ul = $("jobs");
   ul.innerHTML = list.length ? "" : '<li class="muted small">Nothing yet.</li>';
   for (const j of list) {
@@ -269,8 +284,7 @@ function renderJobs(jobs) {
     const act = li.querySelector(".act");
     if (j.status === "done" && (j.file || j.downloadId)) {
       const b = Object.assign(document.createElement("button"), { className: "link small", textContent: "Show file" });
-      b.onclick = () => chrome.runtime.sendMessage(
-        j.downloadId ? { type: "revealDirect", downloadId: j.downloadId } : { type: "reveal", file: j.file });
+      b.onclick = () => chrome.runtime.sendMessage({ type: "reveal", id: j.id });
       act.appendChild(b);
     } else if (!["done", "error", "cancelled"].includes(j.status)) {
       const b = Object.assign(document.createElement("button"), { className: "link small", textContent: "Cancel" });
@@ -282,7 +296,7 @@ function renderJobs(jobs) {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "session" && changes.jobs) renderJobs(changes.jobs.newValue);
+  if (area === "local" && changes.jobs) renderJobs(changes.jobs.newValue);
 });
 
 const TERMS_VERSION = 1;
@@ -312,6 +326,6 @@ async function ensureAgreed() {
 (async () => {
   await ensureAgreed();
   $("cookies").checked = !!(await chrome.storage.local.get("useCookies")).useCookies;
-  renderJobs((await chrome.storage.session.get("jobs")).jobs);
+  renderJobs((await chrome.storage.local.get("jobs")).jobs);
   loadInfo();
 })();

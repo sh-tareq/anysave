@@ -108,7 +108,7 @@ object Converter {
         // Target size: share the budget between video and 128 kb/s audio.
         val videoBitrate = spec.targetMb?.let { mb ->
             val secs = outSeconds ?: return@let null
-            ((mb * 8.0 * 1024 * 1024 / secs) - 128_000).toLong().coerceAtLeast(150_000)
+            ((mb * 0.96 * 8.0 * 1024 * 1024 / secs) - 128_000).toLong().coerceAtLeast(150_000) // 4% margin for container overhead
         }
         fun quality(crf: String) = videoBitrate?.let { listOf("-b:v", "$it", "-maxrate", "$it", "-bufsize", "${it * 2}") }
             ?: if (h264.contains("libx264")) listOf("-crf", crf) else emptyList()
