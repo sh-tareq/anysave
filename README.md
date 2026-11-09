@@ -2,7 +2,7 @@
 
 Made by **Shahidul H Tareq**.
 
-Download videos from **YouTube, Facebook, Instagram and TikTok** on Mac, Windows and Android.
+Download videos from **YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites**, save ad videos from **Meta Ad Library** and **TikTok Creative Center**, download **any file** with pause/resume, and **convert** videos and audio, on Android, Mac and Windows.
 
 | Platform | What people get | How it works |
 |---|---|---|
@@ -11,6 +11,18 @@ Download videos from **YouTube, Facebook, Instagram and TikTok** on Mac, Windows
 | Android | VidGrab app (APK) | Share a link to VidGrab → yt-dlp + ffmpeg bundled in the app |
 
 Chrome on Android has no extensions, so Android gets its own app.
+
+## Features (2.0)
+
+| | Android app | Chrome / Edge / Brave extension |
+|---|---|---|
+| Videos from 1,000+ sites (yt-dlp) | ✓ paste, share, copy, Quick Settings tile | ✓ popup on any page, right-click menu |
+| Built-in browser that finds video files on any page | ✓ | ✓ page scan in the popup |
+| Meta Ad Library / TikTok Creative Center | ✓ | ✓ |
+| Download manager: any file, pause/resume, queue, folders | ✓ Downloads tab | ✓ manager page |
+| Converter: MP4/WebM/MKV/MOV/GIF, MP3/M4A/WAV/Opus, resize, target size, trim | ✓ Convert tab | ✓ manager page |
+
+Sites behind anti-bot protection (for example Cloudflare challenges) and DRM-protected services are not supported, by design.
 
 ## Build everything to share
 
