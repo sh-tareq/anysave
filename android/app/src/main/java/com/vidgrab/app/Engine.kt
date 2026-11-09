@@ -188,7 +188,21 @@ object Engine {
         val i = lines.indexOfFirst { it.startsWith("ERROR") }
         val msg = if (i >= 0) lines.subList(i, minOf(i + 3, lines.size)).joinToString(" ")
         else lines.lastOrNull() ?: "Something went wrong"
-        return msg.replaceFirst("ERROR:", "").trim().ifBlank { "Something went wrong" }
+        return friendly(msg.replaceFirst("ERROR:", "").trim().ifBlank { "Something went wrong" })
+    }
+
+    /** Common yt-dlp failures in plain language. */
+    private fun friendly(msg: String): String {
+        val l = msg.lowercase()
+        return when {
+            "cloudflare" in l || "anti-bot" in l || "captcha" in l ->
+                "This website blocks automated downloads, so VidGrab can't download from it. Use the site's own download button if it has one."
+            "unsupported url" in l -> "No downloadable video found on this page. Try opening it in the built-in browser and playing the video."
+            "drm" in l -> "This video is DRM-protected, so it can't be downloaded."
+            "http error 404" in l -> "The video or file wasn't found (404). The link may be broken or removed."
+            "http error 403" in l -> "The website refused the download (403). It may need you to be logged in, or it blocks downloads."
+            else -> msg
+        }
     }
 
     fun siteOf(url: String): String? {

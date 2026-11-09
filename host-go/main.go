@@ -181,6 +181,25 @@ func lastError(stderr string) string {
 	if msg == "" {
 		msg = "yt-dlp failed (see vidgrab.log)"
 	}
+	return friendlyError(msg)
+}
+
+// friendlyError turns common yt-dlp failures into plain language.
+func friendlyError(msg string) string {
+	l := strings.ToLower(msg)
+	switch {
+	case strings.Contains(l, "cloudflare") || strings.Contains(l, "anti-bot") || strings.Contains(l, "captcha"):
+		return "This website blocks automated downloads, so VidGrab can't download from it. " +
+			"Use the site's own download button if it has one."
+	case strings.Contains(l, "unsupported url"):
+		return "No downloadable video found on this page. Open it, play the video, then use the VidGrab popup."
+	case strings.Contains(l, "drm"):
+		return "This video is DRM-protected, so it can't be downloaded."
+	case strings.Contains(l, "http error 404"):
+		return "The video or file wasn't found (404). The link may be broken or removed."
+	case strings.Contains(l, "http error 403"):
+		return "The website refused the download (403). It may need you to be logged in, or it blocks downloads."
+	}
 	return msg
 }
 
