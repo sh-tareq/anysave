@@ -1,6 +1,6 @@
 # AnySave
 
-Made by **Shahidul H Tareq**. Formerly called VidGrab.
+Made by **Shahidul H Tareq**.
 
 Download videos from **YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites**, save ad videos from **Meta Ad Library** and **TikTok Creative Center**, download **any file** with pause/resume, and **convert** videos and audio, on Android, Mac and Windows.
 
@@ -93,8 +93,8 @@ Re-running the installer updates yt-dlp, which fixes most "stopped working" prob
   On Android, Settings → Accounts logs in to Instagram, Facebook, TikTok, Vimeo or YouTube in a
   WebView and keeps those cookies in the app's private storage.
 - **Internal IDs still say "vidgrab".** The Android package (`com.vidgrab.app`), the extension key/ID,
-  the native host name (`com.vidgrab.host`) and the helper binary (`vidgrab-host`) keep the old name on
-  purpose, so AnySave installs as an update over VidGrab. Don't rename them.
+  the native host name (`com.vidgrab.host`) and the helper binary (`vidgrab-host`) keep the project's
+  original working name on purpose. Changing them would break updates for installed copies. Don't rename them.
 - **Android signing key.** `android/vidgrab-release.jks` + `android/keystore.properties`.
   Back these up. People can only install updates signed with the same key.
 - **Android yt-dlp updates.** The app updates yt-dlp at most every 2 days, before it

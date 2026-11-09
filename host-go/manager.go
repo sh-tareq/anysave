@@ -24,7 +24,7 @@ import (
 
 // ---------- probe ----------
 
-const fileUA = "AnySave/2.1 (+https://github.com/sh-tareq/anysave)"
+const fileUA = "AnySave/1.0 (+https://github.com/sh-tareq/anysave)"
 
 func actionProbe(msg map[string]any) map[string]any {
 	raw := str(msg, "url")

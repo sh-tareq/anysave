@@ -35,9 +35,6 @@ AnySave for Windows - download videos, files and convert media
    - For Instagram, and Facebook posts that need a login, tick
      "Use my Chrome login".
 
-Upgrading from VidGrab? Just run the installer. Then click the reload
-button on the extension in chrome://extensions.
-
 Something stopped working?  Run "Install AnySave.bat" again. That gets the
 newest version of the downloader, which fixes most problems.
 

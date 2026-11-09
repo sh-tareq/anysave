@@ -118,7 +118,7 @@ Write-Host 'To update AnySave later, run this installer again.'
 if (Test-Path $OldApp) { Remove-Item $OldApp -Recurse -Force -ErrorAction SilentlyContinue }
 if ($Upgraded) {
   Write-Host ''
-  Write-Host 'Upgraded from VidGrab: just click the reload button on the extension in chrome://extensions.' -ForegroundColor Green
+  Write-Host 'Updated: just click the reload button on the extension in chrome://extensions.' -ForegroundColor Green
   Write-Host "(Optional: remove it and 'Load unpacked' from $ExtDest, then delete $env:USERPROFILE\VidGrab.)"
 }
 Start-Process explorer.exe (Split-Path $ExtDest)

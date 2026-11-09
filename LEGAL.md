@@ -1,6 +1,6 @@
 # AnySave: Legal notice, disclaimer and privacy
 
-*Last updated: 9 November 2026 · AnySave (formerly VidGrab) is made by Shahidul H Tareq*
+*Last updated: 9 November 2026 · AnySave is made by Shahidul H Tareq*
 
 ## 1. What AnySave is for
 

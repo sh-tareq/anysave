@@ -101,7 +101,7 @@ echo "To update AnySave later, run this installer again."
 rm -rf "$OLD_APP"
 if [ -n "$UPGRADED" ]; then
   echo
-  echo "Upgraded from VidGrab: just click the reload button on the extension in chrome://extensions."
+  echo "Updated: just click the reload button on the extension in chrome://extensions."
   echo "(Optional: remove it and 'Load unpacked' from $EXT_DEST, then delete ~/VidGrab.)"
 fi
 open -R "$EXT_DEST" || true

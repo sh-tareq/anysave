@@ -73,7 +73,7 @@ fun LegalDialog(onClose: () -> Unit) {
                     Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    Text("Last updated 9 November 2026 · formerly VidGrab", style = MaterialTheme.typography.bodySmall,
+                    Text("Last updated 9 November 2026", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LegalSections.forEach { (title, body) ->
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
