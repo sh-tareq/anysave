@@ -107,40 +107,37 @@ fun DownloadsScreen(jobs: List<Job>) {
         Filter.CONVERTED to done.count { it.kind == JobKind.CONVERT }, Filter.FAILED to failed.size,
     )
 
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // Compact header: title, total, search and more actions
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Downloads", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                        Text(
-                            "${done.size} saved · ${Engine.humanSize(done.sumOf { it.sizeBytes }) ?: "0 MB"} · Downloads/AnySave",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                        Icon(if (searching) Icons.Outlined.Close else Icons.Outlined.Search, "Search")
-                    }
-                    Box {
-                        IconButton(onClick = { overflow = true }) { Icon(Icons.Outlined.MoreVert, "More") }
-                        DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                            if (active.any { it.canPause }) DropdownMenuItem(text = { Text("Pause all") },
-                                onClick = { overflow = false; active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } })
-                            if (paused.isNotEmpty()) DropdownMenuItem(text = { Text("Resume all") },
-                                onClick = { overflow = false; paused.forEach { DownloadService.resume(ctx, it.id) } })
-                            if (failed.isNotEmpty()) DropdownMenuItem(text = { Text("Retry all failed") },
-                                onClick = { overflow = false; failed.forEach { DownloadService.retry(ctx, it.id) } })
-                            DropdownMenuItem(text = { Text("Clear finished from list") }, enabled = jobs.any { it.finished },
-                                onClick = { overflow = false; confirmClear = true })
-                        }
-                    }
+    ScreenScaffold(
+        title = "Downloads",
+        subtitle = "${done.size} saved · ${Engine.humanSize(done.sumOf { it.sizeBytes }) ?: "0 MB"} · Downloads/AnySave",
+        actions = {
+            IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+                Icon(if (searching) Icons.Outlined.Close else Icons.Outlined.Search, "Search")
+            }
+            Box {
+                IconButton(onClick = { overflow = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                    if (active.any { it.canPause }) DropdownMenuItem(text = { Text("Pause all") },
+                        onClick = { overflow = false; active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } })
+                    if (paused.isNotEmpty()) DropdownMenuItem(text = { Text("Resume all") },
+                        onClick = { overflow = false; paused.forEach { DownloadService.resume(ctx, it.id) } })
+                    if (failed.isNotEmpty()) DropdownMenuItem(text = { Text("Retry all failed") },
+                        onClick = { overflow = false; failed.forEach { DownloadService.retry(ctx, it.id) } })
+                    DropdownMenuItem(text = { Text("Clear finished from list") }, enabled = jobs.any { it.finished },
+                        onClick = { overflow = false; confirmClear = true })
                 }
             }
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(onClick = { addLink = true },
+                icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add") })
+        },
+    ) { pad ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             if (searching) item {
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
@@ -180,11 +177,6 @@ fun DownloadsScreen(jobs: List<Job>) {
                 else EmptyState()
             }
         }
-        ExtendedFloatingActionButton(
-            onClick = { addLink = true },
-            icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add") },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-        )
     }
 
     if (addLink) AddDownloadDialog { addLink = false }

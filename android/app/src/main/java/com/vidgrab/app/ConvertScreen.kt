@@ -77,16 +77,12 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
     val dur = picked?.durationSec
     val converting = jobs.filter { it.kind == JobKind.CONVERT && it.active }
 
+    ScreenScaffold(title = "Convert", subtitle = "Change the format, size or length of any video or audio") { pad ->
     LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            Text("Convert", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("Change the format, size or length of any video or audio file",
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
 
         // 1. Choose a file
         item {
@@ -222,6 +218,7 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
         }
         item { MadeBy() }
     }
+    }
 
     // Pick from finished downloads (videos and music)
     if (fromDownloads) {
@@ -259,8 +256,8 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
 
 @Composable
 private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             content()
         }

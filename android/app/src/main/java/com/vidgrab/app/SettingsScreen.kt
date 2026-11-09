@@ -51,11 +51,12 @@ fun SettingsScreen(vm: MainViewModel) {
     }
     val appVersion = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
 
+    ScreenScaffold(title = "Settings") { pad ->
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
+        Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
 
         Section("Downloads")
         SettingRow(Icons.Outlined.HighQuality, "Default quality", quality.label,
@@ -111,12 +112,14 @@ fun SettingsScreen(vm: MainViewModel) {
                     .clickable { login.launch(LoginActivity.intent(ctx, site)) }.padding(horizontal = 12.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SiteIcon(site.label, 26.dp)
+                SiteIcon(site.label, 24.dp)
                 Spacer(Modifier.width(14.dp))
                 Text(site.label, Modifier.weight(1f))
                 if (on) AssistChip(onClick = { login.launch(LoginActivity.intent(ctx, site)) }, label = { Text("Logged in") },
                     leadingIcon = { Icon(Icons.Outlined.AccountCircle, null, Modifier.size(18.dp)) })
-                else TextButton(onClick = { login.launch(LoginActivity.intent(ctx, site)) }) { Text("Log in") }
+                else TextButton(onClick = { login.launch(LoginActivity.intent(ctx, site)) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)) { Text("Log in") }
             }
         }
         if (loggedIn.isNotEmpty()) TextButton(onClick = { LoginActivity.logOutAll(ctx); loggedIn = emptyList() }) {
@@ -149,6 +152,7 @@ fun SettingsScreen(vm: MainViewModel) {
         CopyrightNotice(Modifier.padding(horizontal = 4.dp))
         SettingRow(Icons.Outlined.Gavel, "Legal & disclaimer",
             "Copyright, your responsibility, privacy, open-source licences", null) { showLegal = true }
+    }
     }
 
     if (showLegal) LegalDialog { showLegal = false }

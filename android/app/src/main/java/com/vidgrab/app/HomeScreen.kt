@@ -57,22 +57,16 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
     val engine by Engine.state.collectAsState()
     val active = jobs.filter { it.active }
 
+    ScreenScaffold(
+        title = "AnySave",
+        subtitle = "Download videos & files. Convert anything.",
+        leading = { AnimatedLogo(40.dp) },
+    ) { pad ->
     LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedLogo(64.dp)
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text("AnySave", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                    Text("Download videos & files. Convert anything.", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
         item { LinkInput(vm) }
         item { SiteRowWrapped() }
         item { AdLibrariesCard() }
@@ -109,6 +103,7 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
 
         if (vm.info == null && !vm.loading && active.isEmpty()) item { HowToCard() }
         item { MadeBy(Modifier.padding(top = 8.dp)) }
+    }
     }
 }
 
