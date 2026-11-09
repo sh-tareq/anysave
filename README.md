@@ -1,6 +1,6 @@
 # AnySave
 
-Made by **Shahidul H Tareq**.
+Made by **Shahidul H Tareq**. Formerly called VidGrab.
 
 Download videos from **YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites**, save ad videos from **Meta Ad Library** and **TikTok Creative Center**, download **any file** with pause/resume, and **convert** videos and audio, on Android, Mac and Windows.
 
@@ -12,7 +12,15 @@ Download videos from **YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ mo
 
 Chrome on Android has no extensions, so Android gets its own app.
 
-## Features (2.0)
+## Download
+
+Get the latest version from **[Releases](https://github.com/sh-tareq/anysave/releases/latest)**:
+
+- **AnySave.apk**: Android 8 and newer
+- **AnySave-Desktop-Mac-Windows.zip**: Chrome, Edge or Brave on Mac and Windows. Unzip it and follow
+  "How to install.txt" in the folder for your computer.
+
+## Features
 
 | | Android app | Chrome / Edge / Brave extension |
 |---|---|---|
@@ -21,6 +29,8 @@ Chrome on Android has no extensions, so Android gets its own app.
 | Meta Ad Library / TikTok Creative Center | ✓ | ✓ |
 | Download manager: any file, pause/resume, queue, folders | ✓ Downloads tab | ✓ manager page |
 | Converter: MP4/WebM/MKV/MOV/GIF, MP3/M4A/WAV/Opus, resize, target size, trim | ✓ Convert tab | ✓ manager page |
+| Catch downloads started by a site's own download button | | ✓ (switch in the manager) |
+| Download progress | notification | ring and percent on the toolbar icon |
 
 Sites behind anti-bot protection (for example Cloudflare challenges) and DRM-protected services are not supported, by design.
 
@@ -80,8 +90,11 @@ Re-running the installer updates yt-dlp, which fixes most "stopped working" prob
   "Use my Chrome login" is ticked, the extension reads cookies for that one site through
   `chrome.cookies` and passes them to the helper. The helper writes them to a private
   temp file and deletes it when yt-dlp finishes.
-  On Android, the app's menu has "Log in to Instagram / Facebook / TikTok / YouTube", which
-  uses a WebView and exports its cookies to the app's private storage.
+  On Android, Settings → Accounts logs in to Instagram, Facebook, TikTok, Vimeo or YouTube in a
+  WebView and keeps those cookies in the app's private storage.
+- **Internal IDs still say "vidgrab".** The Android package (`com.vidgrab.app`), the extension key/ID,
+  the native host name (`com.vidgrab.host`) and the helper binary (`vidgrab-host`) keep the old name on
+  purpose, so AnySave installs as an update over VidGrab. Don't rename them.
 - **Android signing key.** `android/vidgrab-release.jks` + `android/keystore.properties`.
   Back these up. People can only install updates signed with the same key.
 - **Android yt-dlp updates.** The app updates yt-dlp at most every 2 days, before it

@@ -61,7 +61,7 @@ fun SettingsScreen(vm: MainViewModel) {
         SettingRow(Icons.Outlined.HighQuality, "Default quality", quality.label,
             "Used for one-tap downloads (copied links, Share → Download, Quick Settings tile)") { pickQuality = true }
         SwitchRow(Icons.Outlined.ContentCopy, "Auto-download copied links",
-            "Open AnySave after copying a video link and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
+            "Open AnySave after copying a link from a video site and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
         SwitchRow(Icons.Outlined.Wifi, "Wi-Fi only", "Wait for Wi-Fi instead of using mobile data", wifiOnly) {
             Settings.setWifiOnly(it)
         }

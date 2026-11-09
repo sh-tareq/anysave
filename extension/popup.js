@@ -299,7 +299,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.jobs) renderJobs(changes.jobs.newValue);
 });
 
-const TERMS_VERSION = 1;
+const TERMS_VERSION = 2;
 
 function openLegal(e) {
   e.preventDefault();

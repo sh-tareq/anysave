@@ -6,6 +6,9 @@ import android.text.format.DateUtils
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import coil.request.videoFramePercent
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.outlined.Add
@@ -26,7 +29,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -51,100 +53,146 @@ private enum class Filter(val label: String) {
     ALL("All"), VIDEO("Videos"), AUDIO("Music"), FILES("Files"), CONVERTED("Converted"), FAILED("Failed")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** "Big Buck Bunny [BigBuckBunny_124] 720p.mp4" -> "Big Buck Bunny 720p" (IDs and extension hidden). */
+fun displayName(job: Job): String {
+    val raw = if (job.status == JobStatus.DONE && job.kind != JobKind.VIDEO) job.fileName ?: job.title
+    else if (job.status == JobStatus.DONE) job.fileName ?: job.title else job.title
+    val noExt = if (FileKinds.extOf(raw).length in 2..5) raw.substringBeforeLast('.') else raw
+    return noExt.replace(Regex("""\s*\[[^\]]{4,}\]"""), "").replace(Regex("\\s+"), " ").trim().ifBlank { raw }
+}
+
+private fun dayGroup(t: Long): String {
+    val now = java.util.Calendar.getInstance()
+    val c = java.util.Calendar.getInstance().apply { timeInMillis = t }
+    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
+        a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) && a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    if (sameDay(now, c)) return "Today"
+    now.add(java.util.Calendar.DAY_OF_YEAR, -1)
+    if (sameDay(now, c)) return "Yesterday"
+    if (System.currentTimeMillis() - t < 7L * 24 * 3600 * 1000) return "This week"
+    return "Earlier"
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DownloadsScreen(jobs: List<Job>) {
+    val ctx = LocalContext.current
     var filter by remember { mutableStateOf(Filter.ALL) }
     var confirmClear by remember { mutableStateOf(false) }
     var addLink by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var overflow by remember { mutableStateOf(false) }
+
     val active = jobs.filter { it.active }
     val paused = jobs.filter { it.status == JobStatus.PAUSED }
-    var query by remember { mutableStateOf("") }
-    val finished = jobs.filter { it.finished }.filter {
-        query.isBlank() || listOfNotNull(it.title, it.fileName, it.site).any { t -> t.contains(query.trim(), ignoreCase = true) }
-    }.filter {
-        val done = it.status == JobStatus.DONE
-        val cat = it.category
-        when (filter) {
-            Filter.ALL -> it.status != JobStatus.CANCELLED
-            Filter.VIDEO -> done && cat == FileKinds.Category.VIDEOS
-            Filter.AUDIO -> done && cat == FileKinds.Category.MUSIC
-            Filter.FILES -> done && cat !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED)
-            Filter.CONVERTED -> done && it.kind == JobKind.CONVERT
-            Filter.FAILED -> it.status == JobStatus.ERROR || it.status == JobStatus.CANCELLED
-        }
+    val done = jobs.filter { it.status == JobStatus.DONE }
+    val failed = jobs.filter { it.status == JobStatus.ERROR }
+    fun matches(j: Job) = query.isBlank() ||
+        listOfNotNull(j.title, j.fileName, j.site).any { it.contains(query.trim(), ignoreCase = true) }
+    fun inFilter(j: Job) = when (filter) {
+        Filter.ALL -> true
+        Filter.VIDEO -> j.category == FileKinds.Category.VIDEOS
+        Filter.AUDIO -> j.category == FileKinds.Category.MUSIC || (j.kind == JobKind.CONVERT && j.audioOnly)
+        Filter.FILES -> j.category !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED)
+        Filter.CONVERTED -> j.kind == JobKind.CONVERT
+        Filter.FAILED -> false
     }
+    val saved = if (filter == Filter.FAILED) emptyList() else done.filter { inFilter(it) && matches(it) }
+    val failedShown = if (filter == Filter.FAILED || filter == Filter.ALL) failed.filter(::matches) else emptyList()
+    val counts = mapOf(
+        Filter.ALL to done.size, Filter.VIDEO to done.count { it.category == FileKinds.Category.VIDEOS },
+        Filter.AUDIO to done.count { it.category == FileKinds.Category.MUSIC || (it.kind == JobKind.CONVERT && it.audioOnly) },
+        Filter.FILES to done.count { it.category !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED) },
+        Filter.CONVERTED to done.count { it.kind == JobKind.CONVERT }, Filter.FAILED to failed.size,
+    )
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Downloads", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f))
-                if (jobs.any { it.finished }) TextButton(onClick = { confirmClear = true }) {
-                    Text("Clear list", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Button(onClick = { addLink = true }, modifier = Modifier.padding(top = 10.dp)) {
-                Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                Text("Add download")
-            }
-            Text("Saved in Downloads/AnySave, sorted into folders", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        item {
-            if (jobs.count { it.finished } > 6) OutlinedTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                placeholder = { Text("Search downloads") },
-                leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Clear") } },
-                shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            )
-            @OptIn(ExperimentalLayoutApi::class)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Filter.entries.forEach { f ->
-                    FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
-                }
-            }
-        }
-        if (active.isNotEmpty()) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // Compact header: title, total, search and more actions
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel("In progress (${active.size})")
-                    Spacer(Modifier.weight(1f))
-                    val ctx = LocalContext.current
-                    TextButton(onClick = { active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } }) { Text("Pause all") }
+                    Column(Modifier.weight(1f)) {
+                        Text("Downloads", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${done.size} saved · ${Engine.humanSize(done.sumOf { it.sizeBytes }) ?: "0 MB"} · Downloads/AnySave",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+                        Icon(if (searching) Icons.Outlined.Close else Icons.Outlined.Search, "Search")
+                    }
+                    Box {
+                        IconButton(onClick = { overflow = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                        DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                            if (active.any { it.canPause }) DropdownMenuItem(text = { Text("Pause all") },
+                                onClick = { overflow = false; active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } })
+                            if (paused.isNotEmpty()) DropdownMenuItem(text = { Text("Resume all") },
+                                onClick = { overflow = false; paused.forEach { DownloadService.resume(ctx, it.id) } })
+                            if (failed.isNotEmpty()) DropdownMenuItem(text = { Text("Retry all failed") },
+                                onClick = { overflow = false; failed.forEach { DownloadService.retry(ctx, it.id) } })
+                            DropdownMenuItem(text = { Text("Clear finished from list") }, enabled = jobs.any { it.finished },
+                                onClick = { overflow = false; confirmClear = true })
+                        }
+                    }
                 }
             }
-            items(active, key = { it.id }) { ActiveJobCard(it) }
-        }
-        if (paused.isNotEmpty()) {
+            if (searching) item {
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    placeholder = { Text("Search by name or site") },
+                    leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                    shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+            // One swipeable row of filters with counts
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel("Paused (${paused.size})")
-                    Spacer(Modifier.weight(1f))
-                    val ctx = LocalContext.current
-                    TextButton(onClick = { paused.forEach { DownloadService.resume(ctx, it.id) } }) { Text("Resume all") }
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Filter.entries.forEach { f ->
+                        val n = counts[f] ?: 0
+                        if (f == Filter.FAILED && n == 0 && filter != f) return@forEach
+                        FilterChip(selected = filter == f, onClick = { filter = f },
+                            label = { Text(if (n > 0 && f != Filter.ALL) "${f.label} $n" else f.label) })
+                    }
                 }
             }
-            items(paused, key = { it.id }) { ActiveJobCard(it) }
+            if (active.isNotEmpty() || paused.isNotEmpty()) {
+                item { SectionLabel("In progress") }
+                items(active + paused, key = { it.id }) { ActiveJobCard(it) }
+            }
+            // Saved files grouped by day
+            saved.groupBy { dayGroup(it.createdAt) }.forEach { (day, list) ->
+                item(key = "h-$day") { SectionLabel(day) }
+                items(list, key = { it.id }) { FinishedRow(it) }
+            }
+            if (failedShown.isNotEmpty()) {
+                item(key = "h-failed") { SectionLabel("Couldn't download") }
+                items(failedShown, key = { it.id }) { FinishedRow(it) }
+            }
+            if (active.isEmpty() && paused.isEmpty() && saved.isEmpty() && failedShown.isEmpty()) item {
+                if (query.isNotBlank() || filter != Filter.ALL) Text("Nothing matches.", Modifier.padding(vertical = 32.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else EmptyState()
+            }
         }
-        if (finished.isNotEmpty()) {
-            item { SectionLabel(if (filter == Filter.FAILED) "Failed or cancelled" else "Saved") }
-            items(finished, key = { it.id }) { FinishedRow(it) }
-        }
-        if (active.isEmpty() && paused.isEmpty() && finished.isEmpty()) item { EmptyState() }
+        ExtendedFloatingActionButton(
+            onClick = { addLink = true },
+            icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add") },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        )
     }
 
     if (addLink) AddDownloadDialog { addLink = false }
 
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
-        title = { Text("Clear the list?") },
-        text = { Text("This only clears the list. Your downloaded files stay in Downloads/AnySave.") },
+        title = { Text("Clear finished from the list?") },
+        text = { Text("Only the list is cleared. Your files stay in Downloads/AnySave.") },
         confirmButton = { TextButton(onClick = { Downloads.clearFinished(); confirmClear = false }) { Text("Clear") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
     )
@@ -193,15 +241,15 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
 
 @Composable
 private fun SectionLabel(text: String) =
-    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 6.dp))
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
 
 @Composable
 private fun EmptyState() {
     Column(Modifier.fillMaxWidth().padding(top = 60.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         AnimatedLogo(96.dp)
         Text("Nothing here yet", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
-        Text("Copy or share a video link to start.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Paste, copy or share a link to start.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -227,8 +275,12 @@ fun Thumb(job: Job, modifier: Modifier) {
                 FileKinds.Category.VIDEOS -> Icons.Outlined.Videocam
             }, null, tint = MaterialTheme.colorScheme.outline)
         }
+        val ctx = LocalContext.current
+        val request = remember(model) {
+            if (model is android.net.Uri) coil.request.ImageRequest.Builder(ctx).data(model).videoFramePercent(0.1).build() else model
+        }
         if (model == null) icon() else SubcomposeAsyncImage(
-            model = model, contentDescription = null, contentScale = ContentScale.Crop,
+            model = request, contentDescription = null, contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(), error = { icon() }, loading = { icon() }
         )
         if (job.audioOnly && model != null) Icon(Icons.Outlined.MusicNote, null, tint = Color.White,
@@ -237,45 +289,53 @@ fun Thumb(job: Job, modifier: Modifier) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FinishedRow(job: Job) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     val failed = job.status != JobStatus.DONE
+    val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable { if (failed) DownloadService.retry(ctx, job.id) else open(ctx, job) }
+            .combinedClickable(onClick = { if (failed) menu = true else open(ctx, job) }, onLongClick = { menu = true })
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
-            Thumb(job, Modifier.size(width = 112.dp, height = 63.dp))
+            Thumb(job, Modifier.size(width = 88.dp, height = 50.dp))
             if (!failed && (job.category == FileKinds.Category.VIDEOS || (job.kind == JobKind.CONVERT && !job.audioOnly && job.mime?.startsWith("video") == true)))
                 Icon(Icons.Outlined.PlayArrow, null, tint = Color.White,
-                modifier = Modifier.align(Alignment.Center).size(28.dp).background(Color(0x66000000), RoundedCornerShape(50)))
+                    modifier = Modifier.align(Alignment.Center).size(22.dp).background(Color(0x66000000), RoundedCornerShape(50)))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(if (!failed && job.kind != JobKind.VIDEO) job.fileName ?: job.title else job.title,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
-                style = MaterialTheme.typography.bodyMedium)
-            if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.width(4.dp))
+            Text(displayName(job), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyLarge)
+            if (failed) {
                 Text(statusText(job), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
             } else {
-                val meta = listOfNotNull(
-                    job.qualityLabel.substringBefore(" (").takeIf { it.isNotBlank() },
-                    Engine.humanSize(job.sizeBytes),
-                    DateUtils.getRelativeTimeSpanString(job.createdAt).toString(),
-                )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    if (job.site != null) { SiteIcon(job.site, 16.dp); Spacer(Modifier.width(6.dp)) }
-                    Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (ext.isNotEmpty()) {
+                        Text(ext, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    if (job.site != null && job.kind != JobKind.CONVERT) { SiteIcon(job.site, 14.dp); Spacer(Modifier.width(5.dp)) }
+                    val time = android.text.format.DateFormat.getTimeFormat(ctx).format(java.util.Date(job.createdAt))
+                    val when_ = if (dayGroup(job.createdAt) in setOf("Today", "Yesterday")) time
+                        else DateUtils.formatDateTime(ctx, job.createdAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH)
+                    Text(listOfNotNull(Engine.humanSize(job.sizeBytes), when_).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+        }
+        if (failed) FilledTonalIconButton(onClick = { DownloadService.retry(ctx, job.id) }) {
+            Icon(Icons.Outlined.Refresh, "Retry")
         }
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }

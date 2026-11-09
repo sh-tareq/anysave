@@ -1,5 +1,5 @@
-AnySave for Windows - download videos from YouTube, Facebook, Instagram and TikTok
-==================================================================================
+AnySave for Windows - download videos, files and convert media
+==============================================================
 
 1. Unzip first
    - Right-click the AnySave zip file and choose "Extract All...".
@@ -21,11 +21,22 @@ AnySave for Windows - download videos from YouTube, Facebook, Instagram and TikT
    - Close Chrome completely and open it again.
 
 4. Use it
-   - Open a video, click the AnySave icon (pin it from the puzzle-piece menu),
-     pick a quality and click Download.
-   - Files are saved in  Downloads\AnySave.
+   - Videos: open a video, click the AnySave icon (pin it from the
+     puzzle-piece menu), pick a quality and click Download. Works on YouTube,
+     Instagram, TikTok, Facebook and 1,000+ other sites.
+   - Any link: right-click a link, video or image > "Download with AnySave".
+   - Download manager: click the AnySave icon > "Download manager" to add any
+     link (PDF, ZIP, MP3...), pause, resume and find your files.
+   - Site download buttons: AnySave catches those downloads too and shows
+     them in the manager (switch: "Catch downloads from websites").
+   - Convert: click the AnySave icon > "Convert" to turn a video into MP3,
+     make it smaller, or trim it.
+   - Files are saved in  Downloads\AnySave, sorted into folders by type.
    - For Instagram, and Facebook posts that need a login, tick
      "Use my Chrome login".
+
+Upgrading from VidGrab? Just run the installer. Then click the reload
+button on the extension in chrome://extensions.
 
 Something stopped working?  Run "Install AnySave.bat" again. That gets the
 newest version of the downloader, which fixes most problems.
@@ -33,8 +44,8 @@ newest version of the downloader, which fixes most problems.
 Chrome may sometimes show "Disable developer mode extensions". Click the X
 to keep AnySave working.
 
-COPYRIGHT: only download videos you own or have permission to save.
-Downloading, re-uploading or sharing copyrighted videos without permission
+COPYRIGHT: only download videos and files you own or have permission to save.
+Downloading, re-uploading or sharing copyrighted content without permission
 can be illegal. You are responsible for how you use AnySave. AnySave asks
 you to accept its legal notice the first time you open it.
 

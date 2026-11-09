@@ -48,7 +48,7 @@ class QuickDownloadActivity : ComponentActivity() {
             return
         }
         when {
-            url == null -> toast(if (fromClipboard) "Copy a video link first" else "No link found in what was shared")
+            url == null -> toast(if (fromClipboard) "Copy a video or file link first" else "No link found in what was shared")
             // Direct file links (PDF, ZIP, APK, MP4 file...) download as files.
             FileKinds.looksLikeFile(url) && Engine.siteOf(url) == null -> {
                 if (fromClipboard) Settings.lastClipboardUrl = url

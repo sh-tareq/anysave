@@ -272,7 +272,7 @@ async function retry(id) {
 
 async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
-  return acceptedTermsVersion >= 1;
+  return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
 const GATED = new Set(["info", "download", "directDownload", "file", "addLink", "convert"]);
 

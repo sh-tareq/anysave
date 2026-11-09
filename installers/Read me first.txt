@@ -1,5 +1,5 @@
-AnySave - download videos from YouTube, Facebook, Instagram and TikTok
-=======================================================================
+AnySave - download videos, files and convert media
+===================================================
 
 Open the folder for your computer:
 
@@ -9,11 +9,11 @@ Open the folder for your computer:
 Android phones: install AnySave.apk instead (sent separately).
 
 IMPORTANT - COPYRIGHT
-Only download videos you own or have permission to save. Downloading,
-re-uploading or sharing copyrighted videos without permission can be
+Only download videos and files you own or have permission to save.
+Downloading, re-uploading or sharing copyrighted content without permission can be
 illegal and can break the website's terms of service. You are solely
 responsible for how you use AnySave. AnySave is provided "as is", with no
-warranty, and is not affiliated with YouTube, Meta or TikTok.
+warranty, and is not affiliated with YouTube, Meta, TikTok or any other site.
 Full details: "Legal notice.txt".
 
 Made by Shahidul H Tareq

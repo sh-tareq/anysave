@@ -79,7 +79,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun lookUp(newUrl: String? = null) {
         newUrl?.let { url = it }
-        val link = Engine.extractUrl(url) ?: run { error = "Paste a video link first."; return }
+        val link = Engine.extractUrl(url) ?: run { error = "Paste a video or file link first."; return }
         url = link
         // Ad library pages list many ads: open them in the built-in ad browser instead.
         // (A single Meta ad link with ?id= still goes through the normal lookup, in HD.)
@@ -314,9 +314,9 @@ private fun WelcomeDialog(onAccept: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Tip(Icons.Outlined.ContentCopy, "Copy a link, open AnySave",
-                    "AnySave spots the copied video link and starts downloading by itself.")
+                    "AnySave picks up a copied video or file link and starts downloading by itself.")
                 Tip(Icons.Outlined.Share, "Share → Download",
-                    "In YouTube, Instagram, TikTok or Facebook tap Share, then AnySave \"Download\". You stay in the app you were using.")
+                    "In any app or browser tap Share, then AnySave \"Download\". You stay in the app you were using.")
                 Tip(Icons.Outlined.TouchApp, "Quick Settings tile",
                     "Add the AnySave tile to your quick settings: copy a link, swipe down, tap it.")
                 CopyrightNotice()
@@ -326,7 +326,7 @@ private fun WelcomeDialog(onAccept: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(checked = agreed, onCheckedChange = { agreed = it })
-                    Text("I'll only download videos I have the right to save, and I accept the legal notice.",
+                    Text("I'll only download videos and files I have the right to save, and I accept the legal notice.",
                         style = MaterialTheme.typography.bodySmall)
                 }
                 TextButton(onClick = { showLegal = true }, contentPadding = PaddingValues(0.dp)) {
