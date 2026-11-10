@@ -30,7 +30,7 @@ Get the latest version from **[Releases](https://github.com/sh-tareq/anysave/rel
 | Download manager: any file, pause/resume, queue, folders | ✓ Downloads tab | ✓ manager page |
 | Converter: MP4/WebM/MKV/MOV/GIF, MP3/M4A/WAV/Opus, resize, target size, trim | ✓ Convert tab | ✓ manager page |
 | Catch downloads started by a site's own download button | | ✓ (switch in the manager) |
-| Download progress | notification | ring and percent on the toolbar icon |
+| Download progress | a notification per download, and one if it fails | ring, percent or count on the toolbar icon, ✓ when finished |
 
 Sites behind anti-bot protection (for example Cloudflare challenges) and DRM-protected services are not supported, by design.
 
