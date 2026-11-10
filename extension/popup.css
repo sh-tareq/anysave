@@ -49,6 +49,13 @@ li.pv img, .pv-ph { width:54px; height:54px; object-fit:cover; border-radius:6px
 .pv-info { flex:1; min-width:0; }
 .mini { padding:5px 10px; border:0; border-radius:6px; background: var(--accent); color:#fff; font-weight:600; font-size:12px; flex:none; }
 .mini:disabled { opacity:.6; }
+/* Choosing which ads to download */
+.pv-all { margin: 0; color: var(--fg); cursor: pointer; }
+li.pv { cursor: pointer; outline: 1.5px solid transparent; }
+li.pv.selected { outline-color: var(--accent); }
+li.pv.started { opacity: .6; cursor: default; }
+li.pv > input[type=checkbox] { margin: 0; flex: none; accent-color: var(--accent); width: 16px; height: 16px; }
+.pv input[type=checkbox], .pv-all input { accent-color: var(--accent); }
 
 .tools { gap: 8px; margin-top: 8px; }
 .ghost { flex:1; padding:7px; border:1px solid var(--line); border-radius:6px; background: var(--card); color: var(--fg); font-weight:600; font-size:12px; }
@@ -57,3 +64,5 @@ li.pv img, .pv-ph { width:54px; height:54px; object-fit:cover; border-radius:6px
 .pill:empty { display:none; }
 
 .ok { color:#2f9e5b; font-weight:600; }
+.pv-all[hidden] { display:none; }
+#pvDownload { margin-top: 4px; }

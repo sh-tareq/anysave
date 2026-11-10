@@ -130,13 +130,44 @@ function downloadPageVideo(v, library) {
 function renderPageVideos(videos, library, note) {
   const box = $("pageVideos");
   box.hidden = false;
+  const noun = library ? "ad" : "video";
   $("pvTitle").textContent = `${library ? "Ads" : "Videos"} on this page (${videos.length})`;
   $("pvNote").textContent = note || "";
-  $("pvAll").hidden = videos.length < 2;
-  $("pvAll").onclick = async () => {
-    $("pvAll").disabled = true;
-    for (const v of videos) await downloadPageVideo(v, library);
-    $("pvAll").textContent = "Started ✓";
+  // Pick any number with the checkboxes (or tap a row), then "Download selected".
+  const selected = new Set();
+  const started = new Set();
+  const rows = new Map();
+  const refresh = () => {
+    const open = videos.filter((v) => !started.has(v));
+    for (const [v, li] of rows) {
+      li.classList.toggle("selected", selected.has(v));
+      li.querySelector("input").checked = selected.has(v);
+    }
+    $("pvAllBox").hidden = open.length < 2;
+    $("pvAll").checked = open.length > 0 && open.every((v) => selected.has(v));
+    $("pvAll").indeterminate = selected.size > 0 && !$("pvAll").checked;
+    const n = selected.size;
+    $("pvDownload").disabled = n === 0;
+    $("pvDownload").textContent = n ? `Download ${n} selected ${noun}${n > 1 ? "s" : ""}` : `Select ${noun}s to download`;
+  };
+  const markStarted = (v) => {
+    started.add(v); selected.delete(v);
+    const li = rows.get(v);
+    li.classList.add("started");
+    li.querySelector("input").disabled = true;
+    const b = li.querySelector("button"); b.disabled = true; b.textContent = "Started ✓";
+  };
+  $("pvAll").onchange = () => {
+    const open = videos.filter((v) => !started.has(v));
+    if ($("pvAll").checked) open.forEach((v) => selected.add(v)); else selected.clear();
+    refresh();
+  };
+  $("pvDownload").onclick = async () => {
+    const list = videos.filter((v) => selected.has(v));
+    $("pvDownload").disabled = true;
+    for (const v of list) { await downloadPageVideo(v, library); markStarted(v); }
+    refresh();
+    $("pvDownload").textContent = `Started ${list.length} ✓ · see Downloads below`;
   };
   const ul = $("pvList");
   ul.innerHTML = "";
@@ -144,6 +175,7 @@ function renderPageVideos(videos, library, note) {
     const li = document.createElement("li");
     li.className = "pv";
     li.innerHTML = `
+      <input type="checkbox" aria-label="Select this ${noun}" />
       ${v.poster ? `<img src="${escapeHtml(v.poster)}" alt="" />` : `<div class="pv-ph">▶</div>`}
       <div class="pv-info">
         <div class="name">${escapeHtml(v.name || (library ? "Ad" : "Video"))}</div>
@@ -151,12 +183,22 @@ function renderPageVideos(videos, library, note) {
       </div>
       <button class="mini">Download</button>`;
     li.querySelector("button").onclick = async (e) => {
+      e.stopPropagation();
       e.target.disabled = true;
       await downloadPageVideo(v, library);
-      e.target.textContent = "Started";
+      markStarted(v); refresh();
     };
+    // Tapping anywhere on the row (or its checkbox) selects it.
+    li.onclick = (e) => {
+      if (started.has(v) || e.target.closest("button")) return;
+      if (e.target.matches("input")) { e.target.checked ? selected.add(v) : selected.delete(v); }
+      else { selected.has(v) ? selected.delete(v) : selected.add(v); }
+      refresh();
+    };
+    rows.set(v, li);
     ul.appendChild(li);
   }
+  refresh();
 }
 
 async function loadInfo() {

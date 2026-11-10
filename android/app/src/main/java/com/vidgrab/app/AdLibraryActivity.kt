@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -198,9 +201,16 @@ class AdLibraryActivity : ComponentActivity() {
                     }
                 }
 
-                if (showList) ModalBottomSheet(onDismissRequest = { showList = false }) {
+                // Fully open, so "Download selected" under the list is always in view.
+                if (showList) ModalBottomSheet(onDismissRequest = { showList = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
                     AdList(ads, lib, started, pageUrl,
                         onPage = { DownloadService.startQuick(this@AdLibraryActivity, pageUrl); toastMsg("Downloading this page's video") ; showList = false },
+                        onDownloadMany = { list ->
+                            list.forEach { download(it, lib, toast = false); started += it.src }
+                            val noun = if (lib == Library.WEB) "video" else "ad"
+                            toastMsg("Downloading ${list.size} $noun${if (list.size > 1) "s" else ""}")
+                        },
                     ) { item -> download(item, lib); started += item.src }
                 }
             }
@@ -225,7 +235,7 @@ class AdLibraryActivity : ComponentActivity() {
     }.getOrDefault(emptyList())
 
     /** Meta: by Library ID through yt-dlp (HD). TikTok: the ad's video file directly. */
-    private fun download(item: AdItem, lib: Library) {
+    private fun download(item: AdItem, lib: Library, toast: Boolean = true) {
         val title = when (item.site) {
             "meta" -> listOfNotNull(item.name ?: "Meta ad", item.id?.let { "ad $it" }).joinToString(" - ")
             "tiktok" -> listOfNotNull(item.name ?: "TikTok ad", item.id?.let { "ad $it" }).joinToString(" - ")
@@ -247,7 +257,7 @@ class AdLibraryActivity : ComponentActivity() {
                 fixedName = true,
             )
         )
-        Toast.makeText(this, "Downloading: $title", Toast.LENGTH_SHORT).show()
+        if (toast) Toast.makeText(this, "Downloading: $title", Toast.LENGTH_SHORT).show()
     }
 
     companion object {
@@ -274,8 +284,13 @@ class AdLibraryActivity : ComponentActivity() {
 @Composable
 private fun AdList(
     ads: List<AdItem>, lib: AdLibraryActivity.Library, started: List<String>, pageUrl: String,
-    onPage: () -> Unit, onDownload: (AdItem) -> Unit,
+    onPage: () -> Unit, onDownloadMany: (List<AdItem>) -> Unit, onDownload: (AdItem) -> Unit,
 ) {
+    // Tick any number of ads (or Select all), then download just those.
+    val selected = remember { mutableStateListOf<String>() }
+    val open = ads.filter { it.src !in started }
+    LaunchedEffect(started.size) { selected.removeAll { it in started } }
+    val noun = if (lib == AdLibraryActivity.Library.WEB) "video" else "ad"
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -290,8 +305,22 @@ private fun AdList(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (ads.size > 1) Button(onClick = { ads.filter { it.src !in started }.forEach(onDownload) }) {
-                Text("Download all")
+            if (open.size > 1) {
+                val all = when {
+                    open.all { it.src in selected } -> ToggleableState.On
+                    selected.isEmpty() -> ToggleableState.Off
+                    else -> ToggleableState.Indeterminate
+                }
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).toggleable(
+                        value = all == ToggleableState.On, role = Role.Checkbox,
+                        onValueChange = { on -> selected.clear(); if (on) selected.addAll(open.map { it.src }) },
+                    ).padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TriStateCheckbox(state = all, onClick = null)
+                    Text("Select all", style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
         if (lib == AdLibraryActivity.Library.WEB) {
@@ -311,10 +340,21 @@ private fun AdList(
                 Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(vertical = 12.dp),
+        LazyColumn(Modifier.heightIn(max = 440.dp), contentPadding = PaddingValues(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(ads, key = { it.src }) { ad ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                val done = ad.src in started
+                val isSelected = ad.src in selected
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent)
+                        .toggleable(value = isSelected, enabled = !done, role = Role.Checkbox,
+                            onValueChange = { if (it) selected += ad.src else selected -= ad.src })
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = isSelected, onCheckedChange = null, enabled = !done,
+                        modifier = Modifier.padding(horizontal = 8.dp))
                     Box(Modifier.size(64.dp).clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                         val icon = @Composable { Icon(Icons.Outlined.Videocam, null, tint = MaterialTheme.colorScheme.outline) }
@@ -327,17 +367,28 @@ private fun AdList(
                     Column(Modifier.weight(1f)) {
                         Text(ad.name ?: "Ad", fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            listOfNotNull(ad.id?.let { "ID $it" }, ad.duration?.let { fmtDuration(it.toDouble()) }).joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            listOfNotNull(ad.duration?.let { fmtDuration(it.toDouble()) }, ad.id?.let { "ID $it" }).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    val done = ad.src in started
-                    FilledTonalButton(onClick = { onDownload(ad) }, enabled = !done) {
-                        Icon(Icons.Outlined.Download, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (done) "Started" else "Get")
+                    // One tap downloads just this one; the checkbox is for picking several.
+                    if (done) Text("Started", Modifier.padding(horizontal = 12.dp),
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    else FilledTonalIconButton(onClick = { onDownload(ad) }, modifier = Modifier.padding(start = 4.dp)) {
+                        Icon(Icons.Outlined.Download, contentDescription = "Download this $noun")
                     }
                 }
+            }
+        }
+        if (ads.isNotEmpty()) {
+            val n = selected.size
+            Button(
+                onClick = { onDownloadMany(ads.filter { it.src in selected }); selected.clear() },
+                enabled = n > 0, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            ) {
+                Icon(Icons.Outlined.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (n > 0) "Download $n selected $noun${if (n > 1) "s" else ""}" else "Select ${noun}s to download")
             }
         }
         MadeBy()

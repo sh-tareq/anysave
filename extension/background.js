@@ -18,7 +18,7 @@ function updateJob(id, patch) {
     const ids = Object.keys(jobs).sort((a, b) => (jobs[b].createdAt || 0) - (jobs[a].createdAt || 0));
     for (const old of ids.slice(400)) delete jobs[old]; // keep the newest 400
     await chrome.storage.local.set({ jobs });
-  });
+  }).catch((e) => console.warn("AnySave: saving a job failed", e)); // never leave the chain broken
   return writeChain;
 }
 // Any other change to the whole list (remove, clear) goes through the same chain, so a
@@ -28,7 +28,7 @@ function mutateJobs(fn) {
     const jobs = await getJobs();
     fn(jobs);
     await chrome.storage.local.set({ jobs });
-  });
+  }).catch((e) => console.warn("AnySave: saving the list failed", e));
   return writeChain;
 }
 function newId() { return String(Date.now()) + Math.floor(Math.random() * 1000); }
@@ -431,8 +431,17 @@ async function isOurs(item) {
   return Object.values(await getJobs()).some((j) => j.downloadId === item.id);
 }
 
-chrome.downloads.onCreated.addListener(async (item) => {
-  if ((await isOurs(item)) || !(await captureOn())) return;
+// When Chrome starts it loads its download history and may announce every old download to
+// extensions as if it were new. Only downloads actually running and started just now are
+// ones a website started; anything else is history and must not show up in AnySave.
+const ADOPT_WINDOW_MS = 60 * 1000;
+function isNewDownload(item) {
+  const started = Date.parse(item.startTime || "");
+  return item.state === "in_progress" && !(started && Date.now() - started > ADOPT_WINDOW_MS);
+}
+
+async function adoptDownload(item) {
+  if (!isNewDownload(item) || (await isOurs(item)) || !(await captureOn())) return;
   const url = item.finalUrl || item.url || "";
   const name = (item.filename || "").split(/[\\/]/).pop() || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
   const id = newId();
@@ -442,7 +451,26 @@ chrome.downloads.onCreated.addListener(async (item) => {
     totalBytes: item.totalBytes > 0 ? item.totalBytes : 0, qualityLabel: "From website",
   });
   pollFiles();
-});
+}
+chrome.downloads.onCreated.addListener(adoptDownload);
+
+// One-time cleanup (1.0.2): remove old Chrome downloads that 1.0.0–1.0.1 wrongly took over
+// after a restart. A real catch is added within seconds of the download starting.
+async function removeAdoptedHistory() {
+  const { cleanedHistory } = await chrome.storage.local.get("cleanedHistory");
+  if (cleanedHistory) return;
+  const jobs = await getJobs();
+  const wrong = [];
+  for (const j of Object.values(jobs)) {
+    if (j.qualityLabel !== "From website" || !j.downloadId) continue;
+    const [d] = await chrome.downloads.search({ id: j.downloadId });
+    const started = Date.parse(d?.startTime || "");
+    if (started && (j.createdAt || 0) - started > 2 * ADOPT_WINDOW_MS) wrong.push(j.id);
+  }
+  if (wrong.length) await mutateJobs((all) => { for (const id of wrong) delete all[id]; });
+  await chrome.storage.local.set({ cleanedHistory: true });
+}
+removeAdoptedHistory().catch(() => {});
 
 // Route website downloads into Downloads/AnySave/<type>/ (Chrome asks every listener for a name).
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
