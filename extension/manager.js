@@ -43,6 +43,7 @@ const P = {
   pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
   play: "M8 5v14l11-7z",
   close: "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+  open: "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
   retry: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
@@ -75,8 +76,36 @@ function ago(t) {
 const ACTIVE = ["starting", "downloading"];
 const FINISHED = ["done", "error", "cancelled"];
 
+// ---------- open / drag a finished download ----------
+// Files saved through Chrome's downloader (any file, website downloads) use Chrome's own
+// open and drag, like its Downloads page. Files the helper saved (videos, conversions) are
+// opened by the helper, and dragged as a file link where the browser allows it.
+async function openDownload(j) {
+  if (j.downloadId) {
+    try { await chrome.downloads.open(j.downloadId); return { ok: true }; } catch {}
+  }
+  return chrome.runtime.sendMessage({ type: "open", id: j.id });
+}
+function fileUrl(path) {
+  const p = String(path).replace(/\\/g, "/");
+  return "file://" + (p.startsWith("/") ? "" : "/") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F");
+}
+// The list is redrawn on every progress update; not while a row is being dragged.
+let dragging = false, redrawAfterDrag = null;
+document.addEventListener("dragend", () => { dragging = false; const f = redrawAfterDrag; redrawAfterDrag = null; f && f(); });
+function startDrag(e, j) {
+  // Chrome's own drag takes over at once (no dragend comes back), so no pause needed.
+  if (j.downloadId) { e.preventDefault(); chrome.downloads.drag(j.downloadId); return; }
+  dragging = true;
+  const name = String(j.file).split(/[\\/]/).pop();
+  e.dataTransfer.effectAllowed = "copy";
+  e.dataTransfer.setData("DownloadURL", `application/octet-stream:${name}:${fileUrl(j.file)}`);
+  e.dataTransfer.setData("text/uri-list", fileUrl(j.file));
+}
+
 // ---------- downloads list ----------
 function render() {
+  if (dragging) { redrawAfterDrag = render; return; }
   const all = Object.values(jobs).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id));
   const activeCount = all.filter((j) => ACTIVE.includes(j.status)).length;
   $("activeBadge").hidden = !activeCount;
@@ -132,8 +161,18 @@ function row(j) {
   if (running && j.kind !== "convert") add("pause", "Pause", () => send({ type: "pause", id: j.id }));
   if (paused) add("play", "Resume", () => send({ type: "resume", id: j.id }));
   if (running || paused) add("close", "Cancel", () => send({ type: "cancel", id: j.id }));
-  if (j.status === "done" && j.file) {
+  if (j.status === "done" && (j.file || j.downloadId)) {
+    const open = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
+    add("open", "Open", open);
     add("folder", "Show in folder", () => send({ type: "reveal", id: j.id }));
+    // Drag the row out (to the desktop, a folder, a chat…), or double-click to open.
+    li.draggable = true;
+    li.classList.add("drag");
+    li.title = "Drag the file anywhere, or double-click to open";
+    li.ondragstart = (e) => startDrag(e, j);
+    li.ondblclick = (e) => { if (!e.target.closest("button")) open(); };
+  }
+  if (j.status === "done" && j.file) {
     if (["Videos", "Music"].includes(category(j)))
       add("convert", "Convert", () => { showTab("convert"); choose({ path: j.file, name: j.fileName || j.title }); });
   }

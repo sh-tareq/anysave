@@ -66,3 +66,6 @@ li.pv > input[type=checkbox] { margin: 0; flex: none; accent-color: var(--accent
 .ok { color:#2f9e5b; font-weight:600; }
 .pv-all[hidden] { display:none; }
 #pvDownload { margin-top: 4px; }
+.act { display:flex; gap:10px; }
+li.drag { cursor: grab; }
+li.drag:active { cursor: grabbing; }

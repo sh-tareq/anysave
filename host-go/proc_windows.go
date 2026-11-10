@@ -31,6 +31,14 @@ func revealInFileManager(path string) {
 	exec.Command("explorer", "/select,", path).Run()
 }
 
+// openWithDefaultApp opens a file in the app the user picked for its type
+// (ShellExecute, the same as double-clicking it in Explorer).
+func openWithDefaultApp(path string) error {
+	c := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", path)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	return c.Start()
+}
+
 // pickFile shows the Windows "Open" dialog. Returns "" if the user cancels.
 func pickFile() (string, error) {
 	script := `Add-Type -AssemblyName System.Windows.Forms

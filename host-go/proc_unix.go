@@ -23,6 +23,11 @@ func revealInFileManager(path string) {
 	exec.Command("open", "-R", path).Run()
 }
 
+// openWithDefaultApp opens a file in the app the user picked for its type.
+func openWithDefaultApp(path string) error {
+	return exec.Command("open", path).Run()
+}
+
 // pickFile shows the macOS "choose a file" dialog. Returns "" if the user cancels.
 func pickFile() (string, error) {
 	script := `try

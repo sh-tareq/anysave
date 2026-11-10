@@ -564,7 +564,20 @@ func webLink(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-// ---------- reveal ----------
+// ---------- reveal / open ----------
+
+// actionOpen opens a file AnySave saved with the system's default app.
+func actionOpen(msg map[string]any) map[string]any {
+	p, err := filepath.Abs(str(msg, "file"))
+	base, _ := filepath.Abs(downloadDir)
+	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) || !isFile(p) {
+		return map[string]any{"ok": false, "error": "File not found. It may have been moved or deleted."}
+	}
+	if err := openWithDefaultApp(p); err != nil {
+		return map[string]any{"ok": false, "error": "Couldn't open the file: " + err.Error()}
+	}
+	return map[string]any{"ok": true}
+}
 
 func actionReveal(msg map[string]any) map[string]any {
 	p, err := filepath.Abs(str(msg, "file"))
@@ -614,6 +627,8 @@ func main() {
 		actionDownload(msg)
 	case "reveal":
 		send(actionReveal(msg))
+	case "open":
+		send(actionOpen(msg))
 	case "probe":
 		send(actionProbe(msg))
 	case "pickFile":

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AnySave",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Download videos from YouTube, Instagram, TikTok, Facebook and 1,000+ sites, download any file, and convert videos.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyb8n7TSDf79vGUCMr1XWIeZZBC6ADtGHT9LWHymrBpgPtzcTE9JiMiC52sK4vowg8yuJzZfz7QPh11X7REVlEsNQ8v2HQ0NqI43DsKYh+TEY4ewRgKqQD/FMA/BbQSYGlpVrwB9DpbybLBpPd/UmWIw80e1m3QmcoDJXi7S79ph1GAfyrtvijPzH0ea99D/dfCiT+MA+I+K8gOpE7XWhGb/6oLXEzGNghY1l1yKDI4Y2lu+tl+64V3tBki5FCIidAvGtkkN6K1KQff8fdNgOdFq0G9Vf1H5sSPvASVNxsnD972u0Xa4R1qGbR0o7jnpfaAVyfiMfqGOtMPEPWW2GkwIDAQAB",
   "permissions": [
@@ -12,7 +12,8 @@
     "scripting",
     "downloads",
     "contextMenus",
-    "downloads.ui"
+    "downloads.ui",
+    "downloads.open"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

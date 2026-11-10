@@ -77,3 +77,5 @@ footer a { color: var(--muted); }
 .ib { display:flex; align-items:center; justify-content:center; }
 .tag { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.3px; padding:1px 5px; margin-right:6px; border-radius:4px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
 .top { padding-top: 12px; padding-bottom: 12px; }
+.item.drag { cursor: grab; }
+.item.drag:active { cursor: grabbing; }

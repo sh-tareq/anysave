@@ -318,7 +318,35 @@ $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "c
 $("openManager").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager" }); window.close(); });
 $("openConvert").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager", tab: "convert" }); window.close(); });
 
+// ---------- open / drag a finished download ----------
+// Files saved through Chrome's downloader (any file, website downloads) use Chrome's own
+// open and drag, like its Downloads page. Files the helper saved (videos, conversions) are
+// opened by the helper, and dragged as a file link where the browser allows it.
+async function openDownload(j) {
+  if (j.downloadId) {
+    try { await chrome.downloads.open(j.downloadId); return { ok: true }; } catch {}
+  }
+  return chrome.runtime.sendMessage({ type: "open", id: j.id });
+}
+function fileUrl(path) {
+  const p = String(path).replace(/\\/g, "/");
+  return "file://" + (p.startsWith("/") ? "" : "/") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F");
+}
+// The list is redrawn on every progress update; not while a row is being dragged.
+let dragging = false, redrawAfterDrag = null;
+document.addEventListener("dragend", () => { dragging = false; const f = redrawAfterDrag; redrawAfterDrag = null; f && f(); });
+function startDrag(e, j) {
+  // Chrome's own drag takes over at once (no dragend comes back), so no pause needed.
+  if (j.downloadId) { e.preventDefault(); chrome.downloads.drag(j.downloadId); return; }
+  dragging = true;
+  const name = String(j.file).split(/[\\/]/).pop();
+  e.dataTransfer.effectAllowed = "copy";
+  e.dataTransfer.setData("DownloadURL", `application/octet-stream:${name}:${fileUrl(j.file)}`);
+  e.dataTransfer.setData("text/uri-list", fileUrl(j.file));
+}
+
 function renderJobs(jobs) {
+  if (dragging) { redrawAfterDrag = () => renderJobs(jobs); return; }
   const list = Object.values(jobs || {}).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id)).slice(0, 5);
   const ul = $("jobs");
   ul.innerHTML = list.length ? "" : '<li class="muted small">Nothing yet.</li>';
@@ -335,9 +363,17 @@ function renderJobs(jobs) {
       <div class="row small muted"><span>${line}</span><span class="act"></span></div>`;
     const act = li.querySelector(".act");
     if (j.status === "done" && (j.file || j.downloadId)) {
-      const b = Object.assign(document.createElement("button"), { className: "link small", textContent: "Show file" });
-      b.onclick = () => chrome.runtime.sendMessage({ type: "reveal", id: j.id });
-      act.appendChild(b);
+      const open = Object.assign(document.createElement("button"), { className: "link small", textContent: "Open" });
+      open.onclick = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
+      const show = Object.assign(document.createElement("button"), { className: "link small", textContent: "Show in folder" });
+      show.onclick = () => chrome.runtime.sendMessage({ type: "reveal", id: j.id });
+      act.append(open, show);
+      // Drag the row out (to the desktop, a folder, a chat…), or double-click to open.
+      li.draggable = true;
+      li.classList.add("drag");
+      li.title = "Drag the file anywhere, or double-click to open";
+      li.ondragstart = (e) => startDrag(e, j);
+      li.ondblclick = (e) => { if (!e.target.closest("button")) open.click(); };
     } else if (!["done", "error", "cancelled"].includes(j.status)) {
       const b = Object.assign(document.createElement("button"), { className: "link small", textContent: "Cancel" });
       b.onclick = () => chrome.runtime.sendMessage({ type: "cancel", id: j.id });

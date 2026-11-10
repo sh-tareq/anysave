@@ -344,6 +344,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return native({ action: "reveal", file: msg.file || j?.file });
       }
       case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
+      case "open": {
+        const j = (await getJobs())[msg.id];
+        if (!j?.file) return { ok: false, error: "File not found" };
+        return native({ action: "open", file: j.file });
+      }
       case "openManager": openManager(msg.tab); return { ok: true };
       case "seen": await markSeen(); return { ok: true };
       case "setCapture": {
