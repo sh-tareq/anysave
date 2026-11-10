@@ -505,7 +505,7 @@ async function loadBaseIcons() {
   return baseIcons;
 }
 
-function drawRing(img, size, fraction) {
+function drawRing(img, size, fraction, spinAt = null) {
   const c = new OffscreenCanvas(size, size);
   const g = c.getContext("2d");
   const inset = size * 0.16;
@@ -517,8 +517,31 @@ function drawRing(img, size, fraction) {
   g.strokeStyle = "#e5484d";
   g.lineCap = "round";
   g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.03, fraction)); g.stroke();
+  if (spinAt != null) { // a bright arc chasing round the ring: "working on it"
+    g.strokeStyle = "#ffb36b";
+    g.beginPath(); g.arc(cx, cy, r, spinAt, spinAt + Math.PI * 0.45); g.stroke();
+  }
   return g.getImageData(0, 0, size, size);
 }
+
+// The ring glides to the real progress instead of jumping, and while a download is still
+// starting (no progress yet) a bright arc spins round it, so the icon shows activity at once.
+const ring = { target: 0, shown: 0, drawn: null, spin: false, phase: 0, timer: null };
+async function ringTick() {
+  ring.shown += (ring.target - ring.shown) * 0.3;
+  if (Math.abs(ring.target - ring.shown) < 0.003) ring.shown = ring.target;
+  ring.phase = (ring.phase + 0.55) % (Math.PI * 2);
+  if (!ring.spin && ring.drawn === ring.shown) return; // nothing moves: don't redraw
+  ring.drawn = ring.shown;
+  try {
+    const icons = await loadBaseIcons();
+    if (!ring.timer) return; // downloads ended meanwhile; the plain icon is already back
+    const at = ring.spin ? ring.phase : null;
+    await chrome.action.setIcon({ imageData: { 16: drawRing(icons[16], 16, ring.shown, at), 32: drawRing(icons[32], 32, ring.shown, at) } });
+  } catch {}
+}
+function startRing() { if (!ring.timer) ring.timer = setInterval(ringTick, 120); }
+function stopRing() { clearInterval(ring.timer); ring.timer = null; ring.shown = 0; ring.drawn = null; }
 
 // Finished downloads the user hasn't looked at yet keep a green ✓ (with their number) on the
 // icon until the popup or the manager is opened, like Chrome's own download icon. "Seen" is
@@ -528,6 +551,7 @@ async function updateActionIcon() {
   const jobs = Object.values(await getJobs());
   const active = jobs.filter((j) => ["starting", "downloading"].includes(j.status));
   if (!active.length) {
+    stopRing();
     const { seenAt = 0 } = await chrome.storage.local.get("seenAt");
     const unseen = jobs.filter((j) => j.status === "done" && (j.finishedAt || 0) > seenAt).length;
     const state = `idle|${unseen}`;
@@ -546,17 +570,16 @@ async function updateActionIcon() {
     ? withBytes.reduce((a, j) => a + (j.doneBytes || 0), 0) / withBytes.reduce((a, j) => a + j.totalBytes, 0)
     : active.reduce((a, j) => a + (j.percent || 0), 0) / active.length / 100;
   const pct = Math.max(0, Math.min(99, Math.floor((fraction || 0) * 100)));
+  ring.target = Math.max(0, Math.min(1, fraction || 0));
+  ring.spin = active.some((j) => j.status === "starting" || (!(j.percent > 0) && !(j.doneBytes > 0)));
+  startRing();
   const state = `${pct}|${active.length}`;
   if (state === lastIconState) return;
   lastIconState = state;
-  try {
-    const icons = await loadBaseIcons();
-    await chrome.action.setIcon({ imageData: { 16: drawRing(icons[16], 16, fraction), 32: drawRing(icons[32], 32, fraction) } });
-  } catch {}
   chrome.action.setBadgeBackgroundColor({ color: "#e5484d" });
   chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
-  // One download: its percent. Several: how many are running.
-  chrome.action.setBadgeText({ text: active.length > 1 ? `${active.length}↓` : `${pct}%` });
+  // The overall percent, for one download or several (how many is in the tooltip).
+  chrome.action.setBadgeText({ text: `${pct}%` });
   chrome.action.setTitle({ title: `AnySave: ${active.length} downloading · ${pct}%` });
 }
 async function markSeen() {
