@@ -133,12 +133,14 @@ function row(j) {
   const pct = Math.max(0, Math.min(100, j.percent || 0));
   const running = ACTIVE.includes(j.status);
   const paused = j.status === "paused";
+  const queued = j.status === "queued";
   let line;
   if (running) {
     const prog = j.kind === "file" && j.totalBytes > 0 ? `${size(j.doneBytes)} of ${size(j.totalBytes)}` : "";
     line = j.status === "starting" ? "Starting…"
       : [`${pct.toFixed(0)}%`, prog, j.speed, j.eta && `ETA ${j.eta}`].filter(Boolean).join(" · ");
   } else if (paused) line = ["Paused", `${pct.toFixed(0)}%`].join(" · ");
+  else if (queued) line = "Queued · starts when a download finishes";
   else if (j.status === "done") line = ["Done", j.qualityLabel, size(j.totalBytes), j.site, ago(j.finishedAt || j.createdAt)].filter(Boolean).join(" · ");
   else if (j.status === "error") line = `<span class="err">${esc(j.error || "Failed")}</span>`;
   else line = "Cancelled";
@@ -147,7 +149,7 @@ function row(j) {
     <div class="icon">${svg(category(j), 22)}${j.status === "done" ? `<span class="done" title="Finished">${svg("check", 13)}</span>` : ""}</div>
     <div class="info">
       <div class="name" title="${esc(j.fileName || j.title || j.url)}">${esc(displayName(j))}</div>
-      ${running || paused ? `<div class="bar ${paused ? "paused" : ""}"><div style="width:${pct}%"></div></div>` : ""}
+      ${running || paused || queued ? `<div class="bar ${paused || queued ? "paused" : ""}"><div style="width:${pct}%"></div></div>` : ""}
       <div class="meta">${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : j.status === "done" ? esc(line).replace(/^Done/, '<span class="ok">Done</span>') : esc(line)}</div>
     </div>
     <div class="btns"></div>`;
@@ -160,7 +162,8 @@ function row(j) {
   };
   if (running && j.kind !== "convert") add("pause", "Pause", () => send({ type: "pause", id: j.id }));
   if (paused) add("play", "Resume", () => send({ type: "resume", id: j.id }));
-  if (running || paused) add("close", "Cancel", () => send({ type: "cancel", id: j.id }));
+  if (queued) add("pause", "Pause", () => send({ type: "pause", id: j.id }));
+  if (running || paused || queued) add("close", "Cancel", () => send({ type: "cancel", id: j.id }));
   if (j.status === "done" && (j.file || j.downloadId)) {
     const open = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
     add("open", "Open", open);
@@ -189,18 +192,42 @@ $("pauseAll").onclick = () => Object.values(jobs).filter((j) => ACTIVE.includes(
 $("resumeAll").onclick = () => Object.values(jobs).filter((j) => j.status === "paused").forEach((j) => send({ type: "resume", id: j.id }));
 $("clearDone").onclick = () => send({ type: "clear" });
 
+// Paste one link or many (one per line, or separated by spaces): each is downloaded.
+// A one-line box drops line breaks when pasting, so links are split where "http" starts.
+function linksIn(text) {
+  return [...new Set((String(text).match(/https?:\/\/.+?(?=https?:\/\/|\s|$)/g) || []).map((s) => s.replace(/[),.;]+$/, "")))];
+}
+$("addUrl").addEventListener("paste", (e) => {
+  const text = e.clipboardData?.getData("text") || "";
+  if (!/\s/.test(text.trim())) return; // a single link: paste as usual
+  e.preventDefault();
+  $("addUrl").value = linksIn(text).join(" ");
+  $("addUrl").dispatchEvent(new Event("input"));
+});
+$("addUrl").addEventListener("input", () => {
+  const n = linksIn($("addUrl").value).length;
+  $("addForm").querySelector("button[type=submit], button:not([type])").textContent = n > 1 ? `Download ${n} links` : "Download";
+});
 $("addForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const url = $("addUrl").value.trim();
-  const btn = e.submitter; btn.disabled = true; btn.textContent = "Checking…";
-  const res = await send({ type: "addLink", url });
+  const raw = $("addUrl").value.trim();
+  const links = linksIn(raw);
+  const list = links.length ? links : [raw];
+  const btn = e.submitter; btn.disabled = true; btn.textContent = list.length > 1 ? `Adding ${list.length}…` : "Checking…";
+  let ok = 0, lastErr = "";
+  for (const url of list) {
+    const res = await send({ type: "addLink", url });
+    if (res?.ok) ok++; else lastErr = res?.error || "Couldn't add this link";
+  }
   btn.disabled = false; btn.textContent = "Download";
   const m = $("addMsg");
   m.hidden = false;
-  m.className = "msg" + (res?.ok ? "" : " err");
-  m.textContent = res?.ok ? "Added. It's downloading below." : (res?.error || "Couldn't add this link");
-  if (res?.ok) $("addUrl").value = "";
-  setTimeout(() => { m.hidden = true; }, 4000);
+  m.className = "msg" + (ok ? "" : " err");
+  m.textContent = list.length === 1
+    ? (ok ? "Added. It's downloading below." : lastErr)
+    : `Added ${ok} of ${list.length} links. They're downloading below.` + (ok < list.length ? ` (${lastErr})` : "");
+  if (ok) $("addUrl").value = "";
+  setTimeout(() => { m.hidden = true; }, 5000);
 });
 
 // ---------- converter ----------

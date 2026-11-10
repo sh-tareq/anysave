@@ -291,7 +291,7 @@ private fun FinishedRow(job: Job) {
     val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .combinedClickable(onClick = { if (failed) menu = true else open(ctx, job) }, onLongClick = { menu = true })
+            .combinedClickable(onClick = { if (failed) menu = true else openFile(ctx, job) }, onLongClick = { menu = true })
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -338,7 +338,7 @@ private fun FinishedRow(job: Job) {
                         onClick = { menu = false; DownloadService.retry(ctx, job.id) })
                 } else {
                     DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
-                        onClick = { menu = false; open(ctx, job) })
+                        onClick = { menu = false; openFile(ctx, job) })
                     DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
                         onClick = { menu = false; share(ctx, job) })
                     DropdownMenuItem(text = { Text("Delete file") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
@@ -359,7 +359,8 @@ private fun FinishedRow(job: Job) {
     )
 }
 
-private fun open(ctx: Context, job: Job) {
+/** Opens a saved file with the default app. */
+fun openFile(ctx: Context, job: Job) {
     val i = Intent(Intent.ACTION_VIEW).setDataAndType(job.uri, job.mime)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     runCatching { ctx.startActivity(i) }

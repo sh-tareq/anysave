@@ -59,21 +59,30 @@ li.pv .meta { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* Live progress for each ad */
 .pv-act { flex:none; width:92px; display:flex; justify-content:flex-end; }
 .pv-act .mini { width:100%; }
-.pill { position:relative; width:100%; height:28px; border-radius:6px; overflow:hidden; border:0; padding:0;
+.prog-pill { position:relative; width:100%; height:28px; border-radius:6px; overflow:hidden; border:0; padding:0;
   background: rgba(229,72,77,.18); color:#fff; font: inherit; font-size:12px; font-weight:700;
   display:flex; align-items:center; justify-content:center; font-variant-numeric: tabular-nums; }
-.pill span { position:relative; }
-.pill .fill { position:absolute; left:0; top:0; bottom:0; width:0; transition: width .6s ease;
+.prog-pill span { position:relative; }
+.prog-pill .fill { position:absolute; left:0; top:0; bottom:0; width:0; transition: width .6s ease;
   background: repeating-linear-gradient(-45deg, var(--accent) 0 8px, #f2666b 8px 16px); background-size: 22.6px 22.6px;
   animation: pill-stripes .7s linear infinite; }
-.pill.wait .fill { width:40%; animation: pill-stripes .7s linear infinite, pill-sweep 1.1s ease-in-out infinite alternate; }
-.pill.paused .fill { animation:none; background: var(--muted); }
-.pill.ok { background: rgba(47,158,91,.18); color:#3fbf6f; cursor:pointer; }
-.pill.ok:hover { background: rgba(47,158,91,.3); }
+.prog-pill.wait .fill { width:40%; animation: pill-stripes .7s linear infinite, pill-sweep 1.1s ease-in-out infinite alternate; }
+.prog-pill.paused .fill { animation:none; background: var(--muted); }
+.prog-pill.ok { background: rgba(47,158,91,.18); color:#3fbf6f; cursor:pointer; }
+.prog-pill.ok:hover { background: rgba(47,158,91,.3); }
 @keyframes pill-stripes { to { background-position: 22.6px 0; } }
 @keyframes pill-sweep { from { left:-10%; } to { left:70%; } }
 /* the big button shows the overall progress while ads download */
-.primary.prog { background: linear-gradient(90deg, var(--accent) var(--p, 0%), rgba(229,72,77,.3) var(--p, 0%)); transition: background .6s; }
+/* moving stripes on the filled part, the rest a faint track */
+.primary.prog { background:
+    linear-gradient(90deg, transparent var(--p, 0%), #4a2427 var(--p, 0%)),
+    repeating-linear-gradient(-45deg, var(--accent) 0 10px, #f2666b 10px 20px);
+  background-size: 100% 100%, 28.28px 28.28px; animation: big-stripes .8s linear infinite; font-variant-numeric: tabular-nums; }
+.primary.prog.wait { background:
+    repeating-linear-gradient(-45deg, rgba(229,72,77,.55) 0 10px, rgba(242,102,107,.35) 10px 20px);
+  background-size: 28.28px 28.28px; animation: wait-stripes .8s linear infinite; }
+@keyframes big-stripes { to { background-position: 0 0, 28.28px 0; } }
+@keyframes wait-stripes { to { background-position: 28.28px 0; } }
 .primary.prog:disabled { opacity:1; }
 .primary.saved, .primary.saved:disabled { opacity:1; background: rgba(47,158,91,.2); color:#3fbf6f; }
 li.pv > input[type=checkbox] { margin: 0; flex: none; accent-color: var(--accent); width: 16px; height: 16px; }
@@ -87,6 +96,9 @@ li.pv > input[type=checkbox] { margin: 0; flex: none; accent-color: var(--accent
 
 .ok { color:#2f9e5b; font-weight:600; }
 .pv-all[hidden] { display:none; }
+.pv-quality { margin: 8px 0 0; }
+.pv-quality[hidden] { display:none; }
+#pageVideos.below { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 #pvDownload { margin-top: 4px; }
 .act { display:flex; gap:10px; }
 li.drag { cursor: grab; }

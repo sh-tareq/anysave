@@ -114,6 +114,9 @@ object Downloads {
 
     fun add(job: Job) { jobs.update { listOf(job) + it }; save() }
 
+    /** Many at once (a playlist): one save instead of one per job. */
+    fun addAll(list: List<Job>) { jobs.update { list.reversed() + it }; save() }
+
     fun get(id: String) = jobs.value.firstOrNull { it.id == id }
 
     /** Progress ticks don't hit the disk; status changes do. */

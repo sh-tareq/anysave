@@ -564,6 +564,100 @@ func webLink(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
+// ---------- playlists and channels ----------
+
+type playlistEntry struct {
+	Type       string   `json:"_type"`
+	IEKey      string   `json:"ie_key"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	URL        string   `json:"url"`
+	WebpageURL string   `json:"webpage_url"`
+	Duration   *float64 `json:"duration"`
+	Thumbnail  string   `json:"thumbnail"`
+	Thumbnails []struct {
+		URL   string `json:"url"`
+		Width int    `json:"width"`
+	} `json:"thumbnails"`
+}
+
+// actionPlaylist lists the videos of a playlist or channel page (first 300), without
+// downloading anything, so the popup can let the user pick which ones to save.
+func actionPlaylist(msg map[string]any) map[string]any {
+	url := str(msg, "url")
+	if !webLink(url) {
+		return map[string]any{"ok": false, "error": "That isn't a web link."}
+	}
+	cookieFile, err := writeCookies(str(msg, "cookies"))
+	if cookieFile != "" {
+		defer os.Remove(cookieFile)
+	}
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	ytdlp, args, err := baseArgs(cookieFile)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	cmd := command(ytdlp, append(args, "--yes-playlist", "--flat-playlist", "-I", "1:300", "-J", "--", url)...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Start(); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(120*time.Second, func() { timedOut.Store(true); killTree(cmd) })
+	err = cmd.Wait()
+	timer.Stop()
+	if timedOut.Load() {
+		return map[string]any{"ok": false, "error": "The site took too long to list the videos. Try again in a moment."}
+	}
+	if err != nil {
+		logf("playlist failed: %s", stderr.String())
+		return map[string]any{"ok": false, "error": lastError(stderr.String())}
+	}
+	var pl struct {
+		Type     string          `json:"_type"`
+		Title    string          `json:"title"`
+		Uploader string          `json:"uploader"`
+		Channel  string          `json:"channel"`
+		Entries  []playlistEntry `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(stdout.String()), &pl); err != nil {
+		return map[string]any{"ok": false, "error": "Could not read yt-dlp output"}
+	}
+	entries := []map[string]any{}
+	for _, e := range pl.Entries {
+		// Skip sub-lists (a channel's "Videos" / "Shorts" tabs) and anything without a link.
+		if e.Type == "playlist" || strings.HasSuffix(e.IEKey, "Tab") {
+			continue
+		}
+		link := e.URL
+		if !webLink(link) {
+			link = e.WebpageURL
+		}
+		if !webLink(link) {
+			continue
+		}
+		thumb := e.Thumbnail
+		for _, t := range e.Thumbnails { // a small one is enough for the list
+			if t.URL != "" && (thumb == "" || (t.Width >= 120 && t.Width <= 480)) {
+				thumb = t.URL
+			}
+		}
+		entry := map[string]any{"url": link, "id": e.ID, "title": e.Title, "thumbnail": thumb}
+		if e.Duration != nil {
+			entry["duration"] = *e.Duration
+		}
+		entries = append(entries, entry)
+	}
+	uploader := pl.Uploader
+	if uploader == "" {
+		uploader = pl.Channel
+	}
+	return map[string]any{"ok": true, "isPlaylist": pl.Type == "playlist", "title": pl.Title, "uploader": uploader, "entries": entries}
+}
+
 // ---------- reveal / open ----------
 
 // actionOpen opens a file AnySave saved with the system's default app.
@@ -629,6 +723,8 @@ func main() {
 		send(actionReveal(msg))
 	case "open":
 		send(actionOpen(msg))
+	case "playlist":
+		send(actionPlaylist(msg))
 	case "probe":
 		send(actionProbe(msg))
 	case "pickFile":

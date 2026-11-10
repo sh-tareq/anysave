@@ -48,6 +48,7 @@ import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -60,8 +61,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var selected by mutableIntStateOf(0)
     var updating by mutableStateOf(false)
     var ytdlpVersion by mutableStateOf<String?>(null)
-    /** A copied link we noticed while auto-download is off: offer it on Home. */
-    var clipboardLink by mutableStateOf<String?>(null)
+    /** Copied links we noticed while auto-download is off: offer them on Home. */
+    var clipboardLinks by mutableStateOf<List<String>>(emptyList())
+    /** Job started from the video card, so its button can show the progress. */
+    var infoJobId by mutableStateOf<String?>(null)
+
+    // Playlist or channel found by the lookup, its selection, and the jobs started from it.
+    var playlist by mutableStateOf<Engine.Playlist?>(null)
+    var playlistLoading by mutableStateOf(false)
+    val playlistSelected = mutableStateListOf<String>()
+    /** Entry link -> job id. */
+    val playlistStarted = mutableStateMapOf<String, String>()
+    var playlistBatch by mutableStateOf<List<String>>(emptyList())
+    var playlistQuality by mutableIntStateOf(0)
+    private var lookupJob: kotlinx.coroutines.Job? = null
+    private var playlistJob: kotlinx.coroutines.Job? = null
     val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
     private val ctx get() = getApplication<Application>()
@@ -95,8 +109,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             url = ""; tab = MainActivity.TAB_DOWNLOADS
             return
         }
-        info = null; error = null; errorIsWebPage = false; loading = true; tab = MainActivity.TAB_HOME
-        viewModelScope.launch {
+        clearLookup()
+        loading = true; tab = MainActivity.TAB_HOME
+        // A YouTube playlist or channel: list its videos (a watch link with &list= shows both).
+        val ytList = Engine.youtubeList(link)
+        if (ytList != null && !Engine.isYoutubeVideo(link)) {
+            loadPlaylist(ytList, onlyList = true)
+            return
+        }
+        if (ytList != null) loadPlaylist(ytList, onlyList = false)
+        lookupJob = viewModelScope.launch {
             try {
                 Engine.state.first { it != Engine.State.STARTING } // wait for setup / update
                 if (Engine.state.value == Engine.State.FAILED) throw Exception("Setup failed: ${Engine.startError}")
@@ -119,6 +141,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     throw e
                 }
                 info = i
+                // Another site answered with a list: show the list instead of its first video.
+                if (i.isPlaylist && ytList == null) loadPlaylist(link, onlyList = false, replacesInfo = true)
                 // Pre-select the option matching the default quality
                 val q = Settings.quality.value
                 selected = when {
@@ -126,31 +150,111 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     q.height != null -> i.options.indexOfFirst { it.label.startsWith("${q.height}p") }
                     else -> 0
                 }.coerceAtLeast(0)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = e.message ?: "Couldn't read this link"
             } finally {
-                loading = false
+                if (isActive) loading = false
+            }
+        }
+    }
+
+    /** Forget the last lookup (video card, playlist, error). */
+    fun clearLookup() {
+        lookupJob?.cancel(); lookupJob = null
+        playlistJob?.cancel(); playlistJob = null
+        info = null; error = null; errorIsWebPage = false; infoJobId = null; loading = false
+        playlist = null; playlistLoading = false
+        playlistSelected.clear(); playlistStarted.clear(); playlistBatch = emptyList()
+    }
+
+    /**
+     * Lists a playlist's videos. [onlyList]: the link is just a list, so its errors are shown;
+     * [replacesInfo]: a list on another site hides the single-video card once the list is in.
+     */
+    private fun loadPlaylist(listUrl: String, onlyList: Boolean, replacesInfo: Boolean = false) {
+        playlistLoading = true
+        val q = Settings.quality.value
+        playlistQuality = when (q) {
+            Quality.AUDIO -> Engine.batchOptions.indexOfFirst { it.audioOnly }
+            Quality.P360 -> Engine.batchOptions.indexOfFirst { it.label.startsWith("480p") }
+            else -> q.height?.let { h -> Engine.batchOptions.indexOfFirst { it.label.startsWith("${h}p") } } ?: 0
+        }.coerceAtLeast(0)
+        playlistJob?.cancel()
+        playlistJob = viewModelScope.launch {
+            try {
+                Engine.state.first { it != Engine.State.STARTING }
+                if (Engine.state.value == Engine.State.FAILED) throw Exception("Setup failed: ${Engine.startError}")
+                val p = Engine.playlist(ctx, listUrl)
+                when {
+                    p.entries.size >= 2 || (onlyList && p.entries.isNotEmpty()) -> {
+                        playlist = p
+                        if (replacesInfo) info = null
+                    }
+                    onlyList -> error = "No videos found in this playlist or channel."
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (onlyList) error = e.message ?: "Couldn't read this link"
+            } finally {
+                // A newer lookup cancelled this one: leave its state alone.
+                if (isActive) {
+                    playlistLoading = false
+                    if (onlyList) loading = false
+                }
             }
         }
     }
 
     fun download() {
         val i = info ?: return
-        DownloadService.startFromInfo(ctx, i, i.options[selected])
-        messages.tryEmit("Download started")
-        info = null; url = ""
+        infoJobId = DownloadService.startFromInfo(ctx, i, i.options[selected])
+    }
+
+    /** "Download N selected videos" under a playlist: every ticked video, in the chosen quality. */
+    fun downloadPlaylist(entries: List<Engine.Entry>) {
+        val opt = Engine.batchOptions[playlistQuality]
+        val jobs = entries.map { DownloadService.entryJob(it, opt) }
+        DownloadService.startMany(ctx, jobs)
+        jobs.forEach { playlistStarted[it.url] = it.id }
+        playlistBatch = jobs.map { it.id }
+        playlistSelected.clear()
+    }
+
+    fun downloadEntry(entry: Engine.Entry) {
+        val job = DownloadService.entryJob(entry, Engine.batchOptions[playlistQuality])
+        DownloadService.start(ctx, job)
+        playlistStarted[entry.url] = job.id
+        playlistSelected.remove(entry.url)
+    }
+
+    /** Several links pasted, copied or shared at once: each one like a single quick download. */
+    fun downloadAll(links: List<String>) {
+        val started = links.count { DownloadService.startLink(ctx, it) }
+        val skipped = links.size - started
+        messages.tryEmit(when {
+            started == 0 -> "Nothing new to download"
+            skipped > 0 -> "Downloading ${plural(started, "link")} · ${plural(skipped, "link")} skipped"
+            else -> "Downloading ${plural(started, "link")}"
+        })
+        clipboardLinks = emptyList()
+        if (Engine.extractUrls(url).size > 1) url = ""
     }
 
     fun quickDownload(link: String) {
         if (FileKinds.looksLikeFile(link) && Engine.siteOf(link) == null) {
             if (DownloadService.startFile(ctx, link)) messages.tryEmit("Downloading file")
-            clipboardLink = null; return
+            clipboardLinks = emptyList(); return
         }
         AdLibraryActivity.libraryOf(link)?.let { lib ->
             if (!(lib == AdLibraryActivity.Library.META && link.contains("id="))) { openAdLibrary = lib to link; return }
         }
+        // A playlist or channel: list its videos so the user picks which ones.
+        if (Engine.youtubeList(link) != null && !Engine.isYoutubeVideo(link)) { clipboardLinks = emptyList(); lookUp(link); return }
         if (DownloadService.startQuick(ctx, link)) messages.tryEmit("Downloading copied link (${Settings.quality.value.label})")
-        clipboardLink = null
+        clipboardLinks = emptyList()
     }
 
     fun needsLogin(msg: String) = Regex("log(ged)?[ -]?in|sign in|cookies|private|account", RegexOption.IGNORE_CASE).containsMatchIn(msg)
@@ -160,14 +264,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!Settings.acceptedTerms) return
         val clip = runCatching { context.getSystemService(ClipboardManager::class.java).primaryClip }.getOrNull()
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-        val link = Engine.extractUrl(text) ?: return
-        if (link == Settings.lastClipboardUrl) return
-        val known = Engine.siteOf(link) != null
-        val file = FileKinds.looksLikeFile(link)
         // Ordinary web links (articles, shops...) are ignored; videos and files are offered.
-        if (!known && !file) return
-        Settings.lastClipboardUrl = link
-        if (known && Settings.autoClipboard.value) quickDownload(link) else clipboardLink = link
+        val links = Engine.extractUrls(text).filter { Engine.siteOf(it) != null || FileKinds.looksLikeFile(it) }
+        if (links.isEmpty()) return
+        val key = links.joinToString(" ")
+        if (key == Settings.lastClipboardUrl) return
+        Settings.lastClipboardUrl = key
+        val auto = Settings.autoClipboard.value
+        when {
+            links.size > 1 -> if (auto) downloadAll(links) else clipboardLinks = links
+            Engine.siteOf(links[0]) != null && auto -> quickDownload(links[0])
+            else -> clipboardLinks = links
+        }
     }
 
     fun updateDownloader() {
@@ -202,7 +310,10 @@ class MainActivity : ComponentActivity() {
             intent?.action == Intent.ACTION_SEND -> {
                 // Share → "Choose quality"
                 skipClipboardOnce = true
-                Engine.extractUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let { vm.lookUp(it) }
+                val links = Engine.extractUrls(intent.getStringExtra(Intent.EXTRA_TEXT))
+                // Several links: put them in the field, which then offers "Download all N links".
+                if (links.size > 1) { vm.clearLookup(); vm.url = links.joinToString(" "); vm.tab = TAB_HOME }
+                else links.firstOrNull()?.let { vm.lookUp(it) }
             }
             intent?.hasExtra(EXTRA_TAB) == true -> vm.tab = intent.getIntExtra(EXTRA_TAB, TAB_HOME)
         }

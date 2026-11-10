@@ -533,12 +533,41 @@ class DownloadService : Service() {
         private const val ACTION_PAUSE = "pause"
         private const val EXTRA_ID = "id"
 
-        private fun newId() = System.currentTimeMillis().toString() + (0..999).random()
+        private val seq = AtomicInteger(0)
+
+        /** Unique even when many jobs start in the same millisecond (a playlist). */
+        fun newId() = System.currentTimeMillis().toString() + (seq.incrementAndGet() % 10000).toString().padStart(4, '0')
 
         fun start(ctx: Context, job: Job) {
             if (!Settings.acceptedTerms) return
             Downloads.add(job)
             enqueue(ctx, job.id)
+        }
+
+        /** Several jobs at once; each waits in the queue (Settings.maxParallel run together). */
+        fun startMany(ctx: Context, jobs: List<Job>) {
+            if (!Settings.acceptedTerms || jobs.isEmpty()) return
+            Downloads.addAll(jobs)
+            jobs.forEach { enqueue(ctx, it.id) }
+        }
+
+        /** A video from a playlist or channel list, as a job ready for [start] or [startMany]. */
+        fun entryJob(entry: Engine.Entry, opt: Engine.Option) = Job(
+            id = newId(), url = entry.url, title = entry.title,
+            format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
+            qualityLabel = opt.label, site = Engine.siteOf(entry.url) ?: Engine.siteLabel(entry.url),
+            thumbnail = entry.thumbnail,
+        )
+
+        /**
+         * One of several links pasted or shared at once, like a single quick download:
+         * files directly, the rest through yt-dlp. Ad library pages are skipped (they need the ad browser).
+         */
+        fun startLink(ctx: Context, url: String): Boolean {
+            val lib = AdLibraryActivity.libraryOf(url)
+            if (lib != null && !(lib == AdLibraryActivity.Library.META && url.contains("id="))) return false
+            return if (FileKinds.looksLikeFile(url) && Engine.siteOf(url) == null) startFile(ctx, url)
+            else startQuick(ctx, url)
         }
 
         private fun enqueue(ctx: Context, id: String) {
@@ -560,12 +589,15 @@ class DownloadService : Service() {
             return true
         }
 
-        fun startFromInfo(ctx: Context, info: Engine.Info, opt: Engine.Option) {
+        /** Returns the new job's id, so the screen can show its progress. */
+        fun startFromInfo(ctx: Context, info: Engine.Info, opt: Engine.Option): String {
+            val id = newId()
             start(ctx, Job(
-                id = newId(), url = info.url, title = info.title,
+                id = id, url = info.url, title = info.title,
                 format = opt.format, sort = opt.sort, audioOnly = opt.audioOnly,
                 qualityLabel = opt.label, site = Engine.siteOf(info.url) ?: Engine.siteLabel(info.url), thumbnail = info.thumbnail,
             ))
+            return id
         }
 
         /** Any direct file link (PDF, ZIP, APK, image, video file...). */

@@ -99,7 +99,20 @@ object Engine {
         val uploader: String?,
         val duration: Double?,
         val options: List<Option>,
+        /** yt-dlp answered with a list (e.g. a playlist on another site): offer the whole list. */
+        val isPlaylist: Boolean = false,
     )
+
+    /** One video of a playlist or channel, from a quick (flat) listing. */
+    data class Entry(val url: String, val title: String, val duration: Double?, val thumbnail: String?)
+
+    data class Playlist(val url: String, val title: String, val uploader: String?, val total: Int?, val entries: List<Entry>)
+
+    /** Qualities offered for a whole playlist (sizes aren't known without looking up each video). */
+    val batchOptions: List<Option> =
+        listOf(Quality.BEST, Quality.P1080, Quality.P720, Quality.P480, Quality.AUDIO).map { it.toOption() }
+
+    private fun JSONObject.str(k: String) = if (isNull(k)) null else optString(k).ifBlank { null }
 
     suspend fun info(ctx: Context, url: String): Info = withContext(Dispatchers.IO) {
         val req = YoutubeDLRequest(url)
@@ -115,6 +128,7 @@ object Engine {
         }
         var json = JSONObject(out)
         val entries = json.optJSONArray("entries")
+        val isPlaylist = json.str("_type") == "playlist" && (entries?.length() ?: 0) > 1
         if (entries != null) { // e.g. Instagram carousel: describe the first item
             for (i in 0 until entries.length()) {
                 val e = entries.optJSONObject(i)
@@ -129,7 +143,96 @@ object Engine {
             uploader = json.optString("uploader").ifBlank { json.optString("channel") }.ifBlank { null },
             duration = if (json.isNull("duration")) null else json.optDouble("duration"),
             options = buildOptions(json),
+            isPlaylist = isPlaylist,
         )
+    }
+
+    /** Lists the videos of a playlist or channel quickly (no per-video lookup), up to 300. */
+    suspend fun playlist(ctx: Context, url: String): Playlist = withContext(Dispatchers.IO) {
+        val req = YoutubeDLRequest(url)
+            .addOption("--yes-playlist")
+            .addOption("--flat-playlist")
+            .addOption("-I", "1:300")
+            .addOption("-J")
+            .addOption("--no-warnings")
+        applyCookies(ctx, req)
+        applyJsRuntime(ctx, req)
+        val out = try {
+            YoutubeDL.getInstance().execute(req).out
+        } catch (e: YoutubeDLException) {
+            throw Exception(cleanError(e.message))
+        }
+        val json = JSONObject(out)
+        val arr = json.optJSONArray("entries")
+        val list = mutableListOf<Entry>()
+        val seen = hashSetOf<String>()
+        if (arr != null) for (i in 0 until arr.length()) {
+            val e = arr.optJSONObject(i) ?: continue
+            // Channel pages can list their tabs or other playlists: only videos are wanted.
+            if (e.str("_type") == "playlist" || e.str("ie_key").orEmpty().endsWith("Tab")) continue
+            val link = e.str("url")?.takeIf { it.startsWith("http") }
+                ?: e.str("webpage_url")?.takeIf { it.startsWith("http") } ?: continue
+            // Items that just point back at the same page (carousels) aren't separate videos.
+            if (link == url || !seen.add(link)) continue
+            val thumbs = e.optJSONArray("thumbnails")
+            var thumb: String? = null
+            var best = 0
+            if (thumbs != null) for (t in 0 until thumbs.length()) {
+                val o = thumbs.optJSONObject(t) ?: continue
+                val w = o.optInt("width", 0)
+                if (w in 120..480 && w > best) { best = w; thumb = o.str("url") }
+            }
+            list += Entry(
+                url = link,
+                title = e.str("title") ?: "Video ${list.size + 1}",
+                duration = if (e.isNull("duration")) null else e.optDouble("duration").takeUnless { it.isNaN() },
+                thumbnail = thumb ?: e.str("thumbnail"),
+            )
+        }
+        Playlist(
+            url = url,
+            title = json.str("title") ?: "Playlist",
+            uploader = json.str("uploader") ?: json.str("channel"),
+            total = json.optInt("playlist_count", 0).takeIf { it > 0 },
+            entries = list,
+        )
+    }
+
+    private fun youtubeUri(url: String): android.net.Uri? {
+        val u = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return null
+        val host = u.host.orEmpty().lowercase()
+        return u.takeIf { host == "youtu.be" || host == "youtube.com" || host.endsWith(".youtube.com") }
+    }
+
+    /** A YouTube link to a single video (it may also carry a playlist, "watch?v=…&list=…"). */
+    fun isYoutubeVideo(url: String): Boolean {
+        val u = youtubeUri(url) ?: return false
+        val path = u.path.orEmpty()
+        return u.host == "youtu.be" || u.getQueryParameter("v") != null || path.startsWith("/shorts/") || path.startsWith("/live/")
+    }
+
+    /**
+     * The playlist or channel a YouTube link points to, as the link to list, or null.
+     * Channel roots list their Videos tab.
+     */
+    fun youtubeList(url: String): String? {
+        val u = youtubeUri(url) ?: return null
+        val list = u.getQueryParameter("list")
+        if (!list.isNullOrBlank()) return "https://www.youtube.com/playlist?list=$list"
+        val seg = u.path.orEmpty().split('/').filter { it.isNotEmpty() }
+        if (seg.isEmpty() || u.host == "youtu.be") return null
+        val base = when {
+            seg[0].startsWith("@") -> 1
+            seg[0] in setOf("channel", "c", "user") && seg.size >= 2 -> 2
+            else -> return null
+        }
+        val root = "https://www.youtube.com/" + seg.take(base).joinToString("/")
+        val tab = seg.getOrNull(base)
+        return when (tab) {
+            null, "featured" -> "$root/videos"
+            "videos", "shorts", "streams" -> "$root/$tab"
+            else -> null
+        }
     }
 
     private class Fmt(val height: Int, val vcodec: String, val acodec: String, val fps: Double, val size: Long?, val ext: String)
@@ -239,6 +342,10 @@ object Engine {
     }
 
     /** Pulls the first link out of shared text like "Check this out https://…". */
-    fun extractUrl(text: String?): String? =
-        text?.let { Regex("""https?://\S+""").find(it)?.value?.trimEnd('.', ',', ')', '"', '\'') }
+    fun extractUrl(text: String?): String? = extractUrls(text).firstOrNull()
+
+    /** Every link in a text (several pasted or shared at once), without repeats. */
+    fun extractUrls(text: String?): List<String> =
+        text?.let { t -> Regex("""https?://\S+""").findAll(t).map { it.value.trimEnd('.', ',', ')', '"', '\'') }.distinct().toList() }
+            ?: emptyList()
 }

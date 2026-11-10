@@ -30,6 +30,8 @@ import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
@@ -55,16 +58,25 @@ val SiteColors = mapOf(
 @Composable
 fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
     val engine by Engine.state.collectAsState()
-    val active = jobs.filter { it.active }
+    val index = remember(jobs) { JobIndex(jobs) }
+    val playlist = vm.playlist
+    // Jobs already shown on the video card or in the playlist aren't listed twice.
+    val shown = buildSet {
+        if (vm.info != null) vm.infoJobId?.let { add(it) }
+        if (playlist != null) addAll(vm.playlistStarted.values)
+    }
+    val active = jobs.filter { it.active && it.id !in shown }
 
     ScreenScaffold(
         title = "AnySave",
         subtitle = "Download videos & files. Convert anything.",
         leading = { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.vidgrab_logo), null, Modifier.size(34.dp)) },
     ) { pad ->
+    Box(Modifier.fillMaxSize().padding(pad)) {
     LazyColumn(
-        Modifier.fillMaxSize().padding(pad),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 24.dp),
+        Modifier.fillMaxSize(),
+        // Room for the playlist's download button that floats at the bottom.
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = if (playlist != null) 96.dp else 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { LinkInput(vm) }
@@ -85,11 +97,31 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
             ErrorCard("Setup failed: ${Engine.startError}", null)
         }
 
-        vm.clipboardLink?.let { link -> item { ClipboardCard(vm, link) } }
+        if (vm.clipboardLinks.isNotEmpty()) item { ClipboardCard(vm, vm.clipboardLinks) }
 
-        if (vm.loading) item { LoadingCard() }
+        if (vm.loading) item { LoadingCard(if (vm.playlistLoading && !Engine.isYoutubeVideo(vm.url)) "Listing videos…" else "Looking up video…") }
         vm.error?.let { item { LookupError(vm, it) } }
-        vm.info?.let { item { InfoCard(vm, it) } }
+        vm.info?.let { item { InfoCard(vm, it, vm.infoJobId?.let { id -> index[id] }) } }
+        if (vm.playlistLoading && !vm.loading) item {
+            Card {
+                Column(Modifier.padding(14.dp)) {
+                    Text("Listing the playlist's videos…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+            }
+        }
+        if (playlist != null) {
+            item(key = "pl-head") { PlaylistHeader(vm, playlist, index) }
+            items(playlist.entries, key = { "pl-" + it.url }) { e ->
+                BatchRow(
+                    title = e.title, subtitle = e.duration?.let { fmtDuration(it) }.orEmpty(),
+                    thumbnail = e.thumbnail, thumbSize = DpSize(96.dp, 54.dp),
+                    job = index.find(vm.playlistStarted[e.url], e.url), selected = e.url in vm.playlistSelected,
+                    onSelect = { if (it) vm.playlistSelected += e.url else vm.playlistSelected -= e.url },
+                    noun = "video", onDownload = { vm.downloadEntry(e) },
+                )
+            }
+        }
 
         if (active.isNotEmpty()) {
             item {
@@ -101,37 +133,95 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
             items(active, key = { it.id }) { ActiveJobCard(it) }
         }
 
-        if (vm.info == null && !vm.loading && active.isEmpty()) item { HowToCard() }
+        if (vm.info == null && playlist == null && !vm.loading && active.isEmpty()) item { HowToCard() }
         item { MadeBy(Modifier.padding(top = 8.dp)) }
     }
+    // The playlist's button stays in view while scrolling through its videos.
+    if (playlist != null) Surface(
+        Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp, shadowElevation = 6.dp,
+    ) {
+        BatchButton(vm.playlistSelected.size, "video", vm.playlistBatch.mapNotNull { index[it] }, onDownloadSelected = {
+            vm.downloadPlaylist(playlist.entries.filter { it.url in vm.playlistSelected })
+        }, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    }
+    }
+    }
+}
+
+/** Title, Select all and the quality for a playlist or channel; its videos follow as rows. */
+@Composable
+private fun PlaylistHeader(vm: MainViewModel, p: Engine.Playlist, index: JobIndex) {
+    val open = p.entries.filter { index.find(vm.playlistStarted[it.url], it.url).isOpen() }.map { it.url }
+    // Rows that started downloading can't stay ticked.
+    LaunchedEffect(open.size) { vm.playlistSelected.retainAll(open.toSet()) }
+    ElevatedCard {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.VideoLibrary, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val count = if (p.total != null && p.total > p.entries.size) "First ${p.entries.size} of ${p.total} videos"
+                        else plural(p.entries.size, "video")
+                    Text(listOfNotNull(count, p.uploader).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            QualityDropdown(Engine.batchOptions, vm.playlistQuality) { vm.playlistQuality = it }
+            if (open.isNotEmpty()) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Tick the videos you want, or", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                SelectAllToggle(open, vm.playlistSelected)
+            }
+        }
     }
 }
 
 @Composable
 private fun LinkInput(vm: MainViewModel) {
     val ctx = LocalContext.current
+    val links = remember(vm.url) { Engine.extractUrls(vm.url) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
             value = vm.url,
             onValueChange = { vm.url = it; vm.error = null },
-            placeholder = { Text("Paste a video or file link") },
+            placeholder = { Text("Paste a video, playlist or file link", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             leadingIcon = { Icon(Icons.Outlined.Link, null) },
             trailingIcon = {
-                if (vm.url.isNotEmpty()) IconButton(onClick = { vm.url = ""; vm.info = null; vm.error = null }) {
+                if (vm.url.isNotEmpty()) IconButton(onClick = { vm.url = ""; vm.clearLookup() }) {
                     Icon(Icons.Outlined.Close, "Clear")
                 } else IconButton(onClick = {
                     val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip
                     val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
-                    Engine.extractUrl(text)?.let { vm.lookUp(it) } ?: vm.messages.tryEmit("No link on the clipboard")
+                    val links = Engine.extractUrls(text)
+                    when {
+                        links.isEmpty() -> vm.messages.tryEmit("No link on the clipboard")
+                        // Several: keep them all in the field, which offers "Download all N links".
+                        links.size > 1 -> { vm.clearLookup(); vm.url = links.joinToString(" ") }
+                        else -> vm.lookUp(links[0])
+                    }
                 }) { Icon(Icons.Outlined.ContentPaste, "Paste") }
             },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { vm.lookUp() }),
+            keyboardActions = KeyboardActions(onGo = { if (links.size > 1) vm.downloadAll(links) else vm.lookUp() }),
         )
-        Button(
+        if (links.size > 1) {
+            Button(
+                onClick = { vm.downloadAll(links) },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Outlined.Download, null); Spacer(Modifier.width(8.dp))
+                Text("Download all ${links.size} links", fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = { vm.lookUp(links[0]) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Choose quality for the first link only")
+            }
+        } else Button(
             onClick = { vm.lookUp() },
             enabled = !vm.loading && vm.url.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(50.dp),
@@ -194,53 +284,61 @@ private fun AdLibrariesCard() {
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                 ) {
                     SiteIcon("Facebook", 20.dp); Spacer(Modifier.width(8.dp))
-                    Text("Meta Ad Library", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                    Text("Meta Ad Library", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
                 }
                 FilledTonalButton(
                     onClick = { ctx.startActivity(AdLibraryActivity.intent(ctx, AdLibraryActivity.Library.TIKTOK)) },
                     modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
                 ) {
                     SiteIcon("TikTok", 20.dp); Spacer(Modifier.width(8.dp))
-                    Text("TikTok Creative", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                    Text("TikTok Creative", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ClipboardCard(vm: MainViewModel, link: String) {
+private fun ClipboardCard(vm: MainViewModel, links: List<String>) {
+    val link = links.first()
+    val many = links.size > 1
     ElevatedCard {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (Engine.siteOf(link) != null) "Copied ${Engine.siteOf(link)} link"
-                        else "Copied file link", fontWeight = FontWeight.SemiBold)
-                    Text(link, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text(when {
+                        many -> "Copied ${links.size} links"
+                        Engine.siteOf(link) != null -> "Copied ${Engine.siteOf(link)} link"
+                        else -> "Copied file link"
+                    }, fontWeight = FontWeight.SemiBold)
+                    Text(if (many) links.joinToString("  ·  ") { Engine.siteLabel(it) } else link, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.quickDownload(link) }) { Text("Download") }
-                if (Engine.siteOf(link) != null)
-                    OutlinedButton(onClick = { vm.clipboardLink = null; vm.lookUp(link) }) { Text("Choose quality") }
-                TextButton(onClick = { vm.clipboardLink = null }) { Text("Dismiss") }
+            // FlowRow: three buttons don't fit on one line on small phones.
+            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (many) Button(onClick = { vm.downloadAll(links) }) { Text("Download all ${links.size}") }
+                else Button(onClick = { vm.quickDownload(link) }) { Text("Download") }
+                if (!many && Engine.siteOf(link) != null)
+                    OutlinedButton(onClick = { vm.clipboardLinks = emptyList(); vm.lookUp(link) }) { Text("Choose quality") }
+                TextButton(onClick = { vm.clipboardLinks = emptyList() }) { Text("Dismiss") }
             }
         }
     }
 }
 
 @Composable
-private fun LoadingCard() {
+private fun LoadingCard(text: String) {
     Card {
         Column(Modifier.padding(14.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            Text("Looking up video…", Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text, Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -291,7 +389,8 @@ fun ErrorCard(msg: String, hint: String?, actionLabel: String? = null, onAction:
 }
 
 @Composable
-private fun InfoCard(vm: MainViewModel, info: Engine.Info) {
+private fun InfoCard(vm: MainViewModel, info: Engine.Info, job: Job?) {
+    val ctx = LocalContext.current
     Card {
         Column {
             Box {
@@ -324,15 +423,49 @@ private fun InfoCard(vm: MainViewModel, info: Engine.Info) {
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
                 info.uploader?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-                QualityDropdown(info.options, vm.selected) { vm.selected = it }
-                Button(
-                    onClick = { vm.download() },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(50.dp),
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Icon(Icons.Outlined.Download, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Download", fontWeight = FontWeight.SemiBold)
+                // A different quality is a new download: the button goes back to "Download".
+                QualityDropdown(info.options, vm.selected) { vm.selected = it; vm.infoJobId = null }
+                val button = Modifier.fillMaxWidth().padding(top = 12.dp).height(50.dp)
+                val shape = RoundedCornerShape(16.dp)
+                when (job?.status) {
+                    null, JobStatus.CANCELLED -> Button(onClick = { vm.download() }, modifier = button, shape = shape) {
+                        Icon(Icons.Outlined.Download, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Download", fontWeight = FontWeight.SemiBold)
+                    }
+                    JobStatus.DONE -> Button(onClick = { openFile(ctx, job) }, modifier = button, shape = shape) {
+                        Icon(Icons.Outlined.CheckCircle, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Saved ✓ · Open", fontWeight = FontWeight.SemiBold)
+                    }
+                    JobStatus.ERROR -> {
+                        Button(
+                            onClick = { DownloadService.retry(ctx, job.id) }, modifier = button, shape = shape,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError),
+                        ) {
+                            Icon(Icons.Outlined.Refresh, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Failed · Try again", fontWeight = FontWeight.SemiBold)
+                        }
+                        job.error?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                    JobStatus.QUEUED -> ProgressButton(null, "Queued", button, shape)
+                    JobStatus.WAITING_WIFI -> ProgressButton(null, "Waiting for Wi-Fi…", button, shape)
+                    JobStatus.PAUSED -> ProgressButton(job.percent / 100f, "Paused · ${job.percent.toInt()}% · Tap to resume", button, shape) {
+                        DownloadService.resume(ctx, job.id)
+                    }
+                    JobStatus.SAVING -> ProgressButton(1f, "Saving…", button, shape)
+                    JobStatus.DOWNLOADING -> {
+                        val started = job.percent > 0f
+                        val text = if (!started) job.eta.takeIf { it.endsWith("…") } ?: "Starting…"
+                            else listOf("${job.percent.toInt()}%", job.speed, job.eta.takeIf { it.isNotBlank() && it != "?" }?.let { "$it left" }.orEmpty())
+                                .filter { it.isNotBlank() }.joinToString(" · ")
+                        ProgressButton(if (started) job.percent / 100f else null, text, button, shape)
+                    }
                 }
             }
         }
@@ -428,7 +561,7 @@ private fun sizeProgress(job: Job): String =
         "${Engine.humanSize(job.doneBytes) ?: "0 MB"} of ${Engine.humanSize(job.totalBytes)}" else ""
 
 fun statusText(job: Job): String = when (job.status) {
-    JobStatus.QUEUED -> "Waiting…"
+    JobStatus.QUEUED -> "Queued"
     JobStatus.WAITING_WIFI -> "Waiting for Wi-Fi…"
     JobStatus.DOWNLOADING -> when {
         job.kind == JobKind.CONVERT && job.percent <= 0f -> job.eta.takeIf { it.endsWith("…") } ?: "Converting…"
@@ -439,7 +572,7 @@ fun statusText(job: Job): String = when (job.status) {
     }
     JobStatus.PAUSED -> listOf("Paused", "${job.percent.toInt()}%", sizeProgress(job)).filter { it.isNotBlank() }.joinToString(" · ")
     JobStatus.SAVING -> "Saving to Downloads…"
-    JobStatus.DONE -> "Saved"
+    JobStatus.DONE -> "Saved ✓"
     JobStatus.CANCELLED -> "Cancelled"
     JobStatus.ERROR -> job.error ?: "Failed"
 }

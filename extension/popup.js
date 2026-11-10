@@ -127,19 +127,70 @@ function downloadPageVideo(v, library) {
   return chrome.runtime.sendMessage({ type: "directDownload", src: v.src, title });
 }
 
+// Quality for a whole batch (a playlist's videos can each have different formats).
+const BATCH_QUALITIES = [
+  { label: "Best quality (MP4)", format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a" },
+  ...[1080, 720, 480].map((h) => ({ label: `${h}p MP4`, format: `bv*[height<=${h}]+ba/b[height<=${h}]`, sort: "res,fps,vcodec:h264,acodec:m4a" })),
+  { label: "Audio only (MP3)", format: "ba[ext=m4a]/ba/b", audioOnly: true },
+];
+
+// YouTube playlist / channel pages → the link that lists their videos.
+// watch: the page is one video that is part of a playlist.
+function youtubeList(pageUrl) {
+  try {
+    const u = new URL(pageUrl);
+    if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null;
+    const list = u.searchParams.get("list");
+    if (list) return { url: `https://www.youtube.com/playlist?list=${encodeURIComponent(list)}`, watch: u.pathname === "/watch", heading: "Videos in this playlist" };
+    const m = u.pathname.match(/^\/(@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)(?:\/(featured|videos|shorts|streams))?\/?$/);
+    if (m) {
+      const tab = !m[2] || m[2] === "featured" ? "videos" : m[2];
+      return { url: `https://www.youtube.com/${m[1]}/${tab}`, watch: false, heading: tab === "shorts" ? "Shorts on this channel" : tab === "streams" ? "Live videos on this channel" : "Videos on this channel" };
+    }
+  } catch {}
+  return null;
+}
+
+// Lists a playlist / channel and shows it as a pick-and-download list.
+async function showPlaylist(url, heading, below) {
+  const pl = await chrome.runtime.sendMessage({ type: "playlist", url, useCookies: $("cookies").checked });
+  if (!pl?.ok || !pl.entries?.length) return false;
+  const videos = pl.entries.map((e) => ({ src: e.url, name: e.title, duration: e.duration, poster: e.thumbnail }));
+  // "Blender Studio - Shorts" already names the channel; don't repeat it.
+  const note = pl.uploader && !String(pl.title || "").includes(pl.uploader) ? [pl.title, pl.uploader].filter(Boolean).join(" · ") : (pl.title || "");
+  renderPageVideos(videos, null, note, {
+    heading, quality: true, below,
+    jobUrl: (v) => v.src,
+    download: (v) => {
+      const q = JSON.parse($("pvQuality").value);
+      return chrome.runtime.sendMessage({ type: "download", url: v.src, title: v.name, format: q.format, sort: q.sort,
+        audioOnly: !!q.audioOnly, useCookies: $("cookies").checked });
+    },
+  });
+  return true;
+}
+
 // The download a page ad belongs to: Meta ads by Library ID, others by their video file.
 function adJobUrl(v, library) {
   return library === "Meta Ad Library" && v.id ? `https://www.facebook.com/ads/library/?id=${v.id}` : v.src;
 }
 let adProgress = null; // while an ad list is shown: called with the latest jobs
 
-function renderPageVideos(videos, library, note) {
+// `opts` (playlists): { heading, download(v), jobUrl(v), quality: true, below: true }
+function renderPageVideos(videos, library, note, opts = {}) {
   const box = $("pageVideos");
   box.hidden = false;
+  box.classList.toggle("below", !!opts.below); // under a single video's card
   const noun = library ? "ad" : "video";
   const plural = (n) => `${n} ${noun}${n > 1 ? "s" : ""}`;
-  $("pvTitle").textContent = `${library ? "Ads" : "Videos"} on this page (${videos.length})`;
+  $("pvTitle").textContent = `${opts.heading || (library ? "Ads on this page" : "Videos on this page")} (${videos.length})`;
   $("pvNote").textContent = note || "";
+  $("pvQualityBox").hidden = !opts.quality;
+  if (opts.quality && !$("pvQuality").options.length) {
+    for (const q of BATCH_QUALITIES) $("pvQuality").append(new Option(q.label, JSON.stringify(q)));
+  }
+  const download = opts.download || ((v) => downloadPageVideo(v, library));
+  const jobUrl = opts.jobUrl || ((v) => adJobUrl(v, library));
   // Pick any number with the checkboxes (or tap a row), then "Download selected".
   // Each ad then shows its own live progress, also after the popup is closed and opened again.
   const selected = new Set();
@@ -150,7 +201,7 @@ function renderPageVideos(videos, library, note) {
   const jobFor = (v) => {
     const own = jobs[jobOf.get(v)];
     if (own) return own;
-    const url = adJobUrl(v, library);
+    const url = jobUrl(v);
     let best = null;
     for (const j of Object.values(jobs)) {
       if (j.url === url && j.status !== "cancelled" && (!best || (j.createdAt || 0) > (best.createdAt || 0))) best = j;
@@ -161,7 +212,7 @@ function renderPageVideos(videos, library, note) {
 
   const start = async (v) => {
     pending.add(v); selected.delete(v); refresh(); // shows "Starting…" at once
-    const r = await downloadPageVideo(v, library);
+    const r = await download(v);
     if (r?.ok && r.id) jobOf.set(v, r.id);
     pending.delete(v);
     refresh();
@@ -185,9 +236,9 @@ function renderPageVideos(videos, library, note) {
         };
         slot.replaceChildren(b);
       } else if (kind === "run") {
-        slot.innerHTML = `<div class="pill"><div class="fill"></div><span></span></div>`;
+        slot.innerHTML = `<div class="prog-pill"><div class="fill"></div><span></span></div>`;
       } else {
-        const b = Object.assign(document.createElement("button"), { className: "pill ok", textContent: "Saved ✓", title: "Open the file" });
+        const b = Object.assign(document.createElement("button"), { className: "prog-pill ok", textContent: "Saved ✓", title: "Open the file" });
         b.onclick = (e) => { e.stopPropagation(); openDownload(jobFor(v)); };
         slot.replaceChildren(b);
       }
@@ -196,10 +247,11 @@ function renderPageVideos(videos, library, note) {
       const pill = slot.firstElementChild;
       const pct = Math.max(0, Math.min(100, Math.floor(j.percent || 0)));
       const waiting = st === "starting" || pct === 0;
-      pill.classList.toggle("wait", waiting && st !== "paused");
-      pill.classList.toggle("paused", st === "paused");
-      pill.querySelector(".fill").style.width = waiting ? "" : pct + "%";
-      pill.querySelector("span").textContent = st === "paused" ? `Paused ${pct}%` : waiting ? "Starting…" : `${pct}%`;
+      const queued = st === "queued";
+      pill.classList.toggle("wait", waiting && st !== "paused" && !queued);
+      pill.classList.toggle("paused", st === "paused" || queued);
+      pill.querySelector(".fill").style.width = waiting && !queued ? "" : (queued ? "0%" : pct + "%");
+      pill.querySelector("span").textContent = queued ? "Queued" : st === "paused" ? `Paused ${pct}%` : waiting ? "Starting…" : `${pct}%`;
     }
   };
 
@@ -253,7 +305,7 @@ function renderPageVideos(videos, library, note) {
     li.className = "pv";
     li.innerHTML = `
       <input type="checkbox" aria-label="Select this ${noun}" />
-      ${v.poster ? `<img src="${escapeHtml(v.poster)}" alt="" />` : `<div class="pv-ph">▶</div>`}
+      ${v.poster ? `<img src="${escapeHtml(v.poster)}" alt="" loading="lazy" />` : `<div class="pv-ph">▶</div>`}
       <div class="pv-info">
         <div class="name">${escapeHtml(v.name || (library ? "Ad" : "Video"))}</div>
         <div class="small muted meta">${[fmtDuration(v.duration), v.id ? "ID " + v.id : ""].filter(Boolean).map(escapeHtml).join(" · ")}</div>
@@ -305,8 +357,19 @@ async function loadInfo() {
     // Any other site: yt-dlp knows 1,000+ video sites; fall back to video files the page plays.
     $("site").textContent = hostLabel(tab.url);
   }
+  // A YouTube playlist or channel page: list its videos to pick from.
+  const yl = youtubeList(tab.url);
+  if (yl && !yl.watch) {
+    setState("Listing the videos…");
+    if (await showPlaylist(yl.url, yl.heading, false)) { $("state").hidden = true; return; }
+  }
   setState("Looking up video…");
   const res = await chrome.runtime.sendMessage({ type: "info", url: tab.url, useCookies: $("cookies").checked });
+  // Other sites: a link yt-dlp reads as a list of videos (no single video in it).
+  if (!res?.hostMissing && (!res?.ok || !res.options?.length) && !yl) {
+    setState("Looking for a list of videos…");
+    if (await showPlaylist(tab.url, "Videos on this page", false)) { $("state").hidden = true; return; }
+  }
   if (!res?.ok && !res?.hostMissing) {
     // yt-dlp couldn't read the page: fall back to video files the page itself is playing.
     const videos = await scanPage(tab);
@@ -348,6 +411,11 @@ async function loadInfo() {
     sel.appendChild(o);
   }
   $("dl").disabled = !sel.options.length;
+  dlJobId = null; dlFresh = false;
+  // A video that's part of a playlist: offer the rest of the playlist underneath.
+  if (yl?.watch) showPlaylist(yl.url, yl.heading, true);
+  lastJobs = (await chrome.storage.local.get("jobs")).jobs || {};
+  showDlProgress();
   if (res.needsFfmpeg) {
     $("meta").textContent += " · video needs ffmpeg (audio only for now)";
   } else if (!res.hasFfmpeg) {
@@ -359,11 +427,48 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// The Download button turns into the download's live progress: Starting… → percent, speed
+// and time left → "Saved ✓ · Open file". Picking another quality makes it a Download button
+// again (to save a second version). It also picks up a download of this video started before.
+let dlJobId = null;      // download started from this button
+let dlFresh = false;     // quality changed: ignore earlier downloads of this video
+let lastJobs = {};
+function dlJob() {
+  if (dlJobId && lastJobs[dlJobId]) return lastJobs[dlJobId];
+  if (!current || dlFresh) return null;
+  let best = null;
+  for (const j of Object.values(lastJobs)) {
+    if (j.kind === "video" && j.url === current.url && j.status !== "cancelled" && (!best || (j.createdAt || 0) > (best.createdAt || 0))) best = j;
+  }
+  return best;
+}
+function showDlProgress() {
+  const btn = $("dl");
+  if (!current || $("media").hidden) return;
+  const j = dlJob();
+  const st = j?.status;
+  const pct = Math.max(0, Math.min(100, Math.floor(j?.percent || 0)));
+  btn.classList.toggle("prog", !!j && !["done", "error"].includes(st));
+  btn.classList.toggle("wait", !!j && (st === "starting" || st === "queued" || (st === "downloading" && pct === 0)));
+  btn.classList.toggle("saved", st === "done");
+  btn.style.setProperty("--p", pct + "%");
+  if (!j || st === "cancelled") { btn.dataset.mode = "download"; btn.disabled = !$("format").options.length; btn.textContent = "Download"; }
+  else if (st === "done") { btn.dataset.mode = "open"; btn.disabled = false; btn.textContent = "Saved ✓ · Open file"; }
+  else if (st === "error") { btn.dataset.mode = "download"; btn.disabled = false; btn.textContent = "Failed · Try again"; btn.title = j.error || ""; }
+  else if (st === "paused") { btn.dataset.mode = "busy"; btn.disabled = true; btn.textContent = `Paused · ${pct}%`; }
+  else if (st === "queued") { btn.dataset.mode = "busy"; btn.disabled = true; btn.textContent = "Queued · starts after the current downloads"; }
+  else if (btn.classList.contains("wait")) { btn.dataset.mode = "busy"; btn.disabled = true; btn.textContent = "Starting…"; }
+  else { btn.dataset.mode = "busy"; btn.disabled = true; btn.textContent = [`Downloading · ${pct}%`, j.speed, j.eta && j.eta !== "?" && `${j.eta} left`].filter(Boolean).join(" · "); }
+}
+$("format").addEventListener("change", () => { dlJobId = null; dlFresh = true; showDlProgress(); });
+
 $("dl").addEventListener("click", async () => {
-  if (!current || !$("format").value || $("dl").disabled) return;
+  if (!current || $("dl").disabled) return;
+  if ($("dl").dataset.mode === "open") { const j = dlJob(); if (j) openDownload(j); return; }
+  if (!$("format").value) return;
   const opt = JSON.parse($("format").value);
-  const label = $("dl").textContent;
   $("dl").disabled = true; // one click, one download
+  $("dl").classList.add("prog", "wait"); $("dl").textContent = "Starting…";
   const res = await chrome.runtime.sendMessage({
     type: "download",
     url: current.url,
@@ -373,13 +478,10 @@ $("dl").addEventListener("click", async () => {
     audioOnly: !!opt.audioOnly,
     useCookies: $("cookies").checked,
   });
-  if (res?.ok) {
-    $("dl").textContent = "Started ✓";
-    setTimeout(() => { $("dl").textContent = label; $("dl").disabled = false; }, 2000);
-  } else {
-    $("dl").textContent = label; $("dl").disabled = false;
-    setState('<span class="err">' + escapeHtml(res?.error || "Couldn't start the download") + "</span>");
-  }
+  if (res?.ok) { dlJobId = res.id; dlFresh = false; }
+  else setState('<span class="err">' + escapeHtml(res?.error || "Couldn't start the download") + "</span>");
+  lastJobs = (await chrome.storage.local.get("jobs")).jobs || {};
+  showDlProgress();
 });
 
 $("cookies").addEventListener("change", async () => {
@@ -430,9 +532,9 @@ function renderJobs(jobs) {
     if (j.status === "downloading") line = `${pct.toFixed(0)}% · ${j.speed || ""} · ETA ${j.eta || "?"}`;
     else if (j.status === "done") line = '<span class="ok">✓ Saved</span>';
     else if (j.status === "error") line = `<span class="err">${escapeHtml(j.error || "Failed")}</span>`;
-    else line = escapeHtml(j.status);
+    else line = escapeHtml({ queued: "Queued", starting: "Starting…", paused: `Paused · ${pct.toFixed(0)}%`, cancelled: "Cancelled" }[j.status] || j.status);
     li.innerHTML = `<div class="name">${escapeHtml(j.title || j.url)}</div>
-      ${["downloading", "starting", "merging", "converting"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
+      ${["downloading", "starting", "merging", "converting", "queued", "paused"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
       <div class="row small muted"><span>${line}</span><span class="act"></span></div>`;
     const act = li.querySelector(".act");
     if (j.status === "done" && (j.file || j.downloadId)) {
@@ -460,6 +562,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.jobs) {
     renderJobs(changes.jobs.newValue);
     if (adProgress) adProgress(changes.jobs.newValue);
+    lastJobs = changes.jobs.newValue || {};
+    showDlProgress();
     const finished = Object.values(changes.jobs.newValue || {}).some((j) => j.status === "done" && changes.jobs.oldValue?.[j.id]?.status !== "done");
     if (finished) chrome.runtime.sendMessage({ type: "seen" }); // finished while the popup is open
   }

@@ -13,8 +13,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,14 +28,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 
@@ -83,7 +77,11 @@ class AdLibraryActivity : ComponentActivity() {
                 var loading by remember { mutableStateOf(true) }
                 var pageUrl by remember { mutableStateOf(startUrl) }
                 var address by remember { mutableStateOf(if (lib == Library.WEB) "" else startUrl) }
-                val started = remember { mutableStateListOf<String>() }
+                // Ad src -> id of the job started for it, and the ids of the last "Download selected".
+                val started = remember { mutableStateMapOf<String, String>() }
+                var batch by remember { mutableStateOf<List<String>>(emptyList()) }
+                val allJobs by Downloads.jobs.collectAsState()
+                val jobIndex = remember(allJobs) { JobIndex(allJobs) }
 
                 // Re-inject (harmless if already there) and read the list every 1.5 s.
                 LaunchedEffect(web) {
@@ -135,9 +133,9 @@ class AdLibraryActivity : ComponentActivity() {
                             text = {
                                 Text(when {
                                     lib == Library.WEB && ads.isEmpty() -> "Download"
-                                    lib == Library.WEB -> "Videos: ${ads.size}"
+                                    lib == Library.WEB -> plural(ads.size, "video") + " found"
                                     ads.isEmpty() -> "No ads yet"
-                                    else -> "Ads found: ${ads.size}"
+                                    else -> plural(ads.size, "ad") + " found"
                                 })
                             },
                             containerColor = if (ads.isEmpty() && lib != Library.WEB) MaterialTheme.colorScheme.surfaceVariant
@@ -204,14 +202,14 @@ class AdLibraryActivity : ComponentActivity() {
                 // Fully open, so "Download selected" under the list is always in view.
                 if (showList) ModalBottomSheet(onDismissRequest = { showList = false },
                     sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-                    AdList(ads, lib, started, pageUrl,
-                        onPage = { DownloadService.startQuick(this@AdLibraryActivity, pageUrl); toastMsg("Downloading this page's video") ; showList = false },
+                    AdList(ads, lib, jobIndex, started, batch,
+                        onPage = { if (DownloadService.startQuick(this@AdLibraryActivity, pageUrl)) toastMsg("Downloading this page's video"); showList = false },
                         onDownloadMany = { list ->
-                            list.forEach { download(it, lib, toast = false); started += it.src }
-                            val noun = if (lib == Library.WEB) "video" else "ad"
-                            toastMsg("Downloading ${list.size} $noun${if (list.size > 1) "s" else ""}")
+                            val ids = list.map { it to download(it, lib, toast = false) }
+                            ids.forEach { (ad, id) -> started[ad.src] = id }
+                            batch = ids.map { it.second }
                         },
-                    ) { item -> download(item, lib); started += item.src }
+                    ) { item -> started[item.src] = download(item, lib, toast = false) }
                 }
             }
         }
@@ -235,18 +233,20 @@ class AdLibraryActivity : ComponentActivity() {
     }.getOrDefault(emptyList())
 
     /** Meta: by Library ID through yt-dlp (HD). TikTok: the ad's video file directly. */
-    private fun download(item: AdItem, lib: Library, toast: Boolean = true) {
+    /** Returns the new job's id, so the list can show its progress. */
+    private fun download(item: AdItem, lib: Library, toast: Boolean = true): String {
         val title = when (item.site) {
             "meta" -> listOfNotNull(item.name ?: "Meta ad", item.id?.let { "ad $it" }).joinToString(" - ")
             "tiktok" -> listOfNotNull(item.name ?: "TikTok ad", item.id?.let { "ad $it" }).joinToString(" - ")
             else -> (item.name ?: "Video").take(80)
         }
         val metaById = item.site == "meta" && item.id != null
+        val id = DownloadService.newId()
         DownloadService.start(
             this,
             Job(
-                id = System.currentTimeMillis().toString() + (0..999).random(),
-                url = if (metaById) "https://www.facebook.com/ads/library/?id=${item.id}" else item.src,
+                id = id,
+                url = adJobUrl(item),
                 title = title,
                 format = if (metaById) "hd/b/bv*+ba" else "b/bv*+ba",
                 sort = Engine.H264_SORT,
@@ -258,6 +258,7 @@ class AdLibraryActivity : ComponentActivity() {
             )
         )
         if (toast) Toast.makeText(this, "Downloading: $title", Toast.LENGTH_SHORT).show()
+        return id
     }
 
     companion object {
@@ -281,14 +282,19 @@ class AdLibraryActivity : ComponentActivity() {
     }
 }
 
+/** The link a job for this ad downloads (Meta ads by Library ID, in HD), so rows match jobs by URL too. */
+private fun adJobUrl(item: AdItem) =
+    if (item.site == "meta" && item.id != null) "https://www.facebook.com/ads/library/?id=${item.id}" else item.src
+
 @Composable
 private fun AdList(
-    ads: List<AdItem>, lib: AdLibraryActivity.Library, started: List<String>, pageUrl: String,
+    ads: List<AdItem>, lib: AdLibraryActivity.Library, jobs: JobIndex, started: Map<String, String>, batch: List<String>,
     onPage: () -> Unit, onDownloadMany: (List<AdItem>) -> Unit, onDownload: (AdItem) -> Unit,
 ) {
     // Tick any number of ads (or Select all), then download just those.
     val selected = remember { mutableStateListOf<String>() }
-    val open = ads.filter { it.src !in started }
+    fun jobOf(ad: AdItem) = jobs.find(started[ad.src], adJobUrl(ad))
+    val open = ads.filter { jobOf(it).isOpen() }
     LaunchedEffect(started.size) { selected.removeAll { it in started } }
     val noun = if (lib == AdLibraryActivity.Library.WEB) "video" else "ad"
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -305,23 +311,7 @@ private fun AdList(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (open.size > 1) {
-                val all = when {
-                    open.all { it.src in selected } -> ToggleableState.On
-                    selected.isEmpty() -> ToggleableState.Off
-                    else -> ToggleableState.Indeterminate
-                }
-                Row(
-                    Modifier.clip(RoundedCornerShape(8.dp)).toggleable(
-                        value = all == ToggleableState.On, role = Role.Checkbox,
-                        onValueChange = { on -> selected.clear(); if (on) selected.addAll(open.map { it.src }) },
-                    ).padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TriStateCheckbox(state = all, onClick = null)
-                    Text("Select all", style = MaterialTheme.typography.labelLarge)
-                }
-            }
+            if (open.size > 1) SelectAllToggle(open.map { it.src }, selected)
         }
         if (lib == AdLibraryActivity.Library.WEB) {
             // Works on 1,000+ video sites (yt-dlp reads the page itself, in the best quality).
@@ -340,56 +330,25 @@ private fun AdList(
                 Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        LazyColumn(Modifier.heightIn(max = 440.dp), contentPadding = PaddingValues(vertical = 12.dp),
+        // Rows keep their own rounded highlight, so the list itself is clipped to the same corners.
+        LazyColumn(Modifier.heightIn(max = 440.dp).clip(RoundedCornerShape(12.dp)),
+            contentPadding = PaddingValues(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(ads, key = { it.src }) { ad ->
-                val done = ad.src in started
-                val isSelected = ad.src in selected
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .toggleable(value = isSelected, enabled = !done, role = Role.Checkbox,
-                            onValueChange = { if (it) selected += ad.src else selected -= ad.src })
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = isSelected, onCheckedChange = null, enabled = !done,
-                        modifier = Modifier.padding(horizontal = 8.dp))
-                    Box(Modifier.size(64.dp).clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                        val icon = @Composable { Icon(Icons.Outlined.Videocam, null, tint = MaterialTheme.colorScheme.outline) }
-                        if (ad.poster != null) SubcomposeAsyncImage(model = ad.poster, contentDescription = null,
-                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
-                            error = { icon() }, loading = { icon() })
-                        else icon()
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(ad.name ?: "Ad", fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            listOfNotNull(ad.duration?.let { fmtDuration(it.toDouble()) }, ad.id?.let { "ID $it" }).joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    // One tap downloads just this one; the checkbox is for picking several.
-                    if (done) Text("Started", Modifier.padding(horizontal = 12.dp),
-                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    else FilledTonalIconButton(onClick = { onDownload(ad) }, modifier = Modifier.padding(start = 4.dp)) {
-                        Icon(Icons.Outlined.Download, contentDescription = "Download this $noun")
-                    }
-                }
+                BatchRow(
+                    title = ad.name ?: if (lib == AdLibraryActivity.Library.WEB) "Video" else "Ad",
+                    subtitle = listOfNotNull(ad.duration?.let { fmtDuration(it.toDouble()) }, ad.id?.let { "ID $it" }).joinToString(" · "),
+                    thumbnail = ad.poster, thumbSize = DpSize(64.dp, 64.dp),
+                    job = jobOf(ad), selected = ad.src in selected,
+                    onSelect = { if (it) selected += ad.src else selected -= ad.src },
+                    noun = noun, onDownload = { onDownload(ad) },
+                )
             }
         }
         if (ads.isNotEmpty()) {
-            val n = selected.size
-            Button(
-                onClick = { onDownloadMany(ads.filter { it.src in selected }); selected.clear() },
-                enabled = n > 0, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            ) {
-                Icon(Icons.Outlined.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                Text(if (n > 0) "Download $n selected $noun${if (n > 1) "s" else ""}" else "Select ${noun}s to download")
-            }
+            BatchButton(selected.size, noun, batch.mapNotNull { jobs[it] }, onDownloadSelected = {
+                onDownloadMany(ads.filter { it.src in selected }); selected.clear()
+            }, modifier = Modifier.padding(bottom = 12.dp))
         }
         MadeBy()
         Spacer(Modifier.height(12.dp))

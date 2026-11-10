@@ -131,6 +131,7 @@ function runNative(id, payload, onDone) {
   port.onDisconnect.addListener(() => {
     ports.delete(id);
     pausing.delete(id);
+    setTimeout(pumpQueue, 300); // a slot is free: start the next queued video
     if (!finished) {
       const err = chrome.runtime.lastError?.message;
       getJobs().then((jobs) => {
@@ -144,17 +145,38 @@ function runNative(id, payload, onDone) {
 }
 const pausing = new Set(); // job ids whose Pause was sent but not yet confirmed
 
+// Video downloads wait in line: a few run at once, the rest show "Queued" and start as others
+// finish (so picking a whole playlist doesn't start hundreds of downloads together).
+const MAX_VIDEOS_AT_ONCE = 3;
+
 async function startVideo({ url, format, sort, audioOnly, title, useCookies, id }) {
   id = id || newId();
   await updateJob(id, {
     kind: "video", url, title: title || `${siteLabel(url)} video`, site: siteLabel(url),
     format, sort, audioOnly: !!audioOnly, useCookies: !!useCookies,
-    status: "starting", percent: 0, error: null,
+    status: "queued", queuedAt: Date.now(), percent: 0, error: null, speed: "", eta: "",
   });
-  const cookies = useCookies ? await cookiesFor(url) : null;
-  // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
-  runNative(id, { action: "download", job: id, url, format, sort, audioOnly, cookies, folder: audioOnly ? "Music" : "Videos" });
+  pumpQueue();
   return id;
+}
+
+let pumping = Promise.resolve();
+function pumpQueue() {
+  pumping = pumping.then(async () => {
+    const jobs = Object.values(await getJobs());
+    let free = MAX_VIDEOS_AT_ONCE - jobs.filter((j) => j.kind === "video" && ports.has(j.id)).length;
+    const waiting = jobs.filter((j) => j.kind === "video" && j.status === "queued")
+      .sort((a, b) => (a.queuedAt || a.createdAt || 0) - (b.queuedAt || b.createdAt || 0));
+    for (const j of waiting) {
+      if (free-- <= 0) break;
+      await updateJob(j.id, { status: "starting" });
+      const cookies = j.useCookies ? await cookiesFor(j.url) : null;
+      // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
+      runNative(j.id, { action: "download", job: j.id, url: j.url, format: j.format, sort: j.sort,
+        audioOnly: j.audioOnly, cookies, folder: j.audioOnly ? "Music" : "Videos" });
+    }
+  }).catch((e) => console.warn("AnySave: queue", e));
+  return pumping;
 }
 
 async function startConvert({ path, name, spec, id }) {
@@ -269,6 +291,7 @@ async function pause(id) {
   const j = (await getJobs())[id];
   if (!j) return;
   if (j.kind === "file" && j.downloadId) { await chrome.downloads.pause(j.downloadId); await updateJob(id, { status: "paused", speed: "", eta: "" }); }
+  else if (j.kind === "video" && j.status === "queued") { await updateJob(id, { status: "paused" }); }
   else if (j.kind === "video" && ports.has(id)) { pausing.add(id); await updateJob(id, { status: "paused", speed: "", eta: "" }); ports.get(id).postMessage({ action: "pause" }); }
 }
 async function resume(id) {
@@ -309,7 +332,7 @@ async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
   return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
-const GATED = new Set(["info", "download", "directDownload", "file", "addLink", "convert"]);
+const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert"]);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -320,6 +343,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "info": {
         const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
         return native({ action: "info", url: msg.url, cookies });
+      }
+      case "playlist": {
+        const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
+        return native({ action: "playlist", url: msg.url, cookies });
       }
       case "download": return { ok: true, id: await startVideo(msg) };
       case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title }) };
@@ -605,6 +632,8 @@ mutateJobs((jobs) => {
     else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
   }
 });
+// Start queued videos again (the queue lives in storage, so it survives restarts).
+pumpQueue();
 // Resume polling file downloads after the service worker restarts.
 pollFiles();
 updateActionIcon();
