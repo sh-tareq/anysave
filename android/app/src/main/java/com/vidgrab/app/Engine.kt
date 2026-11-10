@@ -152,7 +152,7 @@ object Engine {
         val req = YoutubeDLRequest(url)
             .addOption("--yes-playlist")
             .addOption("--flat-playlist")
-            .addOption("-I", "1:300")
+            .addOption("-I", if (url.contains("list=RD")) "1:50" else "1:300") // a Mix never ends
             .addOption("-J")
             .addOption("--no-warnings")
         applyCookies(ctx, req)
@@ -218,7 +218,12 @@ object Engine {
     fun youtubeList(url: String): String? {
         val u = youtubeUri(url) ?: return null
         val list = u.getQueryParameter("list")
-        if (!list.isNullOrBlank()) return "https://www.youtube.com/playlist?list=$list"
+        // A Mix (RD…) only opens from the video it started from; YouTube won't show it as a playlist page.
+        // A Mix of one video is "RD" + that video's ID, so its link can be rebuilt from the list alone.
+        val v = u.getQueryParameter("v") ?: list?.takeIf { Regex("^RD[\\w-]{11}$").matches(it) }?.substring(2)
+        if (!list.isNullOrBlank()) return if (list.startsWith("RD") && v != null)
+            "https://www.youtube.com/watch?v=$v&list=$list"
+        else "https://www.youtube.com/playlist?list=$list"
         val seg = u.path.orEmpty().split('/').filter { it.isNotEmpty() }
         if (seg.isEmpty() || u.host == "youtu.be") return null
         val base = when {

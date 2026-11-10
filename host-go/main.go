@@ -599,7 +599,12 @@ func actionPlaylist(msg map[string]any) map[string]any {
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	cmd := command(ytdlp, append(args, "--yes-playlist", "--flat-playlist", "-I", "1:300", "-J", "--", url)...)
+	// A YouTube Mix (list=RD…) never ends; the first 50 is plenty and much quicker.
+	limit := "1:300"
+	if strings.Contains(url, "list=RD") {
+		limit = "1:50"
+	}
+	cmd := command(ytdlp, append(args, "--yes-playlist", "--flat-playlist", "-I", limit, "-J", "--", url)...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {

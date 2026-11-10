@@ -141,6 +141,12 @@ function youtubeList(pageUrl) {
     const u = new URL(pageUrl);
     if (!/(^|\.)youtube\.com$/.test(u.hostname)) return null;
     const list = u.searchParams.get("list");
+    // A Mix of one video is "RD" + that video's ID, so its link can be rebuilt from the list alone.
+    const v = u.searchParams.get("v") || (/^RD[\w-]{11}$/.test(list || "") ? list.slice(2) : null);
+    // A Mix (RD…) only opens from the video it started from; YouTube won't show it as a playlist page.
+    if (list && list.startsWith("RD") && v) return { url: `https://www.youtube.com/watch?v=${encodeURIComponent(v)}&list=${encodeURIComponent(list)}`, watch: u.pathname === "/watch", heading: "Videos in this Mix" };
+    // Your own lists need your YouTube login.
+    if (list === "WL" || list === "LL") return { url: `https://www.youtube.com/playlist?list=${list}`, watch: u.pathname === "/watch", heading: list === "WL" ? "Your Watch later" : "Your Liked videos", login: true };
     if (list) return { url: `https://www.youtube.com/playlist?list=${encodeURIComponent(list)}`, watch: u.pathname === "/watch", heading: "Videos in this playlist" };
     const m = u.pathname.match(/^\/(@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)(?:\/(featured|videos|shorts|streams))?\/?$/);
     if (m) {
@@ -152,9 +158,14 @@ function youtubeList(pageUrl) {
 }
 
 // Lists a playlist / channel and shows it as a pick-and-download list.
-async function showPlaylist(url, heading, below) {
-  const pl = await chrome.runtime.sendMessage({ type: "playlist", url, useCookies: $("cookies").checked });
-  if (!pl?.ok || !pl.entries?.length) return false;
+async function showPlaylist(url, heading, below, login = false) {
+  const pl = await chrome.runtime.sendMessage({ type: "playlist", url, useCookies: login || $("cookies").checked });
+  if (!pl?.ok || !pl.entries?.length) {
+    const raw = pl?.error || "Couldn't list the videos";
+    // "[youtube:tab] WL: YouTube said: The playlist does not exist." → "The playlist does not exist."
+    const tidy = raw.replace(/^\[[^\]]+\]\s*[^:]*:\s*/, "").replace(/^YouTube said:\s*/i, "");
+    return { ok: false, error: pl?.hostMissing ? "Helper app not found. Run the AnySave installer again." : (pl?.ok ? "This list has no videos AnySave can download." : tidy) };
+  }
   const videos = pl.entries.map((e) => ({ src: e.url, name: e.title, duration: e.duration, poster: e.thumbnail }));
   // "Blender Studio - Shorts" already names the channel; don't repeat it.
   const note = pl.uploader && !String(pl.title || "").includes(pl.uploader) ? [pl.title, pl.uploader].filter(Boolean).join(" · ") : (pl.title || "");
@@ -167,7 +178,16 @@ async function showPlaylist(url, heading, below) {
         audioOnly: !!q.audioOnly, useCookies: $("cookies").checked });
     },
   });
-  return true;
+  return { ok: true };
+}
+// A short note under the video card when its playlist can't be listed.
+function playlistProblem(heading, error) {
+  const box = $("pageVideos");
+  box.hidden = false; box.classList.add("below");
+  $("pvTitle").textContent = heading;
+  $("pvNote").innerHTML = `<span class="err">Couldn't list it: ${escapeHtml(error)}</span>`;
+  $("pvQualityBox").hidden = true; $("pvAllBox").hidden = true;
+  $("pvList").innerHTML = ""; $("pvDownload").hidden = true;
 }
 
 // The download a page ad belongs to: Meta ads by Library ID, others by their video file.
@@ -186,6 +206,7 @@ function renderPageVideos(videos, library, note, opts = {}) {
   $("pvTitle").textContent = `${opts.heading || (library ? "Ads on this page" : "Videos on this page")} (${videos.length})`;
   $("pvNote").textContent = note || "";
   $("pvQualityBox").hidden = !opts.quality;
+  $("pvDownload").hidden = false;
   if (opts.quality && !$("pvQuality").options.length) {
     for (const q of BATCH_QUALITIES) $("pvQuality").append(new Option(q.label, JSON.stringify(q)));
   }
@@ -361,14 +382,18 @@ async function loadInfo() {
   const yl = youtubeList(tab.url);
   if (yl && !yl.watch) {
     setState("Listing the videos…");
-    if (await showPlaylist(yl.url, yl.heading, false)) { $("state").hidden = true; return; }
+    const r = await showPlaylist(yl.url, yl.heading, false, yl.login);
+    if (r.ok) { $("state").hidden = true; return; }
+    setState(`<span class="err">Couldn't list the videos: ${escapeHtml(r.error)}</span>` +
+      (yl.login ? '<br><span class="small">Make sure you\'re logged in to YouTube in this Chrome window.</span>' : ""));
+    return;
   }
   setState("Looking up video…");
   const res = await chrome.runtime.sendMessage({ type: "info", url: tab.url, useCookies: $("cookies").checked });
   // Other sites: a link yt-dlp reads as a list of videos (no single video in it).
   if (!res?.hostMissing && (!res?.ok || !res.options?.length) && !yl) {
     setState("Looking for a list of videos…");
-    if (await showPlaylist(tab.url, "Videos on this page", false)) { $("state").hidden = true; return; }
+    if ((await showPlaylist(tab.url, "Videos on this page", false)).ok) { $("state").hidden = true; return; }
   }
   if (!res?.ok && !res?.hostMissing) {
     // yt-dlp couldn't read the page: fall back to video files the page itself is playing.
@@ -413,7 +438,12 @@ async function loadInfo() {
   $("dl").disabled = !sel.options.length;
   dlJobId = null; dlFresh = false;
   // A video that's part of a playlist: offer the rest of the playlist underneath.
-  if (yl?.watch) showPlaylist(yl.url, yl.heading, true);
+  if (yl?.watch) {
+    $("pageVideos").hidden = false; $("pageVideos").classList.add("below");
+    $("pvTitle").textContent = yl.heading; $("pvNote").textContent = "Listing the videos…";
+    $("pvList").innerHTML = ""; $("pvAllBox").hidden = true; $("pvQualityBox").hidden = true; $("pvDownload").hidden = true;
+    showPlaylist(yl.url, yl.heading, true, yl.login).then((r) => { if (!r.ok) playlistProblem(yl.heading, r.error); });
+  }
   lastJobs = (await chrome.storage.local.get("jobs")).jobs || {};
   showDlProgress();
   if (res.needsFfmpeg) {
