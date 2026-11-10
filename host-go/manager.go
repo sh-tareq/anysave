@@ -84,6 +84,20 @@ func actionPickFile(msg map[string]any) map[string]any {
 		"duration": probeDuration(path)}
 }
 
+// actionFileInfo gives the size and length of a file AnySave saved (for the converter).
+func actionFileInfo(msg map[string]any) map[string]any {
+	p, err := filepath.Abs(str(msg, "path"))
+	base, _ := filepath.Abs(downloadDir)
+	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) {
+		return map[string]any{"ok": false, "error": "File not found"}
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return map[string]any{"ok": false, "error": "File not found"}
+	}
+	return map[string]any{"ok": true, "size": st.Size(), "duration": probeDuration(p)}
+}
+
 var durRe = regexp.MustCompile(`Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)
 
 // probeDuration reads "Duration: 00:09:56.48" from ffmpeg -i (no ffprobe needed).

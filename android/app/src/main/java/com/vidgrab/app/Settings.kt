@@ -26,7 +26,8 @@ object Settings {
 
     private val _quality = MutableStateFlow(Quality.BEST)
     val quality: StateFlow<Quality> = _quality
-    private val _autoClipboard = MutableStateFlow(true)
+    /** Off by default: a copied link is only offered on Home until the user opts in. */
+    private val _autoClipboard = MutableStateFlow(false)
     val autoClipboard: StateFlow<Boolean> = _autoClipboard
     private val _wifiOnly = MutableStateFlow(false)
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
@@ -40,7 +41,7 @@ object Settings {
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
         _quality.value = runCatching { Quality.valueOf(prefs.getString("quality", null)!!) }.getOrDefault(Quality.BEST)
-        _autoClipboard.value = prefs.getBoolean("autoClipboard", true)
+        _autoClipboard.value = prefs.getBoolean("autoClipboard", false)
         _wifiOnly.value = prefs.getBoolean("wifiOnly", false)
         _maxParallel.value = prefs.getInt("maxParallel", 3)
         _sortIntoFolders.value = prefs.getBoolean("sortIntoFolders", true)

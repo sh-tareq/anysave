@@ -46,6 +46,7 @@ const P = {
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
   retry: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
+  check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
   remove: "M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
 };
 const svg = (name, size = 20) =>
@@ -109,16 +110,16 @@ function row(j) {
     line = j.status === "starting" ? "Starting…"
       : [`${pct.toFixed(0)}%`, prog, j.speed, j.eta && `ETA ${j.eta}`].filter(Boolean).join(" · ");
   } else if (paused) line = ["Paused", `${pct.toFixed(0)}%`].join(" · ");
-  else if (j.status === "done") line = [j.qualityLabel, size(j.totalBytes), j.site, ago(j.createdAt)].filter(Boolean).join(" · ");
+  else if (j.status === "done") line = ["Done", j.qualityLabel, size(j.totalBytes), j.site, ago(j.finishedAt || j.createdAt)].filter(Boolean).join(" · ");
   else if (j.status === "error") line = `<span class="err">${esc(j.error || "Failed")}</span>`;
   else line = "Cancelled";
 
   li.innerHTML = `
-    <div class="icon">${svg(category(j), 22)}</div>
+    <div class="icon">${svg(category(j), 22)}${j.status === "done" ? `<span class="done" title="Finished">${svg("check", 13)}</span>` : ""}</div>
     <div class="info">
       <div class="name" title="${esc(j.fileName || j.title || j.url)}">${esc(displayName(j))}</div>
       ${running || paused ? `<div class="bar ${paused ? "paused" : ""}"><div style="width:${pct}%"></div></div>` : ""}
-      <div class="meta">${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : esc(line)}</div>
+      <div class="meta">${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : j.status === "done" ? esc(line).replace(/^Done/, '<span class="ok">Done</span>') : esc(line)}</div>
     </div>
     <div class="btns"></div>`;
   const btns = li.querySelector(".btns");
@@ -178,6 +179,12 @@ function fmt(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:${Str
 
 function choose(p) {
   picked = p;
+  // Files from the download list don't carry their length; "Under N MB" needs it.
+  if (!p.duration && p.path) {
+    send({ type: "fileInfo", path: p.path }).then((r) => {
+      if (picked === p && r?.ok) { p.duration = r.duration || 0; p.size = p.size || r.size; choose(p); }
+    });
+  }
   $("picked").classList.remove("muted");
   $("picked").textContent = p.name + (p.size ? ` · ${size(p.size)}` : "") + (p.duration ? ` · ${fmt(p.duration)}` : "");
   $("duration").textContent = p.duration ? `Length ${fmt(p.duration)}` : "";
@@ -255,8 +262,20 @@ $("convertBtn").onclick = async () => {
 
 // ---------- start ----------
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.jobs) { jobs = changes.jobs.newValue || {}; render(); }
+  if (area === "local" && changes.jobs) {
+    jobs = changes.jobs.newValue || {};
+    render();
+    const old = changes.jobs.oldValue || {};
+    if (Object.values(jobs).some((j) => j.status === "done" && old[j.id]?.status !== "done")) markSeen();
+  }
 });
+// Finished downloads shown here count as seen: the ✓ on the toolbar icon clears.
+let seenTimer = null;
+function markSeen() {
+  if (document.visibilityState !== "visible" || seenTimer) return;
+  seenTimer = setTimeout(() => { seenTimer = null; send({ type: "seen" }); }, 800);
+}
+document.addEventListener("visibilitychange", markSeen);
 $("captureAll").addEventListener("change", (e) => send({ type: "setCapture", on: e.target.checked }));
 
 (async () => {
@@ -264,6 +283,7 @@ $("captureAll").addEventListener("change", (e) => send({ type: "setCapture", on:
   $("captureAll").checked = settings.captureAll !== false;
   jobs = (await chrome.storage.local.get("jobs")).jobs || {};
   render();
+  markSeen();
   updateLabel();
   showTab(location.hash === "#convert" ? "convert" : "downloads");
 })();

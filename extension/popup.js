@@ -226,12 +226,13 @@ async function loadInfo() {
   $("meta").textContent = [res.uploader, fmtDuration(res.duration)].filter(Boolean).join(" · ");
   const sel = $("format");
   sel.innerHTML = "";
-  for (const opt of res.options) {
+  for (const opt of res.options || []) {
     const o = document.createElement("option");
     o.value = JSON.stringify(opt);
     o.textContent = opt.label;
     sel.appendChild(o);
   }
+  $("dl").disabled = !sel.options.length;
   if (res.needsFfmpeg) {
     $("meta").textContent += " · video needs ffmpeg (audio only for now)";
   } else if (!res.hasFfmpeg) {
@@ -244,9 +245,11 @@ function escapeHtml(s) {
 }
 
 $("dl").addEventListener("click", async () => {
-  if (!current) return;
+  if (!current || !$("format").value || $("dl").disabled) return;
   const opt = JSON.parse($("format").value);
-  await chrome.runtime.sendMessage({
+  const label = $("dl").textContent;
+  $("dl").disabled = true; // one click, one download
+  const res = await chrome.runtime.sendMessage({
     type: "download",
     url: current.url,
     title: current.title,
@@ -255,6 +258,13 @@ $("dl").addEventListener("click", async () => {
     audioOnly: !!opt.audioOnly,
     useCookies: $("cookies").checked,
   });
+  if (res?.ok) {
+    $("dl").textContent = "Started ✓";
+    setTimeout(() => { $("dl").textContent = label; $("dl").disabled = false; }, 2000);
+  } else {
+    $("dl").textContent = label; $("dl").disabled = false;
+    setState('<span class="err">' + escapeHtml(res?.error || "Couldn't start the download") + "</span>");
+  }
 });
 
 $("cookies").addEventListener("change", async () => {
@@ -275,7 +285,7 @@ function renderJobs(jobs) {
     const pct = Math.max(0, Math.min(100, j.percent || 0));
     let line = "";
     if (j.status === "downloading") line = `${pct.toFixed(0)}% · ${j.speed || ""} · ETA ${j.eta || "?"}`;
-    else if (j.status === "done") line = "Saved";
+    else if (j.status === "done") line = '<span class="ok">✓ Saved</span>';
     else if (j.status === "error") line = `<span class="err">${escapeHtml(j.error || "Failed")}</span>`;
     else line = escapeHtml(j.status);
     li.innerHTML = `<div class="name">${escapeHtml(j.title || j.url)}</div>
@@ -296,7 +306,11 @@ function renderJobs(jobs) {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.jobs) renderJobs(changes.jobs.newValue);
+  if (area === "local" && changes.jobs) {
+    renderJobs(changes.jobs.newValue);
+    const finished = Object.values(changes.jobs.newValue || {}).some((j) => j.status === "done" && changes.jobs.oldValue?.[j.id]?.status !== "done");
+    if (finished) chrome.runtime.sendMessage({ type: "seen" }); // finished while the popup is open
+  }
 });
 
 const TERMS_VERSION = 2;
@@ -327,5 +341,6 @@ async function ensureAgreed() {
   await ensureAgreed();
   $("cookies").checked = !!(await chrome.storage.local.get("useCookies")).useCookies;
   renderJobs((await chrome.storage.local.get("jobs")).jobs);
+  chrome.runtime.sendMessage({ type: "seen" }); // clears the ✓ on the toolbar icon
   loadInfo();
 })();

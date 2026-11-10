@@ -13,7 +13,9 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -27,16 +29,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
@@ -47,10 +51,13 @@ import kotlin.coroutines.resume
  */
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private lateinit var slots: Semaphore
+    private val running = MutableStateFlow(0)
     private val activeCount = AtomicInteger(0)
-    @Volatile private var lastStartId = 0
-    private var lastNotify = 0L
+    /** Newest startId of any command; only touched on the main thread. */
+    private var lastStartId = 0
+    private val main = Handler(Looper.getMainLooper())
+    /** Jobs that may show a progress notification, and when each last updated it. */
+    private val lastNotify = ConcurrentHashMap<String, Long>()
 
     private class Stopped : Exception()
 
@@ -58,32 +65,53 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        slots = Semaphore(Settings.maxParallel.value.coerceIn(1, 5))
         ServiceCompat.startForeground(
-            this, NOTIF_PROGRESS, progressNotification(null, "Starting…", 0f, true),
+            this, NOTIF_PROGRESS, summaryNotification(),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val id = intent?.getStringExtra(EXTRA_ID) ?: return START_NOT_STICKY
-        when (intent.action) {
-            ACTION_START -> {
-                lastStartId = startId
+        lastStartId = startId
+        val id = intent?.getStringExtra(EXTRA_ID)
+        when (intent?.action) {
+            ACTION_START -> if (id != null) {
                 activeCount.incrementAndGet()
+                updateSummary()
                 scope.launch {
-                    try { slots.withPermit { runJob(id) } }
+                    try { withSlot { runJob(id) } }
                     finally {
-                        if (activeCount.decrementAndGet() == 0 && stopSelfResult(lastStartId)) {
-                            ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                        }
+                        endProgress(id)
+                        activeCount.decrementAndGet()
+                        main.post { updateSummary(); stopIfIdle() }
                     }
                 }
             }
-            ACTION_CANCEL -> stopJob(id, JobStatus.CANCELLED)
-            ACTION_PAUSE -> stopJob(id, JobStatus.PAUSED)
+            ACTION_CANCEL -> id?.let { stopJob(it, JobStatus.CANCELLED) }
+            ACTION_PAUSE -> id?.let { stopJob(it, JobStatus.PAUSED) }
         }
+        // A pause/cancel can arrive after the last job ended; don't leave the notification behind.
+        stopIfIdle()
         return START_NOT_STICKY
+    }
+
+    /** Main thread only, like onStartCommand, so a start that just arrived is always counted. */
+    private fun stopIfIdle() {
+        if (activeCount.get() == 0 && stopSelfResult(lastStartId)) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        }
+    }
+
+    /** Waits for a free slot. Reads the setting each time, so a change applies to the next downloads. */
+    private suspend fun <T> withSlot(block: suspend () -> T): T {
+        while (true) {
+            val now = running.value
+            if (now < Settings.maxParallel.value.coerceIn(1, 5)) {
+                if (running.compareAndSet(now, now + 1)) break else continue
+            }
+            combine(running, Settings.maxParallel) { r, m -> r < m.coerceIn(1, 5) }.first { it }
+        }
+        try { return block() } finally { running.update { it - 1 } }
     }
 
     /** Pause keeps the partial file; cancel deletes it. */
@@ -110,6 +138,7 @@ class DownloadService : Service() {
     private suspend fun runJob(id: String) {
         val job = Downloads.get(id) ?: return
         if (job.status != JobStatus.QUEUED) return // paused or cancelled while waiting
+        lastNotify[id] = 0L // from now on this job may show its notification
 
         Engine.state.first { it != Engine.State.STARTING } // setup / yt-dlp update first
 
@@ -153,7 +182,9 @@ class DownloadService : Service() {
                 else -> {
                     val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else (e.message ?: e.toString())
                     Downloads.update(id) { it.copy(status = JobStatus.ERROR, error = msg, speed = "", eta = "") }
-                    keepPartial = job.kind == JobKind.FILE // a file download can be resumed with Retry
+                    // Downloads resume from their partial files with Retry (yt-dlp continues .part files).
+                    keepPartial = job.kind != JobKind.CONVERT
+                    errorNotification(Downloads.get(id) ?: job)
                 }
             }
         } finally {
@@ -187,6 +218,7 @@ class DownloadService : Service() {
         if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
         else req.addOption("--merge-output-format", "mp4")
         Engine.applyCookies(this, req)
+        Engine.applyJsRuntime(this, req)
 
         var finalPath: String? = null
         YoutubeDL.getInstance().execute(req, id) { _, _, line ->
@@ -365,10 +397,16 @@ class DownloadService : Service() {
                 if (uri != null) break
             }
             if (uri == null) throw Exception("Couldn't create the file in Downloads")
-            resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+            try {
+                resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (e: Throwable) {
+                // Don't leave a hidden, half-written entry in Downloads.
+                runCatching { resolver.delete(uri, null, null) }
+                throw e
+            }
             return uri
         }
         // Android 8/9: write to the public folder, then ask the media scanner for a shareable Uri.
@@ -389,14 +427,23 @@ class DownloadService : Service() {
 
     // ---------- notifications ----------
 
+    private fun progressId(id: String) = ("progress:$id").hashCode()
+
+    /** Each job has its own notification, throttled on its own. */
     private fun notifyProgress(job: Job, text: String?, pct: Float, indeterminate: Boolean, force: Boolean = false) {
+        val last = lastNotify[job.id] ?: return // job already ended
         val now = System.currentTimeMillis()
-        if (!force && now - lastNotify < 700) return
-        lastNotify = now
+        if (!force && now - last < 700) return
+        lastNotify[job.id] = now
         runCatching {
             getSystemService(NotificationManager::class.java)
-                .notify(NOTIF_PROGRESS, progressNotification(job, text, pct, indeterminate))
+                .notify(progressId(job.id), progressNotification(job, text, pct, indeterminate))
         }
+    }
+
+    private fun endProgress(id: String) {
+        lastNotify.remove(id)
+        runCatching { getSystemService(NotificationManager::class.java).cancel(progressId(id)) }
     }
 
     private fun openAppIntent() = PendingIntent.getActivity(
@@ -407,21 +454,38 @@ class DownloadService : Service() {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
-    private fun progressNotification(job: Job?, text: String?, pct: Float, indeterminate: Boolean): Notification {
-        val others = (activeCount.get() - 1).coerceAtLeast(0)
-        val b = NotificationCompat.Builder(this, AnySaveApp.CH_PROGRESS)
+    /** The service's own notification; job notifications are grouped under it. */
+    private fun summaryNotification(): Notification {
+        val n = activeCount.get()
+        return NotificationCompat.Builder(this, AnySaveApp.CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_download)
-            .setContentTitle(job?.title ?: "AnySave")
-            .setContentText(text ?: listOf("${pct.toInt()}%", job?.speed.orEmpty(), job?.eta?.let { "ETA $it" }.orEmpty(),
-                if (others > 0) "+$others more" else "").filter { it.isNotBlank() }.joinToString(" · "))
+            .setContentTitle("AnySave")
+            .setContentText(if (n > 0) "$n active" else "Starting…")
             .setOnlyAlertOnce(true)
             .setOngoing(true)
+            .setGroup(GROUP)
+            .setGroupSummary(true)
+            .setContentIntent(openAppIntent())
+            .build()
+    }
+
+    private fun updateSummary() {
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF_PROGRESS, summaryNotification()) }
+    }
+
+    private fun progressNotification(job: Job, text: String?, pct: Float, indeterminate: Boolean): Notification {
+        val b = NotificationCompat.Builder(this, AnySaveApp.CH_PROGRESS)
+            .setSmallIcon(R.drawable.ic_stat_download)
+            .setContentTitle(job.title)
+            .setContentText(text ?: listOf("${pct.toInt()}%", job.speed, job.eta.takeIf { it.isNotBlank() }?.let { "ETA $it" }.orEmpty())
+                .filter { it.isNotBlank() }.joinToString(" · "))
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setGroup(GROUP)
             .setProgress(100, pct.toInt(), indeterminate)
             .setContentIntent(openAppIntent())
-        if (job != null) {
-            if (job.kind != JobKind.CONVERT) b.addAction(0, "Pause", serviceIntent(ACTION_PAUSE, job.id))
-            b.addAction(0, "Cancel", serviceIntent(ACTION_CANCEL, job.id))
-        }
+        if (job.kind != JobKind.CONVERT) b.addAction(0, "Pause", serviceIntent(ACTION_PAUSE, job.id))
+        b.addAction(0, "Cancel", serviceIntent(ACTION_CANCEL, job.id))
         return b.build()
     }
 
@@ -445,6 +509,17 @@ class DownloadService : Service() {
         runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
     }
 
+    private fun errorNotification(job: Job) {
+        val n = NotificationCompat.Builder(this, AnySaveApp.CH_DONE)
+            .setSmallIcon(R.drawable.ic_stat_download)
+            .setContentTitle(if (job.kind == JobKind.CONVERT) "Conversion failed" else "Download failed")
+            .setContentText(job.title)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent())
+            .build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
+    }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
@@ -452,6 +527,7 @@ class DownloadService : Service() {
 
     companion object {
         private const val NOTIF_PROGRESS = 1
+        private const val GROUP = "active"
         private const val ACTION_START = "start"
         private const val ACTION_CANCEL = "cancel"
         private const val ACTION_PAUSE = "pause"
@@ -522,10 +598,10 @@ class DownloadService : Service() {
             enqueue(ctx, id)
         }
 
-        /** Retry: file downloads resume from their partial file; others start over. */
+        /** Retry: downloads resume from their partial files; conversions start over. */
         fun retry(ctx: Context, id: String) {
             val old = Downloads.get(id) ?: return
-            if (old.kind == JobKind.FILE) { resume(ctx, id); return }
+            if (old.kind != JobKind.CONVERT) { resume(ctx, id); return }
             Downloads.remove(id)
             start(ctx, old.copy(id = newId(), status = JobStatus.QUEUED, percent = 0f, error = null,
                 speed = "", eta = "", createdAt = System.currentTimeMillis()))

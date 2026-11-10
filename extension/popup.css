@@ -55,3 +55,5 @@ li.pv img, .pv-ph { width:54px; height:54px; object-fit:cover; border-radius:6px
 .ghost:hover { border-color: var(--accent); }
 
 .pill:empty { display:none; }
+
+.ok { color:#2f9e5b; font-weight:600; }

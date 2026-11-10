@@ -67,6 +67,16 @@ object Engine {
         }
     }
 
+    /**
+     * YouTube needs a JavaScript runtime to unlock its video formats (without one, yt-dlp
+     * often finds only audio). The app ships QuickJS as libqjs.so: Android only lets apps run
+     * programs from their native-library folder. See scripts/fetch-quickjs.sh.
+     */
+    fun applyJsRuntime(ctx: Context, req: YoutubeDLRequest) {
+        val qjs = File(ctx.applicationInfo.nativeLibraryDir, "libqjs.so")
+        if (qjs.exists()) req.addOption("--js-runtimes", "quickjs:${qjs.absolutePath}")
+    }
+
     fun cookieFile(ctx: Context) = File(ctx.filesDir, "cookies.txt")
 
     fun applyCookies(ctx: Context, req: YoutubeDLRequest) {
@@ -97,6 +107,7 @@ object Engine {
             .addOption("--no-playlist")
             .addOption("--no-warnings")
         applyCookies(ctx, req)
+        applyJsRuntime(ctx, req)
         val out = try {
             YoutubeDL.getInstance().execute(req).out
         } catch (e: YoutubeDLException) {

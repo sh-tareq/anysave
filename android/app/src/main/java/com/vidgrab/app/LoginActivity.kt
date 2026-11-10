@@ -9,6 +9,7 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +39,8 @@ class LoginActivity : ComponentActivity() {
         val site = Site.valueOf(intent.getStringExtra(EXTRA_SITE) ?: Site.INSTAGRAM.name)
         setContent {
             AnySaveTheme {
+                // Back counts as Done, so a finished login is still saved.
+                BackHandler { saveAndFinish() }
                 Scaffold(topBar = {
                     TopAppBar(
                         title = { Text("Log in to ${site.label}") },

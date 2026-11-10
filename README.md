@@ -51,6 +51,9 @@ Output in `dist/`:
 The R8 mapping for each Android release is kept in `dist-assets/r8-mapping-<version>.txt`
 (not shared). Use it to read crash stack traces from that build.
 Logos are regenerated with `swift scripts/make-icons.swift`.
+The Android app bundles QuickJS (`android/app/src/main/jniLibs/*/libqjs.so`), the JavaScript
+runtime yt-dlp needs for YouTube; refresh it with `scripts/fetch-quickjs.sh` (checks each
+file against its published SHA-256). The desktop installers download Deno for the same reason.
 
 Each zip includes a `How to install.txt` written for non-technical people.
 

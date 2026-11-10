@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: never copy login sessions or half-downloaded files off the phone -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="cookies.txt" />
+        <exclude domain="file" path="partial/" />
+        <exclude domain="root" path="app_webview/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="cookies.txt" />
+        <exclude domain="file" path="partial/" />
+        <exclude domain="root" path="app_webview/" />
+    </device-transfer>
+</data-extraction-rules>

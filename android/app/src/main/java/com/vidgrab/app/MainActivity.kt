@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -234,6 +235,9 @@ fun AppShell(vm: MainViewModel) {
     var showWelcome by remember { mutableStateOf(!Settings.onboarded || !Settings.acceptedTerms) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+
+    // Back on another tab goes to Home first instead of closing the app
+    BackHandler(enabled = vm.tab != MainActivity.TAB_HOME) { vm.tab = MainActivity.TAB_HOME }
 
     // Open the built-in ad browser when a link belongs to an ad library
     LaunchedEffect(vm.openAdLibrary) {

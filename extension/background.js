@@ -21,6 +21,16 @@ function updateJob(id, patch) {
   });
   return writeChain;
 }
+// Any other change to the whole list (remove, clear) goes through the same chain, so a
+// progress write that was already queued can't bring removed items back.
+function mutateJobs(fn) {
+  writeChain = writeChain.then(async () => {
+    const jobs = await getJobs();
+    fn(jobs);
+    await chrome.storage.local.set({ jobs });
+  });
+  return writeChain;
+}
 function newId() { return String(Date.now()) + Math.floor(Math.random() * 1000); }
 
 // ---------- helpers ----------
@@ -57,10 +67,18 @@ function siteLabel(url) {
 function native(msg) {
   return new Promise((resolve) => {
     chrome.runtime.sendNativeMessage(HOST, msg, (res) => {
-      if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message, hostMissing: true });
+      if (chrome.runtime.lastError) resolve(nativeError(chrome.runtime.lastError.message));
       else resolve(res || { ok: false, error: "No answer from helper" });
     });
   });
+}
+
+// Chrome's message when the helper isn't installed/registered, vs. when it crashed.
+function helperMissing(msg) { return /not found|forbidden/i.test(msg || ""); }
+function nativeError(msg) {
+  return helperMissing(msg)
+    ? { ok: false, error: msg, hostMissing: true }
+    : { ok: false, error: "The AnySave helper stopped unexpectedly. Please try again." };
 }
 
 // Login cookies for the site of `url`, in Netscape cookies.txt format. macOS blocks other
@@ -95,10 +113,11 @@ function runNative(id, payload, onDone) {
   let finished = false;
   port.onMessage.addListener((msg) => {
     if (msg.type === "progress") {
+      if (pausing.has(id)) return; // progress still in flight after Pause was pressed
       updateJob(id, { status: "downloading", percent: msg.percent, speed: msg.speed, eta: msg.eta });
     } else if (msg.type === "done") {
       finished = true;
-      updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "",
+      updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "", finishedAt: Date.now(),
         fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined });
       onDone && onDone(msg);
     } else if (msg.type === "paused") {
@@ -111,16 +130,19 @@ function runNative(id, payload, onDone) {
   });
   port.onDisconnect.addListener(() => {
     ports.delete(id);
+    pausing.delete(id);
     if (!finished) {
       const err = chrome.runtime.lastError?.message;
       getJobs().then((jobs) => {
-        if (jobs[id]?.status === "paused") return;
-        updateJob(id, { status: err ? "error" : "cancelled", error: err });
+        if (["paused", "cancelled"].includes(jobs[id]?.status)) return;
+        updateJob(id, { status: err ? "error" : "cancelled", speed: "", eta: "",
+          error: err ? (helperMissing(err) ? "AnySave helper not found. Run the AnySave installer again, then restart Chrome." : "The AnySave helper stopped unexpectedly. Try again.") : null });
       });
     }
   });
   port.postMessage(payload);
 }
+const pausing = new Set(); // job ids whose Pause was sent but not yet confirmed
 
 async function startVideo({ url, format, sort, audioOnly, title, useCookies, id }) {
   id = id || newId();
@@ -130,13 +152,14 @@ async function startVideo({ url, format, sort, audioOnly, title, useCookies, id 
     status: "starting", percent: 0, error: null,
   });
   const cookies = useCookies ? await cookiesFor(url) : null;
-  runNative(id, { action: "download", url, format, sort, audioOnly, cookies, folder: audioOnly ? "Music" : "Videos" });
+  // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
+  runNative(id, { action: "download", job: id, url, format, sort, audioOnly, cookies, folder: audioOnly ? "Music" : "Videos" });
   return id;
 }
 
-async function startConvert({ path, name, spec }) {
-  const id = newId();
-  await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0,
+async function startConvert({ path, name, spec, id }) {
+  id = id || newId();
+  await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0, error: null,
     qualityLabel: specLabel(spec) });
   runNative(id, { action: "convert", path, spec });
   return id;
@@ -150,12 +173,13 @@ function specLabel(s) {
 
 // ---------- any file (Chrome's downloader: pause/resume built in) ----------
 
-async function startFile({ url, name, title }) {
-  const id = newId();
+async function startFile({ url, name, title, id }) {
+  id = id || newId();
   const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
   const folder = categoryOf(fileName, "file");
   await updateJob(id, { kind: "file", url, title: title || fileName, fileName, site: siteLabel(url),
-    status: "starting", percent: 0, qualityLabel: "File" });
+    status: "starting", percent: 0, qualityLabel: "File", error: null, downloadId: null, doneBytes: 0, totalBytes: 0 });
+  ownUrls.add(url); // so onCreated doesn't adopt it a second time as a "website download"
   try {
     const downloadId = await chrome.downloads.download({
       url, filename: `AnySave/${folder}/${fileName}`, conflictAction: "uniquify",
@@ -165,8 +189,10 @@ async function startFile({ url, name, title }) {
   } catch (e) {
     await updateJob(id, { status: "error", error: String(e.message || e) });
   }
+  setTimeout(() => ownUrls.delete(url), 5000);
   return id;
 }
+const ownUrls = new Set();
 
 let polling = null;
 function pollFiles() {
@@ -180,7 +206,7 @@ function pollFiles() {
       if (!d) continue;
       if (d.state === "complete") {
         await updateJob(j.id, { status: "done", percent: 100, file: d.filename, fileName: d.filename.split(/[\\/]/).pop(),
-          totalBytes: d.totalBytes, doneBytes: d.totalBytes, speed: "", eta: "" });
+          totalBytes: d.totalBytes, doneBytes: d.totalBytes, speed: "", eta: "", finishedAt: j.finishedAt || Date.now() });
       } else if (d.state === "interrupted") {
         await updateJob(j.id, { status: d.error === "USER_CANCELED" ? "cancelled" : "error", error: d.error, speed: "", eta: "" });
       } else if (d.paused) {
@@ -204,7 +230,9 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   if (!j) return;
   const [d] = await chrome.downloads.search({ id: delta.id });
   if (delta.state.current === "complete") {
-    await updateJob(j.id, { status: "done", percent: 100, file: d?.filename, fileName: d?.filename?.split(/[\\/]/).pop() });
+    const bytes = d?.totalBytes > 0 ? d.totalBytes : d?.bytesReceived;
+    await updateJob(j.id, { status: "done", percent: 100, file: d?.filename, fileName: d?.filename?.split(/[\\/]/).pop(),
+      totalBytes: bytes, doneBytes: bytes, speed: "", eta: "", finishedAt: j.finishedAt || Date.now() });
   } else if (delta.state.current === "interrupted") {
     await updateJob(j.id, { status: d?.error === "USER_CANCELED" ? "cancelled" : "error", error: d?.error || "Download failed" });
   }
@@ -230,7 +258,8 @@ async function addLink(url, title) {
   if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title }) };
   // Unknown: ask the helper what the server says it is.
   const p = await native({ action: "probe", url });
-  if (p.ok && p.isFile) return { ok: true, id: await startFile({ url, name: p.name, title }) };
+  // Without the helper, video pages can't be read anyway: let Chrome download the link.
+  if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title }) };
   return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title }) };
 }
 
@@ -240,7 +269,7 @@ async function pause(id) {
   const j = (await getJobs())[id];
   if (!j) return;
   if (j.kind === "file" && j.downloadId) { await chrome.downloads.pause(j.downloadId); await updateJob(id, { status: "paused", speed: "", eta: "" }); }
-  else if (j.kind === "video" && ports.has(id)) { await updateJob(id, { status: "paused", speed: "", eta: "" }); ports.get(id).postMessage({ action: "pause" }); }
+  else if (j.kind === "video" && ports.has(id)) { pausing.add(id); await updateJob(id, { status: "paused", speed: "", eta: "" }); ports.get(id).postMessage({ action: "pause" }); }
 }
 async function resume(id) {
   const j = (await getJobs())[id];
@@ -257,15 +286,21 @@ async function cancel(id) {
   const j = (await getJobs())[id];
   if (!j) return;
   if (j.downloadId) { try { await chrome.downloads.cancel(j.downloadId); } catch {} }
-  if (ports.has(id)) { ports.get(id).disconnect(); ports.delete(id); }
+  if (ports.has(id)) {
+    // Tell the helper it's a real cancel (delete the pieces); closing alone means "pause".
+    try { ports.get(id).postMessage({ action: "cancel" }); } catch {}
+    const port = ports.get(id); ports.delete(id);
+    setTimeout(() => { try { port.disconnect(); } catch {} }, 300);
+  }
   await updateJob(id, { status: "cancelled", speed: "", eta: "" });
 }
 async function retry(id) {
   const j = (await getJobs())[id];
   if (!j) return;
-  if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title });
-  if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec });
-  return startVideo({ ...j, id: undefined });
+  // Retry restarts the same row, so the failed one doesn't stay behind in "Failed".
+  if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id });
+  if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec, id });
+  return startVideo({ ...j, id });
 }
 
 // ---------- terms gate + messages ----------
@@ -296,15 +331,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "resume": await resume(msg.id); return { ok: true };
       case "cancel": await cancel(msg.id); return { ok: true };
       case "retry": await retry(msg.id); return { ok: true };
-      case "remove": {
-        const jobs = await getJobs(); delete jobs[msg.id];
-        await chrome.storage.local.set({ jobs }); return { ok: true };
-      }
-      case "clear": {
-        const jobs = await getJobs();
-        for (const [k, j] of Object.entries(jobs)) if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];
-        await chrome.storage.local.set({ jobs }); return { ok: true };
-      }
+      case "remove": await mutateJobs((jobs) => { delete jobs[msg.id]; }); return { ok: true };
+      case "clear":
+        await mutateJobs((jobs) => {
+          for (const [k, j] of Object.entries(jobs)) if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];
+        });
+        return { ok: true };
+      case "fileInfo": return native({ action: "fileInfo", path: msg.path });
       case "reveal": {
         const j = msg.id ? (await getJobs())[msg.id] : null;
         if (j?.downloadId) { chrome.downloads.show(j.downloadId); return { ok: true }; }
@@ -312,6 +345,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
       case "openManager": openManager(msg.tab); return { ok: true };
+      case "seen": await markSeen(); return { ok: true };
       case "setCapture": {
         const { settings = {} } = await chrome.storage.local.get("settings");
         await chrome.storage.local.set({ settings: { ...settings, captureAll: !!msg.on } });
@@ -337,7 +371,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
   // Move pre-2.0 session jobs into the persistent store.
   const old = (await chrome.storage.session.get("jobs")).jobs;
-  if (old) { const jobs = await getJobs(); await chrome.storage.local.set({ jobs: { ...old, ...jobs } }); }
+  if (old) await mutateJobs((jobs) => { for (const [k, j] of Object.entries(old)) if (!jobs[k]) jobs[k] = j; });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -354,8 +388,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   } else {
     await addLink(target, info.menuItemId === "vg-page" ? tab?.title : undefined);
   }
-  chrome.action.setBadgeText({ text: "↓" });
-  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2500);
+  // The job's own progress shows on the badge as soon as it starts.
+  lastIconState = "";
+  updateActionIcon();
 });
 
 // ---------- catch downloads started by websites ----------
@@ -370,22 +405,34 @@ async function captureOn() {
 let captureCache = true;
 
 // While AnySave catches downloads, hide Chrome's own download bubble (like other download
-// managers do), so each download shows in one place. It comes back when catching is off.
-function applyChromeBubble(capturing) {
-  try { chrome.downloads.setUiOptions({ enabled: !capturing }).catch(() => {}); } catch {}
+// managers do), so each download shows in one place. It comes back when catching is off, and
+// also while the AnySave icon isn't pinned to the toolbar: Chrome doesn't show an unpinned
+// extension's badge, so without the bubble there'd be no progress visible anywhere.
+async function iconPinned() {
+  try { return (await chrome.action.getUserSettings()).isOnToolbar !== false; } catch { return true; }
 }
-captureOn().then((v) => { captureCache = v; applyChromeBubble(v); });
+async function applyChromeBubble() {
+  const hide = captureCache && (await iconPinned());
+  try { await chrome.downloads.setUiOptions({ enabled: !hide }); } catch {}
+}
+captureOn().then((v) => { captureCache = v; applyChromeBubble(); });
 chrome.storage.onChanged.addListener((ch, area) => {
   if (area === "local" && ch.settings) {
     captureCache = ch.settings.newValue?.captureAll !== false;
-    applyChromeBubble(captureCache);
+    applyChromeBubble();
   }
 });
+chrome.action.onUserSettingsChanged?.addListener(() => applyChromeBubble());
 
-function isOurs(item) { return item.byExtensionId === chrome.runtime.id; }
+// Chrome doesn't always fill byExtensionId when onCreated fires, so our own downloads are
+// also recognised by URL (startFile) and by an existing job holding the same download id.
+async function isOurs(item) {
+  if (item.byExtensionId === chrome.runtime.id || ownUrls.has(item.url) || ownUrls.has(item.finalUrl)) return true;
+  return Object.values(await getJobs()).some((j) => j.downloadId === item.id);
+}
 
 chrome.downloads.onCreated.addListener(async (item) => {
-  if (isOurs(item) || !(await captureOn())) return;
+  if ((await isOurs(item)) || !(await captureOn())) return;
   const url = item.finalUrl || item.url || "";
   const name = (item.filename || "").split(/[\\/]/).pop() || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
   const id = newId();
@@ -399,7 +446,7 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
 // Route website downloads into Downloads/AnySave/<type>/ (Chrome asks every listener for a name).
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  if (isOurs(item) || !captureCache) { suggest(); return; }
+  if (item.byExtensionId === chrome.runtime.id || ownUrls.has(item.url) || !captureCache) { suggest(); return; }
   const base = (item.filename || "download").split(/[\\/]/).pop();
   if (/^AnySave[\\/]/.test(item.filename || "")) { suggest(); return; }
   suggest({ filename: `AnySave/${categoryOf(base, "file")}/${safeFile(base)}`, conflictAction: "uniquify" });
@@ -440,36 +487,32 @@ function drawRing(img, size, fraction) {
   return g.getImageData(0, 0, size, size);
 }
 
+// Finished downloads the user hasn't looked at yet keep a green ✓ (with their number) on the
+// icon until the popup or the manager is opened, like Chrome's own download icon. "Seen" is
+// kept in storage, so this survives the service worker being put to sleep.
 let lastIconState = "";
-let doneTimer = null;
-let hadActive = false;
 async function updateActionIcon() {
   const jobs = Object.values(await getJobs());
   const active = jobs.filter((j) => ["starting", "downloading"].includes(j.status));
   if (!active.length) {
-    if (lastIconState === "idle" || lastIconState === "done") return;
+    const { seenAt = 0 } = await chrome.storage.local.get("seenAt");
+    const unseen = jobs.filter((j) => j.status === "done" && (j.finishedAt || 0) > seenAt).length;
+    const state = `idle|${unseen}`;
+    if (state === lastIconState) return;
+    lastIconState = state;
     await chrome.action.setIcon({ path: { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png" } });
-    if (hadActive) {
-      lastIconState = "done";
-      chrome.action.setBadgeBackgroundColor({ color: "#2f9e5b" });
-      chrome.action.setBadgeText({ text: "✓" });
-      clearTimeout(doneTimer);
-      doneTimer = setTimeout(() => { chrome.action.setBadgeText({ text: "" }); lastIconState = "idle"; }, 4000);
-    } else {
-      chrome.action.setBadgeText({ text: "" });
-      lastIconState = "idle";
-    }
-    hadActive = false;
-    chrome.action.setTitle({ title: "AnySave" });
+    chrome.action.setBadgeBackgroundColor({ color: "#2f9e5b" });
+    chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
+    chrome.action.setBadgeText({ text: unseen ? (unseen > 1 ? `${Math.min(unseen, 99)}✓` : "✓") : "" });
+    chrome.action.setTitle({ title: unseen ? `AnySave: ${unseen} download${unseen > 1 ? "s" : ""} finished` : "AnySave" });
     return;
   }
-  hadActive = true;
   // Overall progress: by bytes when known, otherwise the average percent.
   const withBytes = active.filter((j) => j.totalBytes > 0);
   const fraction = withBytes.length === active.length
     ? withBytes.reduce((a, j) => a + (j.doneBytes || 0), 0) / withBytes.reduce((a, j) => a + j.totalBytes, 0)
     : active.reduce((a, j) => a + (j.percent || 0), 0) / active.length / 100;
-  const pct = Math.min(99, Math.floor(fraction * 100));
+  const pct = Math.max(0, Math.min(99, Math.floor((fraction || 0) * 100)));
   const state = `${pct}|${active.length}`;
   if (state === lastIconState) return;
   lastIconState = state;
@@ -477,19 +520,35 @@ async function updateActionIcon() {
     const icons = await loadBaseIcons();
     await chrome.action.setIcon({ imageData: { 16: drawRing(icons[16], 16, fraction), 32: drawRing(icons[32], 32, fraction) } });
   } catch {}
-  clearTimeout(doneTimer);
   chrome.action.setBadgeBackgroundColor({ color: "#e5484d" });
+  chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
+  // One download: its percent. Several: how many are running.
   chrome.action.setBadgeText({ text: active.length > 1 ? `${active.length}↓` : `${pct}%` });
   chrome.action.setTitle({ title: `AnySave: ${active.length} downloading · ${pct}%` });
+}
+async function markSeen() {
+  await chrome.storage.local.set({ seenAt: Date.now() });
+  lastIconState = "";
+  updateActionIcon();
 }
 
 let iconTimer = null;
 chrome.storage.onChanged.addListener((ch, area) => {
-  if (area !== "local" || !ch.jobs) return;
+  if (area !== "local" || !(ch.jobs || ch.seenAt)) return;
   if (iconTimer) return; // at most every 500 ms
   iconTimer = setTimeout(() => { iconTimer = null; updateActionIcon(); }, 500);
 });
 
+// Video downloads and conversions run through a connection that ends when the service worker
+// stops (Chrome quit, extension updated). Any still marked running were cut off: videos can be
+// resumed (the helper kept their pieces), conversions have to be started again.
+mutateJobs((jobs) => {
+  for (const j of Object.values(jobs)) {
+    if (!["starting", "downloading"].includes(j.status) || ports.has(j.id)) continue;
+    if (j.kind === "video") Object.assign(j, { status: "paused", speed: "", eta: "" });
+    else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
+  }
+});
 // Resume polling file downloads after the service worker restarts.
 pollFiles();
 updateActionIcon();

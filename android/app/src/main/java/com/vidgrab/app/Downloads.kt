@@ -88,17 +88,28 @@ object Downloads {
     private var file: File? = null
 
     fun init(ctx: Context) {
-        file = File(ctx.filesDir, "history.json")
-        jobs.value = runCatching {
-            val arr = JSONArray(file!!.readText())
+        val f = File(ctx.filesDir, "history.json")
+        file = f
+        jobs.value = if (!f.exists()) emptyList() else runCatching {
+            val arr = JSONArray(f.readText())
             List(arr.length()) { Job.fromJson(arr.getJSONObject(it)) }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            // Keep the unreadable file instead of overwriting it on the next save.
+            f.renameTo(File(ctx.filesDir, "history.bad-${System.currentTimeMillis()}.json"))
+            emptyList()
+        }
     }
 
+    /** Called from several threads; writes a temp file then renames it, so a crash can't leave half a file. */
+    @Synchronized
     private fun save() {
         val f = file ?: return
         val arr = JSONArray().apply { jobs.value.take(500).forEach { put(it.toJson()) } }
-        runCatching { f.writeText(arr.toString()) }
+        runCatching {
+            val tmp = File(f.parentFile, f.name + ".tmp")
+            tmp.writeText(arr.toString())
+            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+        }
     }
 
     fun add(job: Job) { jobs.update { listOf(job) + it }; save() }
@@ -118,9 +129,18 @@ object Downloads {
         if (statusChanged) save()
     }
 
-    fun remove(id: String) { jobs.update { list -> list.filterNot { it.id == id } }; save() }
+    fun remove(id: String) { jobs.update { list -> list.filterNot { it.id == id } }; save(); dropPartial(id) }
 
-    fun clearFinished() { jobs.update { list -> list.filterNot { it.finished } }; save() }
+    fun clearFinished() {
+        val gone = jobs.value.filter { it.finished }.map { it.id }
+        jobs.update { list -> list.filterNot { it.finished } }; save()
+        gone.forEach(::dropPartial)
+    }
+
+    /** Failed downloads keep their partial files for Retry; delete them once the job leaves the list. */
+    private fun dropPartial(id: String) {
+        file?.parentFile?.let { File(it, "partial/$id").deleteRecursively() }
+    }
 
     fun isActive(url: String) = jobs.value.any { it.active && it.url == url }
 }

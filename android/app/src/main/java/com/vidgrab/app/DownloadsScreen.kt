@@ -286,6 +286,7 @@ fun Thumb(job: Job, modifier: Modifier) {
 private fun FinishedRow(job: Job) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val failed = job.status != JobStatus.DONE
     val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
     Row(
@@ -341,13 +342,21 @@ private fun FinishedRow(job: Job) {
                     DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
                         onClick = { menu = false; share(ctx, job) })
                     DropdownMenuItem(text = { Text("Delete file") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
-                        onClick = { menu = false; deleteFile(ctx, job) })
+                        onClick = { menu = false; confirmDelete = true })
                 }
                 DropdownMenuItem(text = { Text("Remove from list") }, leadingIcon = { Icon(Icons.Outlined.PlaylistRemove, null) },
                     onClick = { menu = false; Downloads.remove(job.id) })
             }
         }
     }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete this file?") },
+        text = { Text("${job.fileName ?: job.title} will be removed from your phone. This can't be undone.") },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; deleteFile(ctx, job) }) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
 }
 
 private fun open(ctx: Context, job: Job) {

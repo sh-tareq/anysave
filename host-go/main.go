@@ -13,11 +13,14 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,6 +130,11 @@ func baseArgs(cookieFile string) (string, []string, error) {
 	args := []string{"--no-playlist", "--no-warnings", "--color", "never", "--encoding", "utf-8"}
 	if ff := findTool("ffmpeg"); ff != "" {
 		args = append(args, "--ffmpeg-location", ff)
+	}
+	// YouTube needs a JavaScript runtime to unlock its video formats. Ours lives in bin/,
+	// which isn't on the PATH Chrome gives us, so tell yt-dlp where it is.
+	if deno := findTool("deno"); deno != "" {
+		args = append(args, "--js-runtimes", "deno:"+deno)
 	}
 	if cookieFile != "" {
 		args = append(args, "--cookies", cookieFile)
@@ -304,10 +312,24 @@ func actionInfo(msg map[string]any) map[string]any {
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
-	cmd := command(ytdlp, append(args, "-J", url)...)
+	if !webLink(url) {
+		return map[string]any{"ok": false, "error": "That isn't a web link."}
+	}
+	cmd := command(ytdlp, append(args, "-J", "--", url)...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	// A stuck lookup would leave the popup spinning forever.
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(90*time.Second, func() { timedOut.Store(true); killTree(cmd) })
+	err = cmd.Wait()
+	timer.Stop()
+	if timedOut.Load() {
+		return map[string]any{"ok": false, "error": "The site took too long to answer. Try again in a moment."}
+	}
+	if err != nil {
 		logf("info failed: %s", stderr.String())
 		return map[string]any{"ok": false, "error": lastError(stderr.String())}
 	}
@@ -403,6 +425,14 @@ func actionDownload(msg map[string]any) {
 		fail(err.Error())
 		return
 	}
+	if !webLink(str(msg, "url")) {
+		fail("That isn't a web link.")
+		return
+	}
+	// Each job keeps its unfinished pieces in its own folder, so cancelling one download
+	// never deletes another's, and Resume (same job id) continues from the same pieces.
+	partsDir := filepath.Join(outDir, ".anysave-parts", jobKey(msg))
+	pruneParts(filepath.Dir(partsDir))
 	fmtSel, sortSel := str(msg, "format"), str(msg, "sort")
 	if fmtSel == "" {
 		fmtSel = "b"
@@ -412,7 +442,8 @@ func actionDownload(msg map[string]any) {
 	}
 	args = append(args,
 		"-f", fmtSel, "-S", sortSel,
-		"-o", filepath.Join(outDir, "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s"),
+		"-P", outDir, "-P", "temp:"+partsDir,
+		"-o", "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s",
 		"--continue", // resume .part files after a pause
 		"--newline", "--progress", "--no-simulate",
 		"--progress-template", "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|"+
@@ -425,10 +456,9 @@ func actionDownload(msg map[string]any) {
 	} else if hasFfmpeg {
 		args = append(args, "--merge-output-format", "mp4")
 	}
-	args = append(args, str(msg, "url"))
+	args = append(args, "--", str(msg, "url"))
 	logf("download: %s %q", ytdlp, args)
 
-	started := time.Now().Add(-2 * time.Second)
 	cmd := command(ytdlp, args...)
 	stdout, _ := cmd.StdoutPipe()
 	var stderr strings.Builder
@@ -438,18 +468,21 @@ func actionDownload(msg map[string]any) {
 		return
 	}
 
-	// Chrome closes our stdin when the user cancels: stop yt-dlp and its children.
-	// Chrome closes our stdin when the user cancels: stop yt-dlp and its children.
-	// A {"action":"pause"} message first means: stop, but keep the partial files.
+	// {"action":"cancel"} stops and deletes the unfinished pieces; {"action":"pause"} stops
+	// and keeps them. If Chrome just closes our stdin (browser quit, extension reloaded), that
+	// counts as a pause too, so the download can continue from where it was.
 	var cancelled, paused atomic.Bool
 	go func() {
 		for {
 			m, err := readMessage()
 			if err != nil {
+				paused.Store(true)
 				break
 			}
-			if str(m, "action") == "pause" {
+			if a := str(m, "action"); a == "pause" {
 				paused.Store(true)
+				break
+			} else if a == "cancel" {
 				break
 			}
 		}
@@ -489,9 +522,10 @@ func actionDownload(msg map[string]any) {
 	case paused.Load() && err != nil:
 		send(map[string]any{"type": "paused"})
 	case cancelled.Load() && err != nil:
-		removePartials(outDir, started)
+		os.RemoveAll(partsDir)
 		fail("Cancelled")
 	case err == nil:
+		os.RemoveAll(partsDir)
 		var file any
 		if finalFile != "" {
 			file = finalFile
@@ -502,28 +536,33 @@ func actionDownload(msg map[string]any) {
 	}
 }
 
-// removePartials deletes the half-finished pieces a cancelled download leaves
-// behind (.part / .ytdl files and per-format video/audio parts like "x.f399.mp4"),
-// only for files written since this download started.
-func removePartials(dir string, since time.Time) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
+// jobKey names a download's parts folder: the extension's job id, so a resumed job finds
+// its pieces again; without one, the URL and format.
+func jobKey(msg map[string]any) string {
+	if id := safeKey.ReplaceAllString(str(msg, "job"), ""); id != "" {
+		return id
 	}
+	h := sha1.Sum([]byte(str(msg, "url") + "|" + str(msg, "format") + "|" + str(msg, "sort")))
+	return hex.EncodeToString(h[:8])
+}
+
+// pruneParts removes pieces of downloads that were left unfinished for over a week.
+func pruneParts(dir string) {
+	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		name := e.Name()
-		info, err := e.Info()
-		if err != nil || e.IsDir() || info.ModTime().Before(since) {
-			continue
-		}
-		if strings.HasSuffix(name, ".part") || strings.HasSuffix(name, ".ytdl") ||
-			strings.Contains(name, ".part-Frag") || partFormat.MatchString(name) {
-			os.Remove(filepath.Join(dir, name))
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > 7*24*time.Hour {
+			os.RemoveAll(filepath.Join(dir, e.Name()))
 		}
 	}
 }
 
-var partFormat = regexp.MustCompile(`\.f\d+[\w-]*\.\w+$`)
+var safeKey = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+// webLink reports whether s is an http(s) link (never something yt-dlp could read as an option).
+func webLink(s string) bool {
+	u, err := neturl.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
 
 // ---------- reveal ----------
 
@@ -549,7 +588,7 @@ func main() {
 
 	// `vidgrab-host --check` prints which tools were found (used by installers).
 	if len(os.Args) > 1 && os.Args[1] == "--check" {
-		fmt.Printf("yt-dlp: %s\nffmpeg: %s\n", findTool("yt-dlp"), findTool("ffmpeg"))
+		fmt.Printf("yt-dlp: %s\nffmpeg: %s\ndeno: %s\n", findTool("yt-dlp"), findTool("ffmpeg"), findTool("deno"))
 		return
 	}
 
@@ -579,6 +618,8 @@ func main() {
 		send(actionProbe(msg))
 	case "pickFile":
 		send(actionPickFile(msg))
+	case "fileInfo":
+		send(actionFileInfo(msg))
 	case "convert":
 		actionConvert(msg)
 	default:

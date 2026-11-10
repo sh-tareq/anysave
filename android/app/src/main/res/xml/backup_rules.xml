@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: same exclusions as data_extraction_rules.xml -->
+<full-backup-content>
+    <exclude domain="file" path="cookies.txt" />
+    <exclude domain="file" path="partial/" />
+    <exclude domain="root" path="app_webview/" />
+</full-backup-content>
