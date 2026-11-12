@@ -334,7 +334,12 @@ func runPlatformApp(baseURL, _ string, d *daemonServer) {
 	activeURL = baseURL
 
 	hInst, _, _ := procGetModuleHandleW.Call(0)
-	icon, _, _ := procLoadIconW.Call(0, idiApplication)
+	// The AnySave icon is linked into the .exe as icon group 1 (scripts/make-app-icons.sh).
+	// Fall back to Windows' generic app icon if it's missing.
+	icon, _, _ := procLoadIconW.Call(hInst, 1)
+	if icon == 0 {
+		icon, _, _ = procLoadIconW.Call(0, idiApplication)
+	}
 	trayIcon = syscall.Handle(icon)
 
 	clsName, _ := syscall.UTF16PtrFromString("AnySaveTrayWindowClass")

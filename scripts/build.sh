@@ -36,6 +36,7 @@ swiftc -O -target x86_64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -
 lipo -create -output "$APP_BUNDLE/Contents/MacOS/AnySave" "$BUILD/AnySave-app-arm64" "$BUILD/AnySave-app-amd64"
 cp "$BUILD/vidgrab-host" "$APP_BUNDLE/Contents/MacOS/vidgrab-host"
 cp "$ROOT/installers/mac/app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "$ROOT/installers/mac/app/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"   # named in Info.plist
 cp -R "$ROOT/extension" "$APP_BUNDLE/Contents/Resources/extension"
 codesign --force --deep --sign - "$APP_BUNDLE"
 
@@ -86,7 +87,16 @@ PY
 # ---- Native macOS Disk Image (dist/AnySave-Mac.dmg) ----
 if command -v hdiutil >/dev/null 2>&1; then
   echo "Building dist/AnySave-Mac.dmg…"
-  hdiutil create -volname "AnySave" -srcfolder "$MAC" -ov -format UDZO "$DIST/AnySave-Mac.dmg" >/dev/null
+  # The opened disk shows the AnySave icon (in Finder's sidebar and on the desktop).
+  cp "$ROOT/installers/mac/app/AppIcon.icns" "$MAC/.VolumeIcon.icns"
+  hdiutil create -volname "AnySave" -srcfolder "$MAC" -ov -format UDRW "$BUILD/rw.dmg" >/dev/null
+  MNT="$(mktemp -d)"
+  hdiutil attach "$BUILD/rw.dmg" -mountpoint "$MNT" -nobrowse -quiet
+  if command -v SetFile >/dev/null 2>&1; then SetFile -a C "$MNT"; else xattr -wx com.apple.FinderInfo \
+    "0000000000000000040000000000000000000000000000000000000000000000" "$MNT"; fi   # "has a custom icon"
+  hdiutil detach "$MNT" -quiet
+  hdiutil convert "$BUILD/rw.dmg" -format UDZO -ov -o "$DIST/AnySave-Mac.dmg" >/dev/null
+  rm -f "$MAC/.VolumeIcon.icns"
 fi
 
 # ---- Android APK (build first with: cd android && ./gradlew assembleRelease) ----
@@ -97,6 +107,16 @@ if [ -f "$APKS/app-arm64-v8a-release.apk" ]; then
   VER=$(grep -o 'versionName = "[^"]*"' "$ROOT/android/app/build.gradle.kts" | cut -d'"' -f2)
   mkdir -p "$ROOT/dist-assets"
   cp "$ROOT/android/app/build/outputs/mapping/release/mapping.txt" "$ROOT/dist-assets/r8-mapping-$VER.txt"
+fi
+
+# ---- Show the AnySave icon on the files in dist/ (this Mac's Finder only) ----
+# A file's own Finder icon isn't part of the file, so it doesn't survive an upload or
+# download. On Windows the .exe shows its built-in icon; a .dmg and .apk have no way
+# to carry one. This is just so dist/ looks right here.
+if command -v swift >/dev/null 2>&1; then
+  swift "$ROOT/scripts/set-file-icon.swift" "$ROOT/installers/mac/app/AppIcon.icns" \
+    "$DIST/AnySave-Mac.dmg" "$DIST/AnySave-Setup.exe" "$DIST/AnySave.apk" \
+    "$DIST/AnySave-Desktop-Mac-Windows.zip" 2>/dev/null || true
 fi
 
 rm -rf "$BUILD"
