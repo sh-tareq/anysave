@@ -528,6 +528,7 @@ private fun QualityDropdown(options: List<Engine.Option>, selected: Int, onSelec
 @Composable
 fun ActiveJobCard(job: Job) {
     val ctx = LocalContext.current
+    var refreshLink by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
@@ -544,8 +545,11 @@ fun ActiveJobCard(job: Job) {
                 Text(statusText(job), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
-            // Pause / resume (downloads only), then cancel
+            // Pause / resume (downloads only), refresh expired link, then cancel
             if (job.status == JobStatus.PAUSED) {
+                if (job.kind != JobKind.CONVERT) {
+                    IconButton(onClick = { refreshLink = true }) { Icon(Icons.Outlined.Link, "Refresh expired link") }
+                }
                 IconButton(onClick = { DownloadService.resume(ctx, job.id) }) { Icon(Icons.Outlined.PlayArrow, "Resume") }
             } else if (job.canPause) {
                 IconButton(onClick = { DownloadService.pause(ctx, job.id) }) { Icon(Icons.Outlined.Pause, "Pause") }
@@ -553,6 +557,7 @@ fun ActiveJobCard(job: Job) {
             IconButton(onClick = { DownloadService.cancel(ctx, job.id) }) { Icon(Icons.Outlined.Close, "Cancel") }
         }
     }
+    if (refreshLink) RefreshLinkDialog(job) { refreshLink = false }
 }
 
 /** "12 MB of 80 MB" for direct file downloads. */

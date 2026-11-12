@@ -349,8 +349,30 @@ object Engine {
     /** Pulls the first link out of shared text like "Check this out https://…". */
     fun extractUrl(text: String?): String? = extractUrls(text).firstOrNull()
 
-    /** Every link in a text (several pasted or shared at once), without repeats. */
+    /** Every link in a text (several pasted or shared at once), expanding `[01-10]` patterns, without repeats. */
     fun extractUrls(text: String?): List<String> =
-        text?.let { t -> Regex("""https?://\S+""").findAll(t).map { it.value.trimEnd('.', ',', ')', '"', '\'') }.distinct().toList() }
-            ?: emptyList()
+        text?.let { t ->
+            Regex("""https?://\S+""").findAll(t)
+                .map { it.value.trimEnd('.', ',', ')', '"', '\'') }
+                .flatMap { expandUrlPattern(it).asSequence() }
+                .distinct()
+                .toList()
+        } ?: emptyList()
+
+    /** Expands numeric range patterns like `https://example.com/file[01-10].zip` (up to 500 items). */
+    fun expandUrlPattern(url: String): List<String> {
+        val m = Regex("""^(.*)\[(\d{1,5})-(\d{1,5})\](.*)$""").find(url) ?: return listOf(url)
+        val prefix = m.groupValues[1]
+        val startStr = m.groupValues[2]
+        val endStr = m.groupValues[3]
+        val suffix = m.groupValues[4]
+        val start = startStr.toIntOrNull() ?: return listOf(url)
+        val end = endStr.toIntOrNull() ?: return listOf(url)
+        if (end < start || end - start > 500) return listOf(url)
+        val pad = if (startStr.length > 1 && startStr.startsWith('0')) startStr.length else 0
+        return (start..end).map { i ->
+            val num = if (pad > 0) i.toString().padStart(pad, '0') else i.toString()
+            "$prefix$num$suffix"
+        }
+    }
 }

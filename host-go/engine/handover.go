@@ -97,19 +97,20 @@ func ServeOneTimeFile(filePath, fileName string, timeout time.Duration, deleteAf
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		_, copyErr := f.WriteTo(w)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
 		f.Close()
 
 		if copyErr == nil && deleteAfterServe {
 			_ = os.Remove(filePath)
 		}
+		_ = ln.Close()
 		doneCh <- (copyErr == nil)
-		go func() { _ = srv.Close() }()
 	})
 
 	go func() {
-		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "[handover Serve error]: %v\n", err)
-		}
+		_ = srv.Serve(ln)
 	}()
 
 	go func() {

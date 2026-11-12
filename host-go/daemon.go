@@ -212,6 +212,8 @@ func defaultDaemonSettings() map[string]any {
 		"dropBox":         false,
 		"notifications":   true,
 		"releaseChannel":  "stable",
+		"maxSpeedKbps":    float64(0),
+		"afterDoneAction": "none",
 	}
 }
 
@@ -656,6 +658,20 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		d.retryJob(str(req, "id"))
 		return map[string]any{"ok": true}
 
+	case "refreshUrl":
+		id := str(req, "id")
+		newURL := strings.TrimSpace(str(req, "url"))
+		if id == "" || !webLink(newURL) {
+			return map[string]any{"ok": false, "error": "Please enter a valid http(s) link."}
+		}
+		d.updateJob(id, map[string]any{
+			"url":   newURL,
+			"site":  siteLabelOf(newURL),
+			"error": nil,
+		})
+		d.resumeJob(id)
+		return map[string]any{"ok": true}
+
 	case "remove":
 		id := str(req, "id")
 		d.mu.Lock()
@@ -845,14 +861,22 @@ func (d *daemonServer) startVideoJob(req map[string]any) string {
 		}()
 	}
 
+	d.mu.Lock()
+	maxSpeed, _ := d.settings["maxSpeedKbps"].(float64)
+	d.mu.Unlock()
+	if reqSpeed, ok := req["maxSpeedKbps"].(float64); ok && reqSpeed >= 0 {
+		maxSpeed = reqSpeed
+	}
+
 	go d.startDaemonWorker(id, map[string]any{
-		"action":    "download",
-		"job":       id,
-		"url":       rawURL,
-		"format":    formatSel,
-		"sort":      sortSel,
-		"audioOnly": audioOnly,
-		"folder":    folder,
+		"action":       "download",
+		"job":          id,
+		"url":          rawURL,
+		"format":       formatSel,
+		"sort":         sortSel,
+		"audioOnly":    audioOnly,
+		"folder":       folder,
+		"maxSpeedKbps": maxSpeed,
 	})
 	return id
 }
@@ -892,15 +916,20 @@ func (d *daemonServer) startFastFileJob(rawURL, name, title, id, referrer, sha25
 		"error":          nil,
 	})
 
+	d.mu.Lock()
+	maxSpeed, _ := d.settings["maxSpeedKbps"].(float64)
+	d.mu.Unlock()
+
 	go d.startDaemonWorker(id, map[string]any{
-		"action":   "fastDownload",
-		"job":      id,
-		"url":      rawURL,
-		"fileName": fileName,
-		"folder":   folder,
-		"referrer": referrer,
-		"sha256":   sha256,
-		"handover": false,
+		"action":       "fastDownload",
+		"job":          id,
+		"url":          rawURL,
+		"fileName":     fileName,
+		"folder":       folder,
+		"referrer":     referrer,
+		"sha256":       sha256,
+		"handover":     false,
+		"maxSpeedKbps": maxSpeed,
 	})
 	return id
 }
@@ -1004,6 +1033,9 @@ func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 			}
 			if ac, ok := msg["activeConns"].(float64); ok && ac > 1 {
 				patch["qualityLabel"] = fmt.Sprintf("Fast (%.0fx)", ac)
+			}
+			if segs, ok := msg["segments"]; ok && segs != nil {
+				patch["segments"] = segs
 			}
 			d.updateJob(id, patch)
 

@@ -127,7 +127,7 @@ function runNative(id, payload, onDone) {
     } else if (msg.type === "done") {
       finished = true;
       updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "", finishedAt: Date.now(),
-        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined });
+        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined }).then(() => checkAfterDoneAction(id));
       onDone && onDone(msg);
     } else if (msg.type === "paused") {
       finished = true;
@@ -172,8 +172,11 @@ async function startVideo({ url, format, sort, audioOnly, title, useCookies, id 
 let pumping = Promise.resolve();
 function pumpQueue() {
   pumping = pumping.then(async () => {
+    const settings = await getSettings();
+    const maxConc = Math.max(1, Number(settings.maxConcurrent || MAX_VIDEOS_AT_ONCE));
+    const maxSpeedKbps = Number(settings.maxSpeedKbps || 0);
     const jobs = Object.values(await getJobs());
-    let free = MAX_VIDEOS_AT_ONCE - jobs.filter((j) => j.kind === "video" && ports.has(j.id)).length;
+    let free = maxConc - jobs.filter((j) => j.kind === "video" && ports.has(j.id)).length;
     const waiting = jobs.filter((j) => j.kind === "video" && j.status === "queued")
       .sort((a, b) => (a.queuedAt || a.createdAt || 0) - (b.queuedAt || b.createdAt || 0));
     for (const j of waiting) {
@@ -182,7 +185,7 @@ function pumpQueue() {
       const cookies = j.useCookies ? await cookiesFor(j.url) : null;
       // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
       runNative(j.id, { action: "download", job: j.id, url: j.url, format: j.format, sort: j.sort,
-        audioOnly: j.audioOnly, cookies, folder: j.audioOnly ? "Music" : "Videos" });
+        audioOnly: j.audioOnly, cookies, folder: j.audioOnly ? "Music" : "Videos", maxSpeedKbps });
     }
   }).catch((e) => console.warn("AnySave: queue", e));
   return pumping;
@@ -211,11 +214,25 @@ const DEFAULT_SETTINGS = {
   excludedSites: "",
   fileTypes: "",
   loginFastSites: false,
+  maxSpeedKbps: 0,
+  maxConcurrent: 3,
+  afterDoneAction: "none",
+  videoOverlay: true,
 };
 
 async function getSettings() {
   const { settings = {} } = await chrome.storage.local.get("settings");
   return { ...DEFAULT_SETTINGS, ...settings };
+}
+let settingsChain = Promise.resolve();
+function updateSettings(patch) {
+  let result = DEFAULT_SETTINGS;
+  settingsChain = settingsChain.then(async () => {
+    const cur = await getSettings();
+    result = { ...cur, ...patch };
+    await chrome.storage.local.set({ settings: result });
+  }).catch((e) => console.warn("AnySave: saving settings failed", e));
+  return settingsChain.then(() => result);
 }
 
 // Alt-click = Chrome for this download; Ctrl/Cmd-click = force AnySave fast engine.
@@ -295,6 +312,7 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
         status: "downloading", percent: msg.percent || 0,
         doneBytes: msg.doneBytes || 0, totalBytes: msg.totalBytes || 0,
         speed: msg.speed || "", eta: msg.eta || "?", qualityLabel: conns,
+        segments: Array.isArray(msg.segments) ? msg.segments : undefined,
       });
     } else if (msg.type === "handover" && msg.url) {
       // Offer the verified file from 127.0.0.1:<port>/<one-time-token> to Chrome so it appears
@@ -333,7 +351,9 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
         status: "done", percent: 100, file: finalFile, fileName: finalName,
         totalBytes: msg.totalBytes || cur.totalBytes || 0, doneBytes: msg.totalBytes || cur.totalBytes || 0,
         sha256: msg.sha256 || "", qualityLabel: label, speed: "", eta: "", finishedAt: Date.now(),
+        segments: undefined,
       });
+      checkAfterDoneAction(id);
     } else if (msg.type === "paused") {
       finished = true;
       await updateJob(id, { status: "paused", speed: "", eta: "" });
@@ -364,8 +384,32 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
   port.postMessage({
     action: "fastDownload", job: id, url, fileName, folder,
     cookies, referrer: referrer || "", sha256: sha256 || "", handover: true,
+    maxSpeedKbps: Number(settings.maxSpeedKbps || 0),
   });
   return id;
+}
+
+async function checkAfterDoneAction(completedId) {
+  try {
+    const settings = await getSettings();
+    const act = settings.afterDoneAction || "none";
+    if (act === "none") return;
+    const jobs = await getJobs();
+    const busy = Object.values(jobs).some((j) => ["starting", "downloading", "queued"].includes(j.status));
+    if (busy) return;
+    const j = jobs[completedId];
+    if (!j || j.status !== "done") return;
+    if (act === "reveal") {
+      if (j.downloadId) chrome.downloads.show(j.downloadId);
+      else if (j.file) await native({ action: "reveal", file: j.file });
+    } else if (act === "open") {
+      if (j.downloadId) {
+        try { await chrome.downloads.open(j.downloadId); } catch {}
+      } else if (j.file) {
+        await native({ action: "open", file: j.file });
+      }
+    }
+  } catch {}
 }
 
 async function startFile({ url, name, title, id, forceHandler, referrer, sha256 }) {
@@ -574,6 +618,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "resume": await resume(msg.id); return { ok: true };
       case "cancel": await cancel(msg.id); return { ok: true };
       case "retry": await retry(msg.id); return { ok: true };
+      case "refreshUrl": {
+        const u = String(msg.url || "").trim();
+        if (!/^https?:\/\//i.test(u)) return { ok: false, error: "Please enter a valid http(s) link." };
+        const j = (await getJobs())[msg.id];
+        if (!j) return { ok: false, error: "Download not found" };
+        await updateJob(msg.id, { url: u, site: siteLabel(u), error: null, downloadId: null });
+        if (j.kind === "file") {
+          await startFastFile({ url: u, name: j.fileName, title: j.title, id: msg.id, referrer: j.referrer, sha256: j.expectedSha256 });
+        } else {
+          await resume(msg.id);
+        }
+        return { ok: true };
+      }
       case "remove": await mutateJobs((jobs) => { delete jobs[msg.id]; }); return { ok: true };
       case "clear":
         await mutateJobs((jobs) => {
@@ -595,14 +652,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "openManager": openManager(msg.tab); return { ok: true };
       case "seen": await markSeen(); return { ok: true };
       case "setCapture": {
-        const settings = await getSettings();
-        await chrome.storage.local.set({ settings: { ...settings, captureAll: !!msg.on } });
+        await updateSettings({ captureAll: !!msg.on });
         return { ok: true };
       }
       case "setSettings": {
-        const settings = await getSettings();
-        const next = { ...settings, ...(msg.patch || {}) };
-        await chrome.storage.local.set({ settings: next });
+        const next = await updateSettings(msg.patch || {});
         syncClickKeyScript();
         return { ok: true, settings: next };
       }
@@ -763,18 +817,29 @@ chrome.downloads.onCreated.addListener(adoptDownload);
 
 async function syncClickKeyScript() {
   try {
+    const settings = await getSettings();
     const hasAll = await chrome.permissions.contains({ origins: ["*://*/*"] });
     const matches = hasAll
       ? ["*://*/*"]
       : ["*://*.youtube.com/*", "*://*.facebook.com/*", "*://*.instagram.com/*", "*://*.tiktok.com/*", "*://*.vimeo.com/*"];
-    await chrome.scripting.unregisterContentScripts({ ids: ["anysave-click-keys"] }).catch(() => {});
-    await chrome.scripting.registerContentScripts([{
+    await chrome.scripting.unregisterContentScripts({ ids: ["anysave-click-keys", "anysave-video-overlay"] }).catch(() => {});
+    const scripts = [{
       id: "anysave-click-keys",
       js: ["click-keys.js"],
       matches,
       runAt: "document_start",
       allFrames: true,
-    }]);
+    }];
+    if (settings.videoOverlay !== false) {
+      scripts.push({
+        id: "anysave-video-overlay",
+        js: ["video-overlay.js"],
+        matches,
+        runAt: "document_idle",
+        allFrames: false,
+      });
+    }
+    await chrome.scripting.registerContentScripts(scripts);
   } catch {}
 }
 syncClickKeyScript();

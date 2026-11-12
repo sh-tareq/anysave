@@ -454,6 +454,7 @@ func actionDownload(msg map[string]any) {
 	}
 	args = append(args,
 		"-f", fmtSel, "-S", sortSel,
+		"--concurrent-fragments", "4",
 		"-P", outDir, "-P", "temp:"+partsDir,
 		"-o", "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s",
 		"--continue", // resume .part files after a pause
@@ -462,6 +463,14 @@ func actionDownload(msg map[string]any) {
 			"%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
 		"--print", "after_move:VGF %(filepath)s",
 	)
+	if speedKbps, ok := msg["maxSpeedKbps"].(float64); ok && speedKbps > 0 {
+		args = append(args, "--limit-rate", fmt.Sprintf("%dK", int(speedKbps)))
+	}
+	if useAria, _ := msg["useAria2"].(bool); useAria {
+		if aria := findTool("aria2c"); aria != "" {
+			args = append(args, "--downloader", aria, "--downloader-args", "aria2c:-x 8 -s 8 -k 1M")
+		}
+	}
 	hasFfmpeg := findTool("ffmpeg") != ""
 	if audio, _ := msg["audioOnly"].(bool); audio && hasFfmpeg {
 		args = append(args, "-x", "--audio-format", "mp3")

@@ -34,6 +34,9 @@ object Settings {
     private val _maxParallel = MutableStateFlow(3)
     /** How many downloads run at the same time. */
     val maxParallel: StateFlow<Int> = _maxParallel
+    private val _speedLimitKbps = MutableStateFlow(0)
+    /** Global download speed cap in KB/s (0 = Unlimited). */
+    val speedLimitKbps: StateFlow<Int> = _speedLimitKbps
     private val _sortIntoFolders = MutableStateFlow(true)
     /** Save into Downloads/AnySave/Videos, Music, Documents… instead of one folder. */
     val sortIntoFolders: StateFlow<Boolean> = _sortIntoFolders
@@ -44,6 +47,7 @@ object Settings {
         _autoClipboard.value = prefs.getBoolean("autoClipboard", false)
         _wifiOnly.value = prefs.getBoolean("wifiOnly", false)
         _maxParallel.value = prefs.getInt("maxParallel", 3)
+        _speedLimitKbps.value = prefs.getInt("speedLimitKbps", 0)
         _sortIntoFolders.value = prefs.getBoolean("sortIntoFolders", true)
     }
 
@@ -51,6 +55,7 @@ object Settings {
     fun setAutoClipboard(on: Boolean) { _autoClipboard.value = on; prefs.edit().putBoolean("autoClipboard", on).apply() }
     fun setWifiOnly(on: Boolean) { _wifiOnly.value = on; prefs.edit().putBoolean("wifiOnly", on).apply() }
     fun setMaxParallel(n: Int) { _maxParallel.value = n; prefs.edit().putInt("maxParallel", n).apply() }
+    fun setSpeedLimitKbps(kbps: Int) { _speedLimitKbps.value = kbps; prefs.edit().putInt("speedLimitKbps", kbps).apply() }
     fun setSortIntoFolders(on: Boolean) { _sortIntoFolders.value = on; prefs.edit().putBoolean("sortIntoFolders", on).apply() }
 
     /** The last copied link we already acted on, so reopening the app doesn't download it twice. */

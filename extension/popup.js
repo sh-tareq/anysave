@@ -201,11 +201,15 @@ function renderPageVideos(videos, library, note, opts = {}) {
   const box = $("pageVideos");
   box.hidden = false;
   box.classList.toggle("below", !!opts.below); // under a single video's card
-  const noun = library ? "ad" : "video";
+  const noun = opts.noun || (library ? "ad" : "video");
   const plural = (n) => `${n} ${noun}${n > 1 ? "s" : ""}`;
   $("pvTitle").textContent = `${opts.heading || (library ? "Ads on this page" : "Videos on this page")} (${videos.length})`;
   $("pvNote").textContent = note || "";
   $("pvQualityBox").hidden = !opts.quality;
+  if ($("pvFilter")) {
+    $("pvFilter").hidden = !opts.filterable;
+    $("pvFilter").value = "";
+  }
   $("pvDownload").hidden = false;
   if (opts.quality && !$("pvQuality").options.length) {
     for (const q of BATCH_QUALITIES) $("pvQuality").append(new Option(q.label, JSON.stringify(q)));
@@ -288,7 +292,7 @@ function renderPageVideos(videos, library, note, opts = {}) {
       if (j?.status === "done") { saved++; sum += 100; }
       else if (j && j.status !== "error") { running++; sum += j.percent || 0; }
     }
-    const open = videos.filter((v) => !busy(v));
+    const open = videos.filter((v) => !busy(v) && rows.get(v)?.hidden !== true);
     $("pvAllBox").hidden = open.length < 2;
     $("pvAll").checked = open.length > 0 && open.every((v) => selected.has(v));
     $("pvAll").indeterminate = selected.size > 0 && !$("pvAll").checked;
@@ -310,10 +314,22 @@ function renderPageVideos(videos, library, note, opts = {}) {
   };
 
   $("pvAll").onchange = () => {
-    const open = videos.filter((v) => !busy(v));
+    const open = videos.filter((v) => !busy(v) && rows.get(v)?.hidden !== true);
     if ($("pvAll").checked) open.forEach((v) => selected.add(v)); else selected.clear();
     refresh();
   };
+  if ($("pvFilter")) {
+    $("pvFilter").oninput = () => {
+      const q = $("pvFilter").value.trim().toLowerCase();
+      for (const [v, li] of rows) {
+        const hay = `${v.name || ""} ${v.id || ""} ${v.src || ""}`.toLowerCase();
+        const match = !q || hay.includes(q);
+        li.hidden = !match;
+        if (!match) selected.delete(v);
+      }
+      refresh();
+    };
+  }
   $("pvDownload").onclick = async () => {
     const list = videos.filter((v) => selected.has(v));
     $("pvDownload").disabled = true;
@@ -526,6 +542,76 @@ $("dlHandler")?.addEventListener("change", () => {
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear" }));
 $("openManager").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager" }); window.close(); });
 $("openConvert").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager", tab: "convert" }); window.close(); });
+
+function collectPageDownloadLinks() {
+  const extRe = /\.(pdf|zip|rar|7z|tar|gz|tgz|bz2|xz|dmg|pkg|exe|msi|iso|apk|mp4|mkv|webm|mov|avi|m4v|mp3|m4a|aac|wav|flac|ogg|opus|docx?|xlsx?|pptx?|csv|txt|epub|jpe?g|png|gif|webp|svg)$/i;
+  const seen = new Set();
+  const out = [];
+  const add = (rawHref, label, badge) => {
+    if (!rawHref) return;
+    let u;
+    try { u = new URL(rawHref, location.href); } catch { return; }
+    if (!/^https?:$/i.test(u.protocol)) return;
+    const href = u.href;
+    if (seen.has(href)) return;
+    const pathName = decodeURIComponent(u.pathname.split("/").pop() || "");
+    const extMatch = pathName.match(/\.([a-z0-9]{1,6})$/i);
+    const ext = extMatch ? extMatch[1].toUpperCase() : (badge || "");
+    if (!ext && !badge) return;
+    seen.add(href);
+    const cleanName = (label || pathName || u.hostname).replace(/\s+/g, " ").trim().slice(0, 90);
+    out.push({
+      src: href,
+      name: cleanName || pathName || "download",
+      id: ext || "FILE",
+      poster: null,
+      duration: null,
+    });
+  };
+
+  for (const a of document.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href || href.startsWith("#") || href.startsWith("javascript:")) continue;
+    let u;
+    try { u = new URL(href, location.href); } catch { continue; }
+    if (a.hasAttribute("download") || extRe.test(u.pathname)) {
+      add(u.href, a.innerText || a.getAttribute("download") || a.title, a.hasAttribute("download") ? "DL" : "");
+    }
+  }
+  for (const m of document.querySelectorAll("video, audio, source")) {
+    const s = m.currentSrc || m.src;
+    if (s && /^https?:/i.test(s)) add(s, document.title, m.tagName === "AUDIO" ? "AUDIO" : "VIDEO");
+  }
+  return out.slice(0, 200);
+}
+
+$("grabLinks")?.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
+    setState("Open a web page first, then click <b>🔗 Grab links</b> to list all downloadable files on the page.");
+    return;
+  }
+  setState("Scanning page for downloadable files & media…");
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectPageDownloadLinks });
+    const links = result || [];
+    if (!links.length) {
+      setState("No direct file links (PDF, ZIP, MP4, MP3…) found on this page.");
+      return;
+    }
+    $("state").hidden = true;
+    renderPageVideos(links, null, "Filter by extension (.pdf, .zip, .mp4…) or select files to batch download.", {
+      heading: "Files & links on this page",
+      noun: "file",
+      filterable: true,
+      below: !$("media").hidden,
+      jobUrl: (v) => v.src,
+      download: (v) => chrome.runtime.sendMessage({ type: "addLink", url: v.src, title: v.name }),
+    });
+  } catch (e) {
+    setState("Couldn't scan this page. Try refreshing the tab first.");
+  }
+});
 
 // ---------- open / drag a finished download ----------
 // Files saved through Chrome's downloader (any file, website downloads) use Chrome's own

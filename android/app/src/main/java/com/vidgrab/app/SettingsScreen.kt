@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,6 +46,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val autoClip by Settings.autoClipboard.collectAsState()
     val wifiOnly by Settings.wifiOnly.collectAsState()
     val maxParallel by Settings.maxParallel.collectAsState()
+    val speedLimitKbps by Settings.speedLimitKbps.collectAsState()
     val sortFolders by Settings.sortIntoFolders.collectAsState()
     var pickQuality by remember { mutableStateOf(false) }
     var showLegal by remember { mutableStateOf(false) }
@@ -84,6 +86,26 @@ fun SettingsScreen(vm: MainViewModel) {
             Row(Modifier.padding(start = 40.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 (1..5).forEach { n ->
                     FilterChip(selected = maxParallel == n, onClick = { Settings.setMaxParallel(n) }, label = { Text("$n") })
+                }
+            }
+        }
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Speed limit")
+                    Text("Cap total download speed so other apps stay fast", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            val speedPresets = listOf(0 to "Unlimited", 10240 to "10 MB/s", 5120 to "5 MB/s", 2048 to "2 MB/s", 512 to "500 KB/s")
+            Row(
+                Modifier.padding(start = 40.dp, top = 8.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                speedPresets.forEach { (kbps, label) ->
+                    FilterChip(selected = speedLimitKbps == kbps, onClick = { Settings.setSpeedLimitKbps(kbps) }, label = { Text(label) })
                 }
             }
         }

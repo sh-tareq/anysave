@@ -24,6 +24,7 @@ import androidx.core.app.ServiceCompat
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +42,7 @@ import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
@@ -58,6 +60,8 @@ class DownloadService : Service() {
     private val main = Handler(Looper.getMainLooper())
     /** Jobs that may show a progress notification, and when each last updated it. */
     private val lastNotify = ConcurrentHashMap<String, Long>()
+    /** Pause/cancel signal flags for active multi-connection FILE downloads. */
+    private val filePaused = ConcurrentHashMap<String, AtomicBoolean>()
 
     private class Stopped : Exception()
 
@@ -122,7 +126,7 @@ class DownloadService : Service() {
         when (job.kind) {
             JobKind.VIDEO -> YoutubeDL.getInstance().destroyProcessById(id)
             JobKind.CONVERT -> Converter.cancel(id)
-            JobKind.FILE -> {} // the download loop sees the new status and stops
+            JobKind.FILE -> filePaused[id]?.set(true)
         }
         if (to == JobStatus.CANCELLED) partialDir(id).deleteRecursively()
     }
@@ -206,6 +210,7 @@ class DownloadService : Service() {
             .addOption("--progress")
             .addOption("--no-simulate")
             .addOption("--continue") // resume .part files after a pause
+            .addOption("--concurrent-fragments", "4")
             .addOption(
                 "--progress-template",
                 "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|" +
@@ -215,6 +220,8 @@ class DownloadService : Service() {
             .addOption("--print", "video:VGT %(title)s")
             .addOption("--print", "video:VGI %(thumbnail)s")
             .addOption("--print", "after_move:VGF %(filepath)s")
+        val limitKbps = Settings.speedLimitKbps.value
+        if (limitKbps > 0) req.addOption("--limit-rate", "${limitKbps}K")
         if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
         else req.addOption("--merge-output-format", "mp4")
         Engine.applyCookies(this, req)
@@ -256,88 +263,68 @@ class DownloadService : Service() {
         Downloads.get(id)?.let { notifyProgress(it, null, pct, total <= 0) }
     }
 
-    // ---------- any file (direct HTTP, resumable) ----------
+    // ---------- any file (multi-connection HTTP, resumable) ----------
 
-    private fun downloadFile(job: Job, dir: File): File {
-        var attempt = 0
-        while (true) {
-            try {
-                return fetchFile(job.id, dir)
-            } catch (e: IOException) {
-                if (!stillWanted(job.id)) throw Stopped()
-                // Network hiccup: wait and continue from where it stopped.
-                if (++attempt >= 5) throw Exception("Network error: ${e.message ?: "connection lost"}")
-                Downloads.update(job.id) { it.copy(speed = "", eta = "Retrying ($attempt)…") }
-                Thread.sleep(2000L * attempt)
-            }
-        }
-    }
-
-    private fun open(url: String, already: Long, ua: String) = (URL(url).openConnection() as HttpURLConnection).apply {
-        instanceFollowRedirects = true
-        connectTimeout = 15000; readTimeout = 30000
-        setRequestProperty("User-Agent", ua)
-        if (already > 0) setRequestProperty("Range", "bytes=$already-")
-    }
-
-    private fun fetchFile(id: String, dir: File): File {
-        val job = Downloads.get(id) ?: throw Stopped()
-        val existing = dir.listFiles { f -> f.name.endsWith(".part") }?.firstOrNull()
-        val already = existing?.length() ?: 0L
-        // Identify honestly first; some servers only accept browser names, so try that on 403.
-        var c = open(job.url, already, FileKinds.FILE_USER_AGENT)
-        if (c.responseCode == 403) { c.disconnect(); c = open(job.url, already, FileKinds.USER_AGENT) }
+    private suspend fun downloadFile(job: Job, dir: File): File {
+        val id = job.id
+        val currentJob = Downloads.get(id) ?: job
+        val paused = AtomicBoolean(false)
+        filePaused[id] = paused
         try {
-            val code = c.responseCode
-            if (code !in 200..299) throw Exception("Server answered $code ${c.responseMessage.orEmpty()}".trim())
-            val resumed = code == 206 && already > 0
-            val name = safeName(
-                job.fileName
-                    ?: c.getHeaderField("Content-Disposition")?.let(FileKinds::fileNameFromDisposition)
-                    ?: java.net.URLDecoder.decode(c.url.path.substringAfterLast('/'), "UTF-8").ifBlank { null }
-                    ?: job.title
-            ).let { n ->
-                // Give it an extension from the content type if it has none.
-                if (FileKinds.extOf(n).isNotEmpty()) n
-                else android.webkit.MimeTypeMap.getSingleton()
-                    .getExtensionFromMimeType(c.contentType?.substringBefore(';')?.trim())?.let { "$n.$it" } ?: n
-            }
-            val mime = c.contentType?.substringBefore(';')?.trim()
-            val total = if (c.contentLengthLong > 0) c.contentLengthLong + (if (resumed) already else 0) else 0L
-            Downloads.update(id) { it.copy(fileName = name, title = if (it.title.isBlank() || it.title == it.url) name else it.title,
-                mime = mime ?: it.mime, totalBytes = total) }
-
-            val part = existing ?: File(dir, "$name.part")
-            RandomAccessFile(part, "rw").use { out ->
-                if (resumed) out.seek(already) else out.setLength(0)
-                var done = if (resumed) already else 0L
-                val buf = ByteArray(64 * 1024)
-                var tickTime = System.currentTimeMillis(); var tickBytes = done
-                c.inputStream.use { input ->
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        val now = System.currentTimeMillis()
-                        if (now - tickTime >= 600) {
-                            if (!stillWanted(id)) throw Stopped()
-                            val bps = (done - tickBytes) * 1000.0 / (now - tickTime)
-                            tickTime = now; tickBytes = done
-                            val pct = if (total > 0) (done * 100f / total).coerceIn(0f, 100f) else 0f
-                            val eta = if (total > 0 && bps > 0) humanEta(((total - done) / bps).toString()) else "?"
-                            Downloads.update(id) { it.copy(percent = pct, doneBytes = done, speed = humanSpeed(bps), eta = eta) }
-                            Downloads.get(id)?.let { notifyProgress(it, null, pct, total <= 0) }
-                        }
+            val res = FastFileEngine.download(
+                url = currentJob.url,
+                workDir = dir,
+                preferredFilename = currentJob.fileName,
+                userAgent = FileKinds.USER_AGENT,
+                paused = paused,
+                onMeta = { rawName, totalBytes ->
+                    val name = safeName(currentJob.fileName ?: rawName).let { n ->
+                        if (FileKinds.extOf(n).isNotEmpty()) n
+                        else android.webkit.MimeTypeMap.getSingleton()
+                            .getExtensionFromMimeType(currentJob.mime?.substringBefore(';')?.trim())?.let { "$n.$it" } ?: n
                     }
-                }
-                if (total > 0 && done < total) throw IOException("connection closed early")
-                Downloads.update(id) { it.copy(doneBytes = done) }
+                    val mime = currentJob.mime ?: FileKinds.mimeFromName(name)
+                    Downloads.update(id) {
+                        it.copy(
+                            fileName = name,
+                            title = if (it.title.isBlank() || it.title == it.url) name else it.title,
+                            mime = mime ?: it.mime,
+                            totalBytes = if (totalBytes > 0) totalBytes else it.totalBytes,
+                        )
+                    }
+                },
+                onProgress = { p ->
+                    if (!stillWanted(id)) {
+                        paused.set(true)
+                        return@download
+                    }
+                    val eta = if (p.etaSeconds >= 0) humanEta(p.etaSeconds.toString()) else "?"
+                    val speed = humanSpeed(p.speedBps.toDouble())
+                    Downloads.update(id) {
+                        it.copy(
+                            percent = p.percent,
+                            doneBytes = p.doneBytes,
+                            totalBytes = if (p.totalBytes > 0) p.totalBytes else it.totalBytes,
+                            speed = speed,
+                            eta = eta,
+                        )
+                    }
+                    Downloads.get(id)?.let { notifyProgress(it, null, p.percent, p.totalBytes <= 0) }
+                },
+            )
+            if (!stillWanted(id)) throw Stopped()
+            Downloads.update(id) { it.copy(doneBytes = res.totalBytes, totalBytes = res.totalBytes) }
+            val desiredName = Downloads.get(id)?.fileName ?: res.filename
+            if (desiredName != res.file.name) {
+                val target = File(dir, safeName(desiredName))
+                if (res.file.renameTo(target)) return target
             }
-            val final = File(dir, name)
-            if (!part.renameTo(final)) throw Exception("Couldn't finish the file")
-            return final
-        } finally { c.disconnect() }
+            return res.file
+        } catch (e: CancellationException) {
+            throw Stopped()
+        } finally {
+            filePaused.remove(id)
+        }
     }
 
     // ---------- conversion (FFmpeg) ----------
@@ -627,6 +614,19 @@ class DownloadService : Service() {
             val job = Downloads.get(id) ?: return
             if (job.status != JobStatus.PAUSED && job.status != JobStatus.ERROR) return
             Downloads.update(id) { it.copy(status = JobStatus.QUEUED, error = null) }
+            enqueue(ctx, id)
+        }
+
+        /** Updates the URL of a paused or failed download and resumes from its saved partial segments. */
+        fun refreshUrl(ctx: Context, id: String, newUrl: String) {
+            val clean = newUrl.trim()
+            if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+                Toast.makeText(ctx, "Paste a valid http:// or https:// link", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val job = Downloads.get(id) ?: return
+            if (job.status != JobStatus.PAUSED && job.status != JobStatus.ERROR) return
+            Downloads.update(id) { it.copy(url = clean, status = JobStatus.QUEUED, error = null) }
             enqueue(ctx, id)
         }
 

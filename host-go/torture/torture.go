@@ -273,7 +273,11 @@ func (s *Server) handleSlow(w http.ResponseWriter, r *http.Request) {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 

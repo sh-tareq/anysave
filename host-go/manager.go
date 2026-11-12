@@ -427,6 +427,11 @@ func actionFastDownload(msg map[string]any) {
 		}
 	}()
 
+	var maxSpeedBPS int64
+	if speedKbps, ok := msg["maxSpeedKbps"].(float64); ok && speedKbps > 0 {
+		maxSpeedBPS = int64(speedKbps * 1024)
+	}
+
 	res, err := engine.Download(ctx, engine.Options{
 		URL:            rawURL,
 		DestDir:        destDir,
@@ -435,6 +440,7 @@ func actionFastDownload(msg map[string]any) {
 		Cookies:        str(msg, "cookies"),
 		Referrer:       str(msg, "referrer"),
 		ExpectedSHA256: str(msg, "sha256"),
+		MaxSpeedBPS:    maxSpeedBPS,
 		OnStart: func(info engine.StartInfo) {
 			if !handover {
 				return
@@ -480,6 +486,7 @@ func actionFastDownload(msg map[string]any) {
 				"speed":       humanSpeed(p.SpeedBPS),
 				"eta":         eta,
 				"activeConns": p.ActiveConns,
+				"segments":    p.Segments,
 			})
 		},
 	})

@@ -20,7 +20,7 @@
     <!-- ================= Downloads ================= -->
     <section id="downloads" class="panel">
       <form id="addForm" class="add">
-        <input id="addUrl" type="text" inputmode="url" autocomplete="off" placeholder="Paste one or more links: video pages or files (PDF, ZIP, MP3…)" required />
+        <input id="addUrl" type="text" inputmode="url" autocomplete="off" placeholder="Paste one or more links, or a batch pattern like https://…/file[01-10].zip" required />
         <button class="primary" type="submit">Download</button>
       </form>
       <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
@@ -60,12 +60,49 @@
             <label class="small">Sites to leave to Chrome
               <input id="excludedSites" type="text" placeholder="e.g. drive.google.com, dropbox.com" />
             </label>
+            <label class="small">Speed limit
+              <select id="maxSpeedKbps">
+                <option value="0">Unlimited speed</option>
+                <option value="10240">10 MB/s</option>
+                <option value="5120">5 MB/s</option>
+                <option value="2048">2 MB/s</option>
+                <option value="512">500 KB/s</option>
+              </select>
+            </label>
+            <label class="small">Queue concurrency
+              <select id="maxConcurrent">
+                <option value="1">1 download at a time</option>
+                <option value="2">2 downloads at a time</option>
+                <option value="3">3 downloads at a time</option>
+                <option value="6">6 downloads at a time</option>
+              </select>
+            </label>
+            <label class="small">When all downloads finish
+              <select id="afterDoneAction">
+                <option value="none">Do nothing</option>
+                <option value="reveal">Show last file in folder</option>
+                <option value="open">Open last file</option>
+              </select>
+            </label>
           </div>
           <label class="check small"><input type="checkbox" id="loginFastSites" />
             <span>Use my Chrome login for fast file downloads on any website <span class="muted">(asks permission once)</span></span>
           </label>
-          <p class="hint">Shortcuts: hold <b>Alt</b> while clicking a link or Download button to use Chrome for that one download, or hold <b>Ctrl</b> to force AnySave.</p>
+          <label class="check small"><input type="checkbox" id="videoOverlay" checked />
+            <span>Show floating <b>⬇ AnySave</b> button when hovering over web videos</span>
+          </label>
+          <p class="hint">Shortcuts: hold <b>Alt</b> while clicking a link or Download button to use Chrome for that one download, or hold <b>Ctrl</b> to force AnySave. Pattern batch: <code>https://example.com/part[01-10].zip</code> expands automatically.</p>
         </details>
+      </div>
+
+      <div id="speedStatsBar" class="stats-bar" hidden>
+        <div class="stats-left">
+          <span class="stats-speed" id="liveSpeedText">0 KB/s</span>
+          <span class="muted small" id="liveStatsMeta"></span>
+        </div>
+        <svg id="speedSparkline" class="sparkline" viewBox="0 0 140 28" preserveAspectRatio="none" aria-hidden="true">
+          <path id="sparkPath" d="" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
       </div>
 
       <div class="toolbar">

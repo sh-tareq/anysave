@@ -125,7 +125,7 @@ object Downloads {
         jobs.update { list ->
             list.map {
                 if (it.id != id) it else change(it).also { new ->
-                    statusChanged = new.status != it.status || new.title != it.title
+                    statusChanged = new.status != it.status || new.title != it.title || new.url != it.url
                 }
             }
         }

@@ -47,6 +47,7 @@ const P = {
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
   retry: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
+  link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z",
   check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
   remove: "M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
 };
@@ -104,12 +105,64 @@ function startDrag(e, j) {
 }
 
 // ---------- downloads list ----------
+let openRefreshJobId = null;
+const speedSamples = [];
+
+function parseSpeedBps(s) {
+  const m = String(s || "").match(/([\d.]+)\s*(B|KB|MB|GB)\/s/i);
+  if (!m) return 0;
+  const v = parseFloat(m[1]) || 0;
+  const u = m[2].toUpperCase();
+  const mult = u === "GB" ? 1073741824 : u === "MB" ? 1048576 : u === "KB" ? 1024 : 1;
+  return v * mult;
+}
+
+function updateSpeedStats(all) {
+  const bar = $("speedStatsBar");
+  if (!bar) return;
+  const active = all.filter((j) => j.status === "downloading");
+  const done = all.filter((j) => j.status === "done");
+  const totalSavedBytes = done.reduce((acc, j) => acc + (j.totalBytes || 0), 0);
+  const curBps = active.reduce((acc, j) => acc + parseSpeedBps(j.speed), 0);
+
+  if (active.length === 0 && done.length === 0) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  if (active.length > 0) {
+    speedSamples.push(curBps);
+    if (speedSamples.length > 28) speedSamples.shift();
+  }
+  const speedStr = curBps >= 1048576
+    ? `${(curBps / 1048576).toFixed(1)} MB/s`
+    : curBps > 0 ? `${Math.round(curBps / 1024)} KB/s` : "Idle";
+  $("liveSpeedText").textContent = active.length > 0 ? `⬇ ${speedStr}` : "Ready";
+  const parts = [];
+  if (active.length > 0) parts.push(`${active.length} active`);
+  if (done.length > 0) parts.push(`${done.length} saved${totalSavedBytes > 0 ? ` (${size(totalSavedBytes)})` : ""}`);
+  $("liveStatsMeta").textContent = parts.join(" · ");
+
+  const path = $("sparkPath");
+  if (path && speedSamples.length >= 2) {
+    const maxV = Math.max(1024, ...speedSamples);
+    const pts = speedSamples.map((v, i) => {
+      const x = (i / (speedSamples.length - 1)) * 136 + 2;
+      const y = 26 - (v / maxV) * 22;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    path.setAttribute("d", pts.join(" "));
+  }
+}
+
 function render() {
   if (dragging) { redrawAfterDrag = render; return; }
+  if (openRefreshJobId && document.activeElement?.closest(".refresh-box")) return;
   const all = Object.values(jobs).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id));
   const activeCount = all.filter((j) => ACTIVE.includes(j.status)).length;
   $("activeBadge").hidden = !activeCount;
   $("activeBadge").textContent = activeCount;
+  updateSpeedStats(all);
   const shown = all.filter((j) => {
     const c = category(j);
     switch (filter) {
@@ -147,12 +200,28 @@ function row(j) {
   else if (j.status === "error") line = `<span class="err">${esc(j.error || "Failed")}</span>`;
   else line = "Cancelled";
 
+  let progBarHtml = "";
+  if (running || paused || queued) {
+    if (Array.isArray(j.segments) && j.segments.length > 1 && j.totalBytes > 0) {
+      const slices = j.segments.map((s) => {
+        const leftPct = Math.max(0, Math.min(100, (s.start / j.totalBytes) * 100));
+        const doneLen = Math.max(0, (s.current - s.start));
+        const widthPct = Math.max(0, Math.min(100 - leftPct, (doneLen / j.totalBytes) * 100));
+        return `<div class="seg-slice" style="left:${leftPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%"></div>`;
+      }).join("");
+      progBarHtml = `<div class="seg-bar ${paused || queued ? "paused" : ""}" title="${j.segments.length} parallel segments">${slices}</div>`;
+    } else {
+      progBarHtml = `<div class="bar ${paused || queued ? "paused" : ""}"><div style="width:${pct}%"></div></div>`;
+    }
+  }
+
   li.innerHTML = `
     <div class="icon">${svg(category(j), 22)}${j.status === "done" ? `<span class="done" title="Finished">${svg("check", 13)}</span>` : ""}</div>
     <div class="info">
       <div class="name" title="${esc(j.fileName || j.title || j.url)}">${esc(displayName(j))}</div>
-      ${running || paused || queued ? `<div class="bar ${paused || queued ? "paused" : ""}"><div style="width:${pct}%"></div></div>` : ""}
+      ${progBarHtml}
       <div class="meta">${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : j.status === "done" ? esc(line).replace(/^Done/, '<span class="ok">Done</span>') : esc(line)}</div>
+      <div class="refresh-slot"></div>
     </div>
     <div class="btns"></div>`;
   const btns = li.querySelector(".btns");
@@ -189,6 +258,30 @@ function row(j) {
     if (["Videos", "Music"].includes(category(j)))
       add("convert", "Convert", () => { showTab("convert"); choose({ path: j.file, name: j.fileName || j.title }); });
   }
+  if (paused || j.status === "error") {
+    add("link", "Refresh expired link", () => {
+      openRefreshJobId = openRefreshJobId === j.id ? null : j.id;
+      render();
+    });
+  }
+  if (openRefreshJobId === j.id && (paused || j.status === "error")) {
+    const slot = li.querySelector(".refresh-slot");
+    slot.innerHTML = `<div class="refresh-box">
+      <input type="url" class="refresh-input" placeholder="Paste fresh link to continue from saved parts…" value="${esc(j.url || "")}" />
+      <button type="button" class="refresh-go">Continue</button>
+    </div>`;
+    const inp = slot.querySelector(".refresh-input");
+    const go = slot.querySelector(".refresh-go");
+    const submitRefresh = async () => {
+      const u = inp.value.trim();
+      if (!u) return;
+      openRefreshJobId = null;
+      await send({ type: "refreshUrl", id: j.id, url: u });
+      render();
+    };
+    go.onclick = submitRefresh;
+    inp.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); submitRefresh(); } };
+  }
   if (j.status === "error" || j.status === "cancelled") add("retry", "Retry", () => send({ type: "retry", id: j.id }));
   if (FINISHED.includes(j.status)) add("remove", "Remove from list", () => send({ type: "remove", id: j.id }));
   return li;
@@ -202,10 +295,32 @@ $("pauseAll").onclick = () => Object.values(jobs).filter((j) => ACTIVE.includes(
 $("resumeAll").onclick = () => Object.values(jobs).filter((j) => j.status === "paused").forEach((j) => send({ type: "resume", id: j.id }));
 $("clearDone").onclick = () => send({ type: "clear" });
 
-// Paste one link or many (one per line, or separated by spaces): each is downloaded.
+// Expand numeric range patterns like https://example.com/file[01-10].zip into 10 URLs.
+function expandUrlPattern(u) {
+  const m = String(u).match(/^(https?:\/\/.*)\[(\d{1,5})-(\d{1,5})\](.*)$/i);
+  if (!m) return [u];
+  const [, prefix, startStr, endStr, suffix] = m;
+  const start = parseInt(startStr, 10);
+  const end = parseInt(endStr, 10);
+  if (isNaN(start) || isNaN(end) || end < start || end - start > 200) return [u];
+  const pad = startStr.startsWith("0") ? startStr.length : 0;
+  const out = [];
+  for (let i = start; i <= end; i++) {
+    const num = pad ? String(i).padStart(pad, "0") : String(i);
+    out.push(`${prefix}${num}${suffix}`);
+  }
+  return out;
+}
+
+// Paste one link or many (one per line, separated by spaces, or a pattern like file[01-05].zip): each is downloaded.
 // A one-line box drops line breaks when pasting, so links are split where "http" starts.
 function linksIn(text) {
-  return [...new Set((String(text).match(/https?:\/\/.+?(?=https?:\/\/|\s|$)/g) || []).map((s) => s.replace(/[),.;]+$/, "")))];
+  const rawLinks = [...new Set((String(text).match(/https?:\/\/.+?(?=https?:\/\/|\s|$)/g) || []).map((s) => s.replace(/[),.;]+$/, "")))];
+  const expanded = [];
+  for (const u of rawLinks) {
+    for (const item of expandUrlPattern(u)) expanded.push(item);
+  }
+  return [...new Set(expanded)];
 }
 $("addUrl").addEventListener("paste", (e) => {
   const text = e.clipboardData?.getData("text") || "";
@@ -229,6 +344,7 @@ $("addForm").addEventListener("submit", async (e) => {
   const raw = $("addUrl").value.trim();
   const links = linksIn(raw);
   const list = links.length ? links : [raw];
+  const dupCount = list.filter((u) => Object.values(jobs).some((j) => j.url === u && j.status === "done")).length;
   const btn = e.submitter; btn.disabled = true; btn.textContent = list.length > 1 ? `Adding ${list.length}…` : "Checking…";
   let ok = 0, lastErr = "";
   for (const url of list) {
@@ -239,9 +355,10 @@ $("addForm").addEventListener("submit", async (e) => {
   const m = $("addMsg");
   m.hidden = false;
   m.className = "msg" + (ok ? "" : " err");
-  m.textContent = list.length === 1
+  const dupNote = dupCount > 0 ? ` (Note: ${dupCount === 1 ? "this link was" : `${dupCount} links were`} already downloaded earlier — saving a fresh copy.)` : "";
+  m.textContent = (list.length === 1
     ? (ok ? "Added. It's downloading below." : lastErr)
-    : `Added ${ok} of ${list.length} links. They're downloading below.` + (ok < list.length ? ` (${lastErr})` : "");
+    : `Added ${ok} of ${list.length} links. They're downloading below.` + (ok < list.length ? ` (${lastErr})` : "")) + dupNote;
   if (ok) $("addUrl").value = "";
   setTimeout(() => { m.hidden = true; }, 5000);
 });
@@ -385,6 +502,10 @@ function applySettingsUI(settings = {}) {
   if ($("fileTypes") && document.activeElement !== $("fileTypes")) $("fileTypes").value = settings.fileTypes || "";
   if ($("excludedSites") && document.activeElement !== $("excludedSites")) $("excludedSites").value = settings.excludedSites || "";
   if ($("loginFastSites")) $("loginFastSites").checked = !!settings.loginFastSites;
+  if ($("maxSpeedKbps")) $("maxSpeedKbps").value = String(settings.maxSpeedKbps || 0);
+  if ($("maxConcurrent")) $("maxConcurrent").value = String(settings.maxConcurrent || 3);
+  if ($("afterDoneAction")) $("afterDoneAction").value = settings.afterDoneAction || "none";
+  if ($("videoOverlay")) $("videoOverlay").checked = settings.videoOverlay !== false;
 }
 
 document.querySelectorAll("#handlerChips .chip").forEach((c) => c.addEventListener("click", () => {
@@ -394,6 +515,26 @@ document.querySelectorAll("#handlerChips .chip").forEach((c) => c.addEventListen
 $("minSizeMb")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { minSizeMb: Number(e.target.value || 0) } }));
 $("fileTypes")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { fileTypes: e.target.value.trim() } }));
 $("excludedSites")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { excludedSites: e.target.value.trim() } }));
+$("maxSpeedKbps")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { maxSpeedKbps: Number(e.target.value || 0) } }));
+$("maxConcurrent")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { maxConcurrent: Number(e.target.value || 3) } }));
+$("afterDoneAction")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { afterDoneAction: e.target.value } }));
+$("videoOverlay")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { videoOverlay: e.target.checked } }));
+
+// Allow dragging and dropping any link onto the Manager page to download it.
+document.addEventListener("dragover", (e) => {
+  if (!dragging) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (dragging) return;
+  const text = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "";
+  const found = linksIn(text);
+  if (found.length) {
+    e.preventDefault();
+    $("addUrl").value = found.join(" ");
+    $("addUrl").dispatchEvent(new Event("input"));
+    $("addForm").requestSubmit();
+  }
+});
 $("loginFastSites")?.addEventListener("change", async (e) => {
   if (e.target.checked) {
     try {

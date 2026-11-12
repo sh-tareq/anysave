@@ -4,7 +4,7 @@ Read this first if you are picking up the project (a new Claude account, another
 Then read [ROADMAP.md](ROADMAP.md) for what to build next, and the main [README](../README.md),
 especially "Things that are easy to break".
 
-Last updated: 12 November 2026, after release **v1.0.5**.
+Last updated: 12 November 2026, after completing **Phases 0, 1, 2, and 3** (`v1.1.0`).
 
 ---
 
@@ -29,10 +29,10 @@ with all of Internet Download Manager's (IDM) features plus AnySave's own. See R
 
 | Part | Version | Where |
 |---|---|---|
-| Desktop extension | 1.0.5 | `extension/manifest.json` → `"version"` |
-| Android app | 1.0.3 (versionCode 11) | `android/app/build.gradle.kts` |
-| Helper | built from `host-go/` (no own version number yet) | |
-| Latest GitHub release | **v1.0.5** (APK + desktop zip) | github.com/sh-tareq/anysave/releases |
+| Desktop extension | 1.1.0 | `extension/manifest.json` → `"version"` |
+| Android app | 1.1.0 (versionCode 12) | `android/app/build.gradle.kts` (`FastFileEngine.kt` multi-connection engine) |
+| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion` |
+| Latest GitHub release | **v1.0.5** (v1.1.0 ready to publish) | github.com/sh-tareq/anysave/releases |
 
 The owner's Mac and his Android phone (Xiaomi Mi 8, Android 10, adb serial `cb5fdfb5`) run these builds.
 

@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -206,7 +207,7 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
         title = { Text("Add download") },
         text = {
             Column {
-                Text("Any link: a video page, or a file such as PDF, ZIP, APK, MP3 or image.",
+                Text("Any link or batch pattern (e.g. file[01-10].zip): video pages or direct files.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
@@ -214,15 +215,21 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
             }
         },
         confirmButton = {
-            Button(enabled = !busy && Engine.extractUrl(link) != null, onClick = {
-                val url = Engine.extractUrl(link) ?: return@Button
+            Button(enabled = !busy && Engine.extractUrls(link).isNotEmpty(), onClick = {
+                val urls = Engine.extractUrls(link)
+                if (urls.isEmpty()) return@Button
                 busy = true
                 scope.launch {
-                    val known = Engine.siteOf(url) != null
-                    val probe = if (known) null else withContext(Dispatchers.IO) { FileKinds.probe(url) }
-                    if (!known && (FileKinds.looksLikeFile(url) || probe?.isFile == true))
-                        DownloadService.startFile(ctx, url, probe?.name, probe?.mime)
-                    else DownloadService.startQuick(ctx, url)
+                    if (urls.size > 1) {
+                        urls.forEach { DownloadService.startLink(ctx, it) }
+                    } else {
+                        val url = urls.first()
+                        val known = Engine.siteOf(url) != null
+                        val probe = if (known) null else withContext(Dispatchers.IO) { FileKinds.probe(url) }
+                        if (!known && (FileKinds.looksLikeFile(url) || probe?.isFile == true))
+                            DownloadService.startFile(ctx, url, probe?.name, probe?.mime)
+                        else DownloadService.startQuick(ctx, url)
+                    }
                     onClose()
                 }
             }) { Text(if (busy) "Checking…" else "Download") }
@@ -287,6 +294,7 @@ private fun FinishedRow(job: Job) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var refreshLink by remember { mutableStateOf(false) }
     val failed = job.status != JobStatus.DONE
     val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
     Row(
@@ -336,6 +344,10 @@ private fun FinishedRow(job: Job) {
                 if (failed) {
                     DropdownMenuItem(text = { Text("Retry") }, leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
                         onClick = { menu = false; DownloadService.retry(ctx, job.id) })
+                    if (job.kind != JobKind.CONVERT) {
+                        DropdownMenuItem(text = { Text("Refresh expired link") }, leadingIcon = { Icon(Icons.Outlined.Link, null) },
+                            onClick = { menu = false; refreshLink = true })
+                    }
                 } else {
                     DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
                         onClick = { menu = false; openFile(ctx, job) })
@@ -356,6 +368,53 @@ private fun FinishedRow(job: Job) {
         text = { Text("${job.fileName ?: job.title} will be removed from your phone. This can't be undone.") },
         confirmButton = { TextButton(onClick = { confirmDelete = false; deleteFile(ctx, job) }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
+
+    if (refreshLink) RefreshLinkDialog(job) { refreshLink = false }
+}
+
+/** Paste a fresh signed download URL for an expired link and resume from saved partial bytes. */
+@Composable
+fun RefreshLinkDialog(job: Job, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var newUrl by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        val clip = ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+        Engine.extractUrl(clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())?.let {
+            if (it != job.url) newUrl = it
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Refresh expired link") },
+        text = {
+            Column {
+                Text(
+                    "Paste a fresh download link for \"${displayName(job)}\". AnySave will keep the bytes already downloaded and continue from where it stopped.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = newUrl,
+                    onValueChange = { newUrl = it },
+                    singleLine = true,
+                    placeholder = { Text("https://…") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = Engine.extractUrl(newUrl) != null,
+                onClick = {
+                    val u = Engine.extractUrl(newUrl) ?: return@Button
+                    DownloadService.refreshUrl(ctx, job.id, u)
+                    onClose()
+                }
+            ) { Text("Resume") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
 }
 

@@ -38,8 +38,8 @@ func assertPayloadMatch(t *testing.T, path string, want []byte) {
 
 func TestEngineTortureSuite(t *testing.T) {
 	srv := torture.NewServer(256 * 1024) // 256 KB
-	defer srv.Close()
 	defer http.DefaultClient.CloseIdleConnections()
+	defer srv.Close()
 
 	t.Run("normal_multiconn", func(t *testing.T) {
 		dir := t.TempDir()
@@ -158,8 +158,8 @@ func TestEngineTortureSuite(t *testing.T) {
 
 	t.Run("pause_and_crash_safe_resume", func(t *testing.T) {
 		slowSrv := torture.NewServer(512 * 1024) // 512 KB
-		defer slowSrv.Close()
 		defer http.DefaultClient.CloseIdleConnections()
+		defer slowSrv.Close()
 
 		dir := t.TempDir()
 		opts := baseTestOpts(slowSrv.URL+"/slow", dir)
@@ -193,6 +193,7 @@ func TestEngineTortureSuite(t *testing.T) {
 }
 
 func TestHandoverOneTimeServer(t *testing.T) {
+	http.DefaultClient.CloseIdleConnections()
 	dir := t.TempDir()
 	fpath := filepath.Join(dir, "sample.bin")
 	payload := []byte("verified handover payload bytes 1234567890")
@@ -404,5 +405,80 @@ func TestLiveStreamHandoverAbortsOnCorruptHash(t *testing.T) {
 		t.Fatalf("expected LiveStreamServer to hold back final byte and abort on corrupt hash, but client received %d / %d bytes", gotLen, len(srv.Payload))
 	}
 }
+
+func TestSpeedLimiter(t *testing.T) {
+	srv := torture.NewServer(512 * 1024) // 512 KB
+	defer srv.Close()
+	defer http.DefaultClient.CloseIdleConnections()
+
+	dir := t.TempDir()
+	// Limit to 1 MB/s (1024*1024 B/s) -> 512 KB should take ~500ms (>= 350ms).
+	t0 := time.Now()
+	res, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/normal",
+		DestDir:      dir,
+		InitialConns: 4,
+		MaxConns:     8,
+		MinSplitSize: 64 * 1024,
+		MaxSpeedBPS:  1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("speed-limited download failed: %v", err)
+	}
+	dur := time.Since(t0)
+	if dur < 350*time.Millisecond {
+		t.Fatalf("expected speed limiter (1 MB/s on 512 KB) to take >= 350ms, took %v", dur)
+	}
+	assertPayloadMatch(t, res.FilePath, srv.Payload)
+}
+
+func TestRefreshExpiredLinkResume(t *testing.T) {
+	srv := torture.NewServer(1024 * 1024) // 1 MB
+	defer srv.Close()
+	defer http.DefaultClient.CloseIdleConnections()
+
+	dir := t.TempDir()
+	ctx1, cancel1 := context.WithCancel(context.Background())
+
+	// 1. Start downloading from "/normal?sig=expired-1" with a 512 KB/s speed limit
+	// and cancel on the first progress tick once >= 64 KB is saved to disk.
+	_, err := Download(ctx1, Options{
+		URL:          srv.URL + "/normal?sig=expired-1",
+		DestDir:      dir,
+		FileName:     "refreshed.bin",
+		StateKey:     "refresh-job-1",
+		InitialConns: 4,
+		MaxConns:     4,
+		MinSplitSize: 64 * 1024,
+		MaxSpeedBPS:  512 * 1024,
+		OnProgress: func(p Progress) {
+			if p.DoneBytes >= 64*1024 {
+				cancel1()
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("expected first download to be cancelled")
+	}
+
+	// 2. Resume with the SAME StateKey ("refresh-job-1") but a NEW URL ("/normal?sig=fresh-2").
+	res, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/normal?sig=fresh-2",
+		DestDir:      dir,
+		FileName:     "refreshed.bin",
+		StateKey:     "refresh-job-1",
+		InitialConns: 4,
+		MaxConns:     8,
+		MinSplitSize: 64 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("resume with refreshed link failed: %v", err)
+	}
+	if !res.Resumed {
+		t.Fatal("expected res.Resumed == true when continuing with refreshed link")
+	}
+	assertPayloadMatch(t, res.FilePath, srv.Payload)
+}
+
 
 

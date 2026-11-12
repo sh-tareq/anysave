@@ -45,11 +45,12 @@ const (
 
 // Segment represents a contiguous byte range [Start, End] (inclusive).
 type Segment struct {
-	ID      int           `json:"id"`
-	Start   int64         `json:"start"`
-	Current int64         `json:"current"`
-	End     int64         `json:"end"`
-	Status  SegmentStatus `json:"status"`
+	ID       int           `json:"id"`
+	Start    int64         `json:"start"`
+	Current  int64         `json:"current"`
+	End      int64         `json:"end"`
+	Status   SegmentStatus `json:"status"`
+	inFlight int64
 }
 
 // Progress reports live download telemetry to the caller.
@@ -78,6 +79,7 @@ type Options struct {
 	MinSplitSize   int64
 	MaxRetries     int
 	RetryBaseDelay time.Duration
+	MaxSpeedBPS    int64 // optional speed limit in bytes/sec (0 = unlimited)
 	OnStart        func(StartInfo)
 	OnProgress     func(Progress)
 	// OnVerified is called after SHA-256 and size verification succeed, while partPath is still intact.
@@ -187,6 +189,53 @@ type activeDownload struct {
 	verifiedDone   bool
 	verifiedSize   int64
 	terminalErr    error
+	rateMu         sync.Mutex
+	rateTokens     float64
+	rateLastRefill time.Time
+}
+
+func (d *activeDownload) waitRateLimit(ctx context.Context, n int) error {
+	limit := d.opts.MaxSpeedBPS
+	if limit <= 0 || n <= 0 {
+		return nil
+	}
+	d.rateMu.Lock()
+	now := time.Now()
+	if d.rateLastRefill.IsZero() {
+		d.rateLastRefill = now
+		d.rateTokens = 0
+	} else {
+		elapsed := now.Sub(d.rateLastRefill).Seconds()
+		if elapsed > 0 {
+			d.rateTokens += elapsed * float64(limit)
+			maxBurst := float64(limit) * 0.25
+			if maxBurst < 16*1024 {
+				maxBurst = 16 * 1024
+			}
+			if d.rateTokens > maxBurst {
+				d.rateTokens = maxBurst
+			}
+			d.rateLastRefill = now
+		}
+	}
+	d.rateTokens -= float64(n)
+	var waitDur time.Duration
+	if d.rateTokens < 0 {
+		waitSec := (-d.rateTokens) / float64(limit)
+		waitDur = time.Duration(waitSec * float64(time.Second))
+	}
+	d.rateMu.Unlock()
+
+	if waitDur > 0 {
+		timer := time.NewTimer(waitDur)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
 }
 
 func (d *activeDownload) progressState() (int64, bool, error) {
@@ -588,6 +637,11 @@ func (d *activeDownload) tryLoadResumeState() {
 			s.Status = SegDone
 		}
 	}
+	if d.opts.URL != "" && d.opts.URL != st.URL {
+		// Support refreshing an expired signed link while keeping all downloaded segments intact.
+		st.URL = d.opts.URL
+		st.ResolvedURL = ""
+	}
 	d.state = st
 	d.resumed = true
 }
@@ -702,21 +756,27 @@ func (d *activeDownload) claimOrSplitSegment() *Segment {
 	// 2. Find the Active segment with the largest remaining byte range.
 	var best *Segment
 	var bestRem int64
+	var bestPos int64
 	for _, s := range d.state.Segments {
 		if s.Status != SegActive {
 			continue
 		}
-		rem := s.End - s.Current + 1
+		pos := s.Current
+		if s.inFlight > pos {
+			pos = s.inFlight
+		}
+		rem := s.End - pos + 1
 		if rem > bestRem {
 			bestRem = rem
 			best = s
+			bestPos = pos
 		}
 	}
 	if best == nil || bestRem < 2*d.opts.MinSplitSize {
 		return nil
 	}
 
-	mid := best.Current + bestRem/2
+	mid := bestPos + bestRem/2
 	oldEnd := best.End
 	best.End = mid - 1
 
@@ -749,7 +809,11 @@ func (d *activeDownload) runWorker(ctx context.Context, seg *Segment, initialBod
 }
 
 func (d *activeDownload) downloadSegment(ctx context.Context, seg *Segment, initialBody io.ReadCloser) error {
-	buf := make([]byte, 32*1024)
+	bufSize := 32 * 1024
+	if d.opts.MaxSpeedBPS > 0 && d.opts.MaxSpeedBPS < 512*1024 {
+		bufSize = 8 * 1024
+	}
+	buf := make([]byte, bufSize)
 	retries := 0
 
 	for {
@@ -860,6 +924,7 @@ func (d *activeDownload) downloadSegment(ctx context.Context, seg *Segment, init
 				rem := seg.End - seg.Current + 1
 				if rem <= 0 {
 					seg.Status = SegDone
+					seg.inFlight = seg.Current
 					d.mu.Unlock()
 					break
 				}
@@ -868,19 +933,28 @@ func (d *activeDownload) downloadSegment(ctx context.Context, seg *Segment, init
 					toWrite = rem
 				}
 				writeOff := seg.Current
-				seg.Current += toWrite
-				doneSeg := seg.Current > seg.End
-				if doneSeg {
-					seg.Status = SegDone
-				}
+				seg.inFlight = writeOff + toWrite
 				d.mu.Unlock()
 
 				if _, werr := d.partFile.WriteAt(buf[:toWrite], writeOff); werr != nil {
 					_ = body.Close()
 					return werr
 				}
+
+				d.mu.Lock()
+				seg.Current = writeOff + toWrite
+				doneSeg := seg.Current > seg.End
+				if doneSeg {
+					seg.Status = SegDone
+				}
+				d.mu.Unlock()
+
 				d.downloadedNow.Add(toWrite)
 				madeProgress = true
+				if rerr := d.waitRateLimit(ctx, int(toWrite)); rerr != nil {
+					_ = body.Close()
+					return rerr
+				}
 				if doneSeg {
 					break
 				}
@@ -976,6 +1050,10 @@ func (d *activeDownload) downloadSingleStream(ctx context.Context, firstBody io.
 				}
 				written += int64(n)
 				d.downloadedNow.Store(written)
+				if rerr := d.waitRateLimit(ctx, n); rerr != nil {
+					body.Close()
+					return rerr
+				}
 			}
 			if err != nil {
 				readErr = err

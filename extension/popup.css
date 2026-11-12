@@ -105,3 +105,5 @@ li.drag { cursor: grab; }
 li.drag:active { cursor: grabbing; }
 .handler-row { margin-top: 8px; gap: 8px; }
 .handler-select { width: auto; margin-top: 0; padding: 3px 8px; font-size: 12px; }
+.pv-filter { width: 100%; margin: 6px 0 2px; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 12px; }
+.pv-filter[hidden] { display: none; }

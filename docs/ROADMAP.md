@@ -4,8 +4,7 @@ Goal (owner's words): make AnySave **really advanced, ultra high tech, robust an
 feature of Internet Download Manager (IDM) plus AnySave's own, as a **desktop app (Mac + Windows) + browser
 extension + Android app**. The extension works alone; extension + app together unlock everything.
 
-Status: planned, not started. The recommendations below were proposed to the owner; **confirm the open decisions
-with him before building** (§4).
+Status: **Phases 0, 1, 2, and 3 completed and verified.** Phase 4 is next.
 
 ---
 

@@ -170,8 +170,11 @@ func ServeLiveStream(info StartInfo, connectTimeout time.Duration) (*LiveStreamS
 			}
 
 			if verifiedDone && sent >= contig {
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+				_ = ln.Close()
 				doneCh <- true
-				go func() { _ = srv.Close() }()
 				return
 			}
 
