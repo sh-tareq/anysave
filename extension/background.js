@@ -383,7 +383,7 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
 
   port.postMessage({
     action: "fastDownload", job: id, url, fileName, folder,
-    cookies, referrer: referrer || "", sha256: sha256 || "", handover: true,
+    cookies, referrer: referrer || "", userAgent: navigator.userAgent, sha256: sha256 || "", handover: true,
     maxSpeedKbps: Number(settings.maxSpeedKbps || 0),
   });
   return id;

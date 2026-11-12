@@ -439,8 +439,10 @@ func actionFastDownload(msg map[string]any) {
 		StateKey:       key,
 		Cookies:        str(msg, "cookies"),
 		Referrer:       str(msg, "referrer"),
+		UserAgent:      str(msg, "userAgent"),
 		ExpectedSHA256: str(msg, "sha256"),
 		MaxSpeedBPS:    maxSpeedBPS,
+		Trace:          engineTrace(),
 		OnStart: func(info engine.StartInfo) {
 			if !handover {
 				return
@@ -577,4 +579,12 @@ func actionFastDownload(msg map[string]any) {
 		"multiConn":  res.MultiConn,
 		"peakConns":  res.PeakConns,
 	})
+}
+
+// engineTrace returns a per-request logger when ANYSAVE_TRACE=1 is set (off by default).
+func engineTrace() func(string) {
+	if os.Getenv("ANYSAVE_TRACE") != "1" {
+		return nil
+	}
+	return func(line string) { logf("engine: %s", line) }
 }

@@ -31,17 +31,22 @@ import (
 // Server wraps an httptest.Server with deterministic test payloads and fault counters.
 type Server struct {
 	*httptest.Server
-	Payload     []byte
-	PayloadV2   []byte // mutated payload used by /changing-etag after mutation triggers
-	SHA256      string
-	SHA256V2    string
-	ETag        string
-	ETagV2      string
-	LastMod     string
-	DropCount   atomic.Int32 // number of mid-stream drops remaining on /drop-midway
-	ActiveConns atomic.Int32
-	MaxSeenConn atomic.Int32
-	MutateAfter atomic.Int32 // requests before /changing-etag switches to PayloadV2
+	Payload        []byte
+	PayloadV2      []byte // mutated payload used by /changing-etag after mutation triggers
+	SHA256         string
+	SHA256V2       string
+	ETag           string
+	ETagV2         string
+	LastMod        string
+	DropCount      atomic.Int32 // number of mid-stream drops remaining on /drop-midway
+	ActiveConns    atomic.Int32
+	MaxSeenConn    atomic.Int32
+	MutateAfter    atomic.Int32 // requests before /changing-etag switches to PayloadV2
+	StallCount     atomic.Int32 // requests on /stall that still go silent after a few bytes
+	LimitedMax     atomic.Int32 // most connections /max-3-conns served at once
+	limited        atomic.Int32
+	ReqLimited     atomic.Int32 // requests seen by /max-3-requests
+	LimitedRefused atomic.Int32 // requests /max-3-conns answered with 429
 
 	mu          sync.Mutex
 	changeCalls int
@@ -88,6 +93,38 @@ func NewServer(sizeBytes int) *Server {
 	mux.HandleFunc("/redirect-3", s.handleRedirect3)
 	mux.HandleFunc("/single-conn-only", s.handleSingleConnOnly)
 	mux.HandleFunc("/corrupt-hash", s.handleCorruptHash)
+	mux.HandleFunc("/max-3-conns", s.handleMax3Conns)
+	mux.HandleFunc("/stall", s.handleStall)
+	mux.HandleFunc("/max-3-requests", func(w http.ResponseWriter, r *http.Request) {
+		// Limits requests, not connections: the first 3 are served (slowly), every later
+		// one is told to come back in 30 seconds. Like file hosts with a request budget.
+		if s.ReqLimited.Add(1) > 3 {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		s.handleSlow(w, r)
+	})
+	mux.HandleFunc("/browsers-only", func(w http.ResponseWriter, r *http.Request) {
+		// Refuses download tools by name, like some file hosts do.
+		if !strings.HasPrefix(r.Header.Get("User-Agent"), "Mozilla/") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		s.serveBytesWithRange(w, r, s.Payload, s.ETag, s.SHA256)
+	})
+	mux.HandleFunc("/no-fake-browsers", func(w http.ResponseWriter, r *http.Request) {
+		// Hangs up on anything that claims to be a browser, like some bot filters do.
+		if strings.HasPrefix(r.Header.Get("User-Agent"), "Mozilla/") {
+			if hj, ok := w.(http.Hijacker); ok {
+				if c, _, err := hj.Hijack(); err == nil {
+					c.Close()
+					return
+				}
+			}
+		}
+		s.serveBytesWithRange(w, r, s.Payload, s.ETag, s.SHA256)
+	})
 
 	s.Server = httptest.NewServer(mux)
 	return s
@@ -350,9 +387,58 @@ func (s *Server) handleSingleConnOnly(w http.ResponseWriter, r *http.Request) {
 	s.serveBytesWithRange(w, r, s.Payload, s.ETag, s.SHA256)
 }
 
+// handleMax3Conns serves at most 3 requests at a time and answers the rest with 429,
+// like file hosts that limit connections per visitor.
+func (s *Server) handleMax3Conns(w http.ResponseWriter, r *http.Request) {
+	cur := s.limited.Add(1)
+	defer s.limited.Add(-1)
+	if cur > 3 {
+		s.LimitedRefused.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	for {
+		prev := s.LimitedMax.Load()
+		if cur <= prev || s.LimitedMax.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	time.Sleep(25 * time.Millisecond) // overlap the requests reliably
+	s.serveBytesWithRange(w, r, s.Payload, s.ETag, s.SHA256)
+}
+
+// handleStall sends the first bytes of the range and then goes silent without closing,
+// for the first StallCount requests (a connection that died without telling anyone).
+func (s *Server) handleStall(w http.ResponseWriter, r *http.Request) {
+	if s.StallCount.Add(-1) < 0 {
+		s.serveBytesWithRange(w, r, s.Payload, s.ETag, s.SHA256)
+		return
+	}
+	start, end, ok := parseRange(r.Header.Get("Range"), len(s.Payload))
+	if !ok {
+		start, end = 0, len(s.Payload)-1
+	}
+	s.setStandardHeaders(w, s.ETag, s.SHA256)
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(s.Payload)))
+	w.Header().Set("Content-Length", strconv.Itoa(end-start+1))
+	w.WriteHeader(http.StatusPartialContent)
+	n := 4096
+	if end-start+1 < n {
+		n = end - start + 1
+	}
+	_, _ = w.Write(s.Payload[start : start+n])
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	select {
+	case <-r.Context().Done():
+	case <-time.After(30 * time.Second):
+	}
+}
+
 func (s *Server) handleCorruptHash(w http.ResponseWriter, r *http.Request) {
 	defer s.trackConn()()
 	badHash := strings.Repeat("f", 64)
 	s.serveBytesWithRange(w, r, s.Payload, s.ETag, badHash)
 }
-

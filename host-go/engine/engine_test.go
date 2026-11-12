@@ -480,5 +480,85 @@ func TestRefreshExpiredLinkResume(t *testing.T) {
 	assertPayloadMatch(t, res.FilePath, srv.Payload)
 }
 
+// A server that allows only 3 connections at once: the engine must finish the file,
+// keep using the 3 it is allowed, and never fail because the 4th was refused.
+func TestConnectionLimitedServer(t *testing.T) {
+	srv := torture.NewServer(2 * 1024 * 1024)
+	defer srv.Close()
+	opts := baseTestOpts(srv.URL+"/max-3-conns", t.TempDir())
+	opts.InitialConns = 6
+	opts.MaxConns = 12
+	res, err := Download(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("download from a 3-connection server failed: %v", err)
+	}
+	assertPayloadMatch(t, res.FilePath, srv.Payload)
+	if got := srv.LimitedMax.Load(); got < 2 || got > 3 {
+		t.Errorf("expected the engine to keep 2-3 connections busy, server saw at most %d", got)
+	}
+	if !res.MultiConn {
+		t.Errorf("expected a multi-connection download, got PeakConns=%d", res.PeakConns)
+	}
+	// Connections are opened one at a time, so finding the limit costs one refused
+	// request, not a burst (bursts of refused requests get clients blocked).
+	if got := srv.LimitedRefused.Load(); got > 2 {
+		t.Errorf("server had to refuse %d requests; expected at most 2", got)
+	}
+}
 
+// A server with a request budget: 3 requests are served, later ones must wait 30 seconds.
+// Pieces whose request is refused must go back to the connection they were split from,
+// so the file still arrives quickly and whole.
+func TestRequestLimitedServer(t *testing.T) {
+	srv := torture.NewServer(1024 * 1024)
+	defer srv.Close()
+	opts := baseTestOpts(srv.URL+"/max-3-requests", t.TempDir())
+	opts.MinSplitSize = 128 * 1024
+	start := time.Now()
+	res, err := Download(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("download from a request-limited server failed: %v", err)
+	}
+	assertPayloadMatch(t, res.FilePath, srv.Payload)
+	if took := time.Since(start); took > 15*time.Second {
+		t.Errorf("refused pieces waited for the server's penalty: took %v", took)
+	}
+}
 
+// Servers disagree about client names: one refuses download tools, another hangs up on
+// pretend browsers. The engine must get the file from both.
+func TestClientNameFallback(t *testing.T) {
+	srv := torture.NewServer(256 * 1024)
+	defer srv.Close()
+	for _, tc := range []struct{ path, ua string }{
+		{"/browsers-only", ""},
+		{"/no-fake-browsers", BrowserUserAgent},
+	} {
+		opts := baseTestOpts(srv.URL+tc.path, t.TempDir())
+		opts.UserAgent = tc.ua
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("%s: download failed: %v", tc.path, err)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	}
+}
+
+// Connections that go silent after a few bytes: the idle timeout must drop them and the
+// pieces must be retried from where they stopped.
+func TestStalledConnectionsRecover(t *testing.T) {
+	srv := torture.NewServer(512 * 1024)
+	defer srv.Close()
+	srv.StallCount.Store(3)
+	opts := baseTestOpts(srv.URL+"/stall", t.TempDir())
+	opts.IdleTimeout = 300 * time.Millisecond
+	start := time.Now()
+	res, err := Download(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("download with stalled connections failed: %v", err)
+	}
+	assertPayloadMatch(t, res.FilePath, srv.Payload)
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("stalled connections were not dropped quickly: took %v", took)
+	}
+}
