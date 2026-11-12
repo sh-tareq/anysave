@@ -20,12 +20,12 @@ export CGO_ENABLED=0
 LDFLAGS="-s -w"
 
 echo "Building helper…"
-GOOS=darwin  GOARCH=arm64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host-arm64" .
-GOOS=darwin  GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host-amd64" .
-GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host.exe" .
+GOOS=darwin  GOARCH=arm64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/anysave-host-arm64" .
+GOOS=darwin  GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/anysave-host-amd64" .
+GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/anysave-host.exe" .
 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/installer-stub.exe" ./cmd/installer-win
-lipo -create -output "$BUILD/vidgrab-host" "$BUILD/vidgrab-host-arm64" "$BUILD/vidgrab-host-amd64"
-codesign --force --sign - "$BUILD/vidgrab-host"   # ad-hoc signature, required on Apple Silicon
+lipo -create -output "$BUILD/anysave-host" "$BUILD/anysave-host-arm64" "$BUILD/anysave-host-amd64"
+codesign --force --sign - "$BUILD/anysave-host"   # ad-hoc signature, required on Apple Silicon
 
 # ---- Native macOS AnySave.app bundle ----
 echo "Building native macOS AnySave.app…"
@@ -34,7 +34,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 swiftc -O -target arm64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o "$BUILD/AnySave-app-arm64"
 swiftc -O -target x86_64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o "$BUILD/AnySave-app-amd64"
 lipo -create -output "$APP_BUNDLE/Contents/MacOS/AnySave" "$BUILD/AnySave-app-arm64" "$BUILD/AnySave-app-amd64"
-cp "$BUILD/vidgrab-host" "$APP_BUNDLE/Contents/MacOS/vidgrab-host"
+cp "$BUILD/anysave-host" "$APP_BUNDLE/Contents/MacOS/anysave-host"
 cp "$ROOT/installers/mac/app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ROOT/installers/mac/app/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"   # named in Info.plist
 cp -R "$ROOT/extension" "$APP_BUNDLE/Contents/Resources/extension"
@@ -45,7 +45,7 @@ PKG="$BUILD/AnySave-Desktop"
 
 MAC="$PKG/AnySave-mac"
 mkdir -p "$MAC/helper"
-cp "$BUILD/vidgrab-host" "$MAC/helper/"
+cp "$BUILD/anysave-host" "$MAC/helper/"
 cp -R "$APP_BUNDLE" "$MAC/AnySave.app"
 cp -R "$ROOT/extension" "$MAC/extension"
 cp "$ROOT/installers/mac/install-mac.sh" "$MAC/Install AnySave.command"
@@ -55,14 +55,14 @@ chmod +x "$MAC/Install AnySave.command"
 # Windows tools expect CRLF line endings
 WIN="$PKG/AnySave-windows"
 mkdir -p "$WIN/helper"
-cp "$BUILD/vidgrab-host.exe" "$WIN/helper/"
+cp "$BUILD/anysave-host.exe" "$WIN/helper/"
 cp -R "$ROOT/extension" "$WIN/extension"
 for f in "Install AnySave.bat" "install.ps1" "How to install.txt"; do
   perl -pe 's/\r?\n/\r\n/' "$ROOT/installers/windows/$f" > "$WIN/$f"
 done
 
 perl -pe 's/\r?\n/\r\n/' "$ROOT/installers/Read me first.txt" > "$PKG/Read me first.txt"
-cp "$ROOT/dist-assets/vidgrab-logo-1024.png" "$PKG/AnySave logo.png"
+cp "$ROOT/dist-assets/anysave-logo-1024.png" "$PKG/AnySave logo.png"
 cp "$ROOT/LEGAL.md" "$PKG/Legal notice.txt"
 cp "$ROOT/LICENSE" "$PKG/LICENSE.txt"
 # ditto keeps the Mac installer's "executable" flag; Windows unzips it normally

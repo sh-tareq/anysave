@@ -17,7 +17,7 @@
 # ---- AnySave ----
 # Services/activities/tile are referenced from the manifest (kept automatically).
 # Enum names are stored in settings and history.json: keep them stable.
--keepclassmembers enum com.vidgrab.app.** { *; }
+-keepclassmembers enum com.anysave.app.** { *; }
 
 # Keep line numbers for readable crash reports
 -keepattributes SourceFile,LineNumberTable

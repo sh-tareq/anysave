@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Release signing key (android/vidgrab-release.jks + keystore.properties). Kept out of git.
+// Release signing key (android/anysave-release.jks + keystore.properties). Kept out of git.
 // Keep a backup: APK updates must be signed with the same key.
 val keyProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
@@ -13,11 +13,11 @@ val keyProps = Properties().apply {
 }
 
 android {
-    namespace = "com.vidgrab.app"
+    namespace = "com.anysave.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.vidgrab.app"
+        applicationId = "com.anysave.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 12

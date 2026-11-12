@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.content.ClipboardManager
 import android.content.Intent
@@ -82,6 +82,6 @@ class QuickDownloadActivity : ComponentActivity() {
     private fun toast(msg: String) = Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
 
     companion object {
-        const val ACTION_CLIPBOARD = "com.vidgrab.app.DOWNLOAD_CLIPBOARD"
+        const val ACTION_CLIPBOARD = "com.anysave.app.DOWNLOAD_CLIPBOARD"
     }
 }

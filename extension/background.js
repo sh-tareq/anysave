@@ -1,7 +1,7 @@
 // AnySave service worker (2.0): video downloads through the native helper (yt-dlp),
 // any-file downloads through Chrome's downloader, conversions through the helper (FFmpeg),
 // and a right-click menu. Jobs are kept in chrome.storage.local so the history survives restarts.
-const HOST = "com.vidgrab.host";
+const HOST = "com.anysave.host";
 const ports = new Map(); // jobId -> native Port (running video downloads and conversions)
 
 // ---------- job store ----------
@@ -741,10 +741,10 @@ function openManager(tab) {
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "vg-link", title: "Download link with AnySave", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "vg-media", title: "Download with AnySave", contexts: ["video", "audio", "image"] });
-    chrome.contextMenus.create({ id: "vg-page", title: "Download this page's video with AnySave", contexts: ["page"] });
-    chrome.contextMenus.create({ id: "vg-manager", title: "Open AnySave download manager", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "as-link", title: "Download link with AnySave", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "as-media", title: "Download with AnySave", contexts: ["video", "audio", "image"] });
+    chrome.contextMenus.create({ id: "as-page", title: "Download this page's video with AnySave", contexts: ["page"] });
+    chrome.contextMenus.create({ id: "as-manager", title: "Open AnySave download manager", contexts: ["action"] });
   });
   // Move pre-2.0 session jobs into the persistent store.
   const old = (await chrome.storage.session.get("jobs")).jobs;
@@ -752,18 +752,18 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === "vg-manager") return openManager();
+  if (info.menuItemId === "as-manager") return openManager();
   if (!(await agreed())) { chrome.action.openPopup?.(); return; }
   let target = null;
-  if (info.menuItemId === "vg-link") target = info.linkUrl;
-  if (info.menuItemId === "vg-media") target = info.srcUrl?.startsWith("blob:") ? info.pageUrl : info.srcUrl;
-  if (info.menuItemId === "vg-page") target = info.pageUrl;
+  if (info.menuItemId === "as-link") target = info.linkUrl;
+  if (info.menuItemId === "as-media") target = info.srcUrl?.startsWith("blob:") ? info.pageUrl : info.srcUrl;
+  if (info.menuItemId === "as-page") target = info.pageUrl;
   if (!target) return;
   // Images and plain media files go straight to Chrome's downloader.
   if (info.mediaType === "image" || (info.srcUrl && FILE_EXT.test(new URL(info.srcUrl).pathname))) {
     await startFile({ url: target, title: tab?.title });
   } else {
-    await addLink(target, info.menuItemId === "vg-page" ? tab?.title : undefined);
+    await addLink(target, info.menuItemId === "as-page" ? tab?.title : undefined);
   }
   // The job's own progress shows on the badge as soon as it starts.
   lastIconState = "";

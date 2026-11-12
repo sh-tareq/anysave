@@ -1,3 +1,3 @@
-module vidgrab-host
+module anysave-host
 
 go 1.22

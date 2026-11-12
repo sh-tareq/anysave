@@ -1,7 +1,7 @@
 // End-to-end test for the AnySave helper (macOS, Windows, Linux).
 //
 // Usage:
-//   go run ./cmd/test-helper -bin /path/to/vidgrab-host [-live]
+//   go run ./cmd/test-helper -bin /path/to/anysave-host [-live]
 //
 // Tests:
 //   1. `--check` and `--version`
@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"vidgrab-host/torture"
+	"anysave-host/torture"
 )
 
 func writeMsg(w io.Writer, req map[string]any) error {
@@ -129,7 +129,7 @@ func runStreamJob(binPath string, env []string, req map[string]any, cancelAfterF
 }
 
 func main() {
-	bin := flag.String("bin", "", "Path to vidgrab-host binary")
+	bin := flag.String("bin", "", "Path to anysave-host binary")
 	live := flag.Bool("live", false, "Run live YouTube info/playlist/download/cancel checks too")
 	flag.Parse()
 

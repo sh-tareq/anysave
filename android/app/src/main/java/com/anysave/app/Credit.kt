@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"vidgrab-host/torture"
+	"anysave-host/torture"
 )
 
 func baseTestOpts(url, dir string) Options {

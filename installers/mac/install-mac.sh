@@ -9,11 +9,11 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 APP="$HOME/Library/Application Support/AnySave"
 BIN="$APP/bin"
 EXT_DEST="$HOME/AnySave/extension"
-HOST_NAME="com.vidgrab.host"
+HOST_NAME="com.anysave.host"
 EXT_ID="jgkodjdjabccfmfbfmiinmppmcpgomai"   # fixed by the "key" in extension/manifest.json
 
 echo "=== Installing AnySave ==="
-if [ ! -f "$SRC/helper/vidgrab-host" ] || [ ! -d "$SRC/extension" ]; then
+if [ ! -f "$SRC/helper/anysave-host" ] || [ ! -d "$SRC/extension" ]; then
   echo "✗ This installer must be run from the unzipped AnySave-mac folder"
   echo "  (it needs the 'helper' and 'extension' folders next to it)."
   echo "  Developers: run scripts/build.sh and use dist/AnySave-mac/."
@@ -23,23 +23,13 @@ mkdir -p "$BIN" "$(dirname "$EXT_DEST")"
 
 # 1. Helper app. Remove the old copy first: overwriting a signed program in place makes
 #    macOS kill it on launch ("Killed: 9"), mostly on Apple Silicon.
-rm -f "$APP/vidgrab-host"
-cp "$SRC/helper/vidgrab-host" "$APP/vidgrab-host"
-chmod +x "$APP/vidgrab-host"
+rm -f "$APP/anysave-host"
+cp "$SRC/helper/anysave-host" "$APP/anysave-host"
+chmod +x "$APP/anysave-host"
 
 # 2. Extension (kept in a permanent place so the download folder can be deleted)
 rm -rf "$EXT_DEST"
 cp -R "$SRC/extension" "$EXT_DEST"
-
-# Upgrading from VidGrab: Chrome still loads ~/VidGrab/extension, so refresh that copy too
-# (nothing breaks), and reuse the old ffmpeg instead of downloading it again.
-OLD_APP="$HOME/Library/Application Support/VidGrab"
-OLD_EXT="$HOME/VidGrab/extension"
-UPGRADED=""
-if [ -d "$OLD_EXT" ]; then
-  rm -rf "$OLD_EXT"; cp -R "$SRC/extension" "$OLD_EXT"; UPGRADED=1
-fi
-if [ -x "$OLD_APP/bin/ffmpeg" ] && [ ! -x "$BIN/ffmpeg" ]; then cp "$OLD_APP/bin/ffmpeg" "$BIN/ffmpeg"; fi
 
 # 3. yt-dlp, unpacked build. The single-file build unpacks Python on every run,
 #    and macOS blocks those files when Chrome starts it ("Python.framework is damaged").
@@ -98,7 +88,6 @@ fi
 # Files that came from a downloaded zip carry macOS's "downloaded from the
 # internet" flag, which would stop Chrome from starting the helper.
 xattr -dr com.apple.quarantine "$APP" "$EXT_DEST" 2>/dev/null || true
-[ -n "$UPGRADED" ] && xattr -dr com.apple.quarantine "$OLD_EXT" 2>/dev/null || true
 
 # 5b. Native macOS Desktop App (AnySave.app -> /Applications or ~/Applications)
 if [ -d "$SRC/AnySave.app" ]; then
@@ -128,7 +117,7 @@ if [ -z "$BIN_DIR" ]; then
   fi
   CLI_NOTE=" (open a new Terminal window to use it)"
 fi
-if ln -sf "$APP/vidgrab-host" "$BIN_DIR/anysave" 2>/dev/null; then
+if ln -sf "$APP/anysave-host" "$BIN_DIR/anysave" 2>/dev/null; then
   echo "✓ Terminal command: anysave <link>${CLI_NOTE:-}"
 fi
 
@@ -144,7 +133,7 @@ for TARGET in \
 {
   "name": "$HOST_NAME",
   "description": "AnySave helper",
-  "path": "$APP/vidgrab-host",
+  "path": "$APP/anysave-host",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXT_ID/"]
 }
@@ -153,7 +142,7 @@ EOF
 done
 
 echo
-"$APP/vidgrab-host" --check
+"$APP/anysave-host" --check
 echo
 echo "=== Done! Last step, in Chrome: ==="
 echo "  1. Go to chrome://extensions and turn on Developer mode (top right)"
@@ -163,13 +152,6 @@ echo "  3. Quit Chrome (Cmd+Q) and open it again"
 echo
 echo "Already installed? Just click the reload button on AnySave in chrome://extensions."
 echo "To update AnySave later, run this installer again."
-# The old helper folder isn't used any more (the browser registration now points here).
-rm -rf "$OLD_APP"
-if [ -n "$UPGRADED" ]; then
-  echo
-  echo "Updated: just click the reload button on the extension in chrome://extensions."
-  echo "(Optional: remove it and 'Load unpacked' from $EXT_DEST, then delete ~/VidGrab.)"
-fi
 if [ "${ANYSAVE_NO_OPEN:-0}" != "1" ]; then
   open -R "$EXT_DEST" || true
 fi

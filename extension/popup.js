@@ -83,8 +83,8 @@ function collectPageVideos() {
     });
   }
   // TikTok Creative Center: add the ads capture.js recorded while they played on hover.
-  if (window.__vgSeen) {
-    const recorded = [...window.__vgSeen.values()].sort((a, b) => a.at - b.at);
+  if (window.__anysaveSeen) {
+    const recorded = [...window.__anysaveSeen.values()].sort((a, b) => a.at - b.at);
     for (const r of recorded) {
       const i = out.findIndex((o) => o.src === r.src);
       if (i >= 0) out[i] = { ...r, ...out[i], name: out[i].name || r.name, id: out[i].id || r.id, poster: out[i].poster || r.poster };

@@ -3,8 +3,8 @@
 // AnySave popup opens. So this script records each ad video the moment it starts playing,
 // and the popup lists everything recorded on this page.
 (() => {
-  if (window.__vgSeen) return;
-  const seen = (window.__vgSeen = new Map()); // src -> { src, id, name, poster, duration, at }
+  if (window.__anysaveSeen) return;
+  const seen = (window.__anysaveSeen = new Map()); // src -> { src, id, name, poster, duration, at }
 
   // Metric labels and campaign objectives; the industry name (e.g. "Pet Information") is a better title.
   const skip = /^(?:(?:See analytics|Likes|CTR|Budget|Low|Medium|High|Top|Reach|Conversions?|Traffic|App Installs?|Video Views|Lead Generation|Product Sales|Community Interaction|Engagement|Catalog Sales)$|\d)/i;

@@ -55,7 +55,7 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
             <intent-filter>
-                <action android:name="com.vidgrab.app.DOWNLOAD_CLIPBOARD" />
+                <action android:name="com.anysave.app.DOWNLOAD_CLIPBOARD" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

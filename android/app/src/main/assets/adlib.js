@@ -1,8 +1,8 @@
 // AnySave: injected into Meta Ad Library and TikTok Creative Center pages in the in-app browser.
 // Records every ad video as it appears or plays (TikTok removes a video when it stops playing),
-// and window.__vgList() returns them all as JSON for the app's "Ads found" list.
+// and window.__anysaveList() returns them all as JSON for the app's "Ads found" list.
 (() => {
-  if (window.__vgList) return;
+  if (window.__anysaveList) return;
   const isMeta = /facebook\.com$/.test(location.hostname) && location.pathname.startsWith("/ads/library");
   const isTikTokCC = location.hostname === "ads.tiktok.com";
   const isWeb = !isMeta && !isTikTokCC; // any other website
@@ -82,7 +82,7 @@
   }
   setInterval(scanResources, 2000);
 
-  window.__vgList = () => {
+  window.__anysaveList = () => {
     scan();
     scanResources();
     // Meta can show the same ad twice (multiple versions): keep one per Library ID.

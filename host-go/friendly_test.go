@@ -38,7 +38,7 @@ func TestLogRotationAndDiagnostics(t *testing.T) {
 		downloadDir = oldDl
 	}()
 
-	logPath := filepath.Join(tmp, "vidgrab.log")
+	logPath := filepath.Join(tmp, "anysave.log")
 	if err := os.WriteFile(logPath, make([]byte, maxLogBytes+10), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestLogRotationAndDiagnostics(t *testing.T) {
 	logf("test entry from %s/secret", home)
 
 	if _, err := os.Stat(logPath + ".1"); err != nil {
-		t.Fatalf("expected rotated log vidgrab.log.1 to exist: %v", err)
+		t.Fatalf("expected rotated log anysave.log.1 to exist: %v", err)
 	}
 	res := actionDiagnostics(map[string]any{"extensionVersion": "1.0.5"})
 	if ok, _ := res["ok"].(bool); !ok {

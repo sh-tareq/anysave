@@ -1,8 +1,8 @@
 // Records Alt-click (use Chrome for this download) and Ctrl-click (force AnySave fast engine)
 // on links so the service worker knows the user's choice when the download starts.
 (() => {
-  if (window.__vgClickKeys) return;
-  window.__vgClickKeys = true;
+  if (window.__anysaveClickKeys) return;
+  window.__anysaveClickKeys = true;
   const record = (e) => {
     if (!e.altKey && !e.ctrlKey && !e.metaKey) return;
     const a = e.target?.closest?.("a[href]");

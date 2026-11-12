@@ -3,8 +3,8 @@
 //   extension/icons/icon{16,32,48,128}.png                 Chrome extension
 //   android/.../mipmap-*/ic_launcher.png                    launchers without adaptive icons (e.g. some MIUI)
 //   android/.../mipmap-*/ic_launcher_{background,foreground}.png   adaptive icon layers
-//   android/.../drawable-nodpi/vidgrab_logo.png             in-app logo
-//   dist-assets/vidgrab-logo-1024.png                       for docs / sharing
+//   android/.../drawable-nodpi/anysave_logo.png             in-app logo
+//   dist-assets/anysave-logo-1024.png                       for docs / sharing
 // Run from the repo root:  swift scripts/make-icons.swift
 import AppKit
 
@@ -142,5 +142,5 @@ for (name, scale) in densities {
 }
 
 // In-app logo + a large copy for sharing
-write(render(512, fullIcon), "\(res)/drawable-nodpi/vidgrab_logo.png")
-write(render(1024, fullIcon), "\(root)/dist-assets/vidgrab-logo-1024.png")
+write(render(512, fullIcon), "\(res)/drawable-nodpi/anysave_logo.png")
+write(render(1024, fullIcon), "\(root)/dist-assets/anysave-logo-1024.png")

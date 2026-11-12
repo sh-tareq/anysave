@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.Manifest
 import android.app.Application

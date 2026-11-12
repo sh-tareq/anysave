@@ -46,7 +46,7 @@ Output in `dist/`:
 | File | For |
 |---|---|
 | `AnySave-Desktop-Mac-Windows.zip` | Mac and Windows. Contains `AnySave-mac/` and `AnySave-windows/`, each with an installer and "How to install.txt". |
-| `AnySave.apk` | Android phones (64-bit, R8-minified, signed with `android/vidgrab-release.jks`). |
+| `AnySave.apk` | Android phones (64-bit, R8-minified, signed with `android/anysave-release.jks`). |
 
 The R8 mapping for each Android release is kept in `dist-assets/r8-mapping-<version>.txt`
 (not shared). Use it to read crash stack traces from that build.
@@ -95,10 +95,10 @@ Re-running the installer updates yt-dlp, which fixes most "stopped working" prob
   temp file and deletes it when yt-dlp finishes.
   On Android, Settings → Accounts logs in to Instagram, Facebook, TikTok, Vimeo or YouTube in a
   WebView and keeps those cookies in the app's private storage.
-- **Internal IDs still say "vidgrab".** The Android package (`com.vidgrab.app`), the extension key/ID,
-  the native host name (`com.vidgrab.host`) and the helper binary (`vidgrab-host`) keep the project's
-  original working name on purpose. Changing them would break updates for installed copies. Don't rename them.
-- **Android signing key.** `android/vidgrab-release.jks` + `android/keystore.properties`.
+- **Internal IDs.** The Android package (`com.anysave.app`), the native host name (`com.anysave.host`),
+  the helper binary (`anysave-host`) and the extension key/ID are what installed copies use to find each other
+  and to accept updates. Changing any of them breaks updates for installed copies. Don't rename them.
+- **Android signing key.** `android/anysave-release.jks` + `android/keystore.properties`.
   Back these up. People can only install updates signed with the same key.
 - **Android yt-dlp updates.** The app updates yt-dlp at most every 2 days, before it
   reports "ready". Running yt-dlp while it's being replaced fails with
@@ -106,9 +106,9 @@ Re-running the installer updates yt-dlp, which fixes most "stopped working" prob
 
 ## Debugging
 
-- Desktop helper log: `vidgrab.log` next to the helper (see the table above).
-- `vidgrab-host --check` prints which yt-dlp and ffmpeg it found.
-- Android: `adb logcat | grep -i vidgrab`
+- Desktop helper log: `anysave.log` next to the helper (see the table above).
+- `anysave-host --check` prints which yt-dlp and ffmpeg it found.
+- Android: `adb logcat | grep -i anysave`
 
 ## Legal
 

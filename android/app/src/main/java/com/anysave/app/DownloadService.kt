@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.app.Notification
 import android.app.NotificationManager
@@ -213,13 +213,13 @@ class DownloadService : Service() {
             .addOption("--concurrent-fragments", "4")
             .addOption(
                 "--progress-template",
-                "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|" +
+                "download:ASP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|" +
                     "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
             )
             // Title/thumbnail for one-tap downloads that skipped the lookup
             .addOption("--print", "video:VGT %(title)s")
             .addOption("--print", "video:VGI %(thumbnail)s")
-            .addOption("--print", "after_move:VGF %(filepath)s")
+            .addOption("--print", "after_move:ASF %(filepath)s")
         val limitKbps = Settings.speedLimitKbps.value
         if (limitKbps > 0) req.addOption("--limit-rate", "${limitKbps}K")
         if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
@@ -230,8 +230,8 @@ class DownloadService : Service() {
         var finalPath: String? = null
         YoutubeDL.getInstance().execute(req, id) { _, _, line ->
             when {
-                line.startsWith("VGP ") -> onVideoProgress(id, line.removePrefix("VGP "))
-                line.startsWith("VGF ") -> finalPath = line.removePrefix("VGF ").trim()
+                line.startsWith("ASP ") -> onVideoProgress(id, line.removePrefix("ASP "))
+                line.startsWith("ASF ") -> finalPath = line.removePrefix("ASF ").trim()
                 line.startsWith("VGT ") && !job.fixedName -> {
                     val t = line.removePrefix("VGT ").trim()
                     if (t.isNotEmpty() && t != "NA") Downloads.update(id) { it.copy(title = t) }

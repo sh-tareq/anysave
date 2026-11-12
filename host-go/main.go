@@ -37,7 +37,7 @@ import (
 const (
 	h264Sort      = "res,fps,vcodec:h264,acodec:m4a"
 	helperVersion = "1.1.0"
-	maxLogBytes   = 2 * 1024 * 1024 // rotate vidgrab.log at 2 MB
+	maxLogBytes   = 2 * 1024 * 1024 // rotate anysave.log at 2 MB
 )
 
 var (
@@ -74,7 +74,7 @@ func send(v any) {
 func logf(format string, a ...any) {
 	logMu.Lock()
 	defer logMu.Unlock()
-	p := filepath.Join(appDir, "vidgrab.log")
+	p := filepath.Join(appDir, "anysave.log")
 	if st, err := os.Stat(p); err == nil && st.Size() >= maxLogBytes {
 		_ = os.Rename(p, p+".1")
 	}
@@ -166,7 +166,7 @@ func writeCookies(text string) (string, error) {
 	if text == "" {
 		return "", nil
 	}
-	f, err := os.CreateTemp("", "vidgrab-*.txt") // mode 0600
+	f, err := os.CreateTemp("", "anysave-*.txt") // mode 0600
 	if err != nil {
 		return "", err
 	}
@@ -198,7 +198,7 @@ func lastError(stderr string) string {
 	}
 	msg = strings.TrimSpace(strings.Replace(msg, "ERROR:", "", 1))
 	if msg == "" {
-		msg = "yt-dlp failed (see vidgrab.log)"
+		msg = "yt-dlp failed (see anysave.log)"
 	}
 	return friendlyError(msg)
 }
@@ -464,9 +464,9 @@ func actionDownload(msg map[string]any) {
 		"-o", "%(title).150B [%(id)s]%(height& {}p|)s.%(ext)s",
 		"--continue", // resume .part files after a pause
 		"--newline", "--progress", "--no-simulate",
-		"--progress-template", "download:VGP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|"+
+		"--progress-template", "download:ASP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|"+
 			"%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
-		"--print", "after_move:VGF %(filepath)s",
+		"--print", "after_move:ASF %(filepath)s",
 	)
 	if speedKbps, ok := msg["maxSpeedKbps"].(float64); ok && speedKbps > 0 {
 		args = append(args, "--limit-rate", fmt.Sprintf("%dK", int(speedKbps)))
@@ -524,7 +524,7 @@ func actionDownload(msg map[string]any) {
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), "\r")
 		switch {
-		case strings.HasPrefix(line, "VGP "):
+		case strings.HasPrefix(line, "ASP "):
 			p := append(strings.Split(line[4:], "|"), "", "", "", "", "")
 			done, total := num(p[0]), num(p[1])
 			if total == 0 {
@@ -535,7 +535,7 @@ func actionDownload(msg map[string]any) {
 				pct = float64(int(done/total*1000)) / 10
 			}
 			send(map[string]any{"type": "progress", "percent": pct, "speed": humanSpeed(num(p[3])), "eta": humanETA(p[4])})
-		case strings.HasPrefix(line, "VGF "):
+		case strings.HasPrefix(line, "ASF "):
 			finalFile = line[4:]
 		}
 	}
@@ -755,7 +755,7 @@ func scrubPaths(s string) string {
 }
 
 func readLogTail(maxLines int) string {
-	p := filepath.Join(appDir, "vidgrab.log")
+	p := filepath.Join(appDir, "anysave.log")
 	data, err := os.ReadFile(p)
 	if err != nil || len(data) == 0 {
 		return "(no log entries yet)"
@@ -815,7 +815,7 @@ func main() {
 	}
 	downloadDir = filepath.Join(userDownloadsDir(), "AnySave")
 
-	// `vidgrab-host --check` prints which tools were found (used by installers).
+	// `anysave-host --check` prints which tools were found (used by installers).
 	if len(os.Args) > 1 && os.Args[1] == "--check" {
 		fmt.Printf("helper: %s (%s/%s)\nyt-dlp: %s\nffmpeg: %s\ndeno: %s\n",
 			helperVersion, runtime.GOOS, runtime.GOARCH,
@@ -857,7 +857,7 @@ func main() {
 		}
 	}
 	// If launched as `AnySave.exe` directly with no arguments, start the desktop app + tray.
-	if len(os.Args) == 1 && strings.HasPrefix(selfName, "anysave") {
+	if len(os.Args) == 1 && (selfName == "anysave" || selfName == "anysave.exe") {
 		_ = runDaemon(true, "")
 		return
 	}

@@ -9,7 +9,7 @@ android/*.jks
 # Build output
 dist/
 dist-assets/r8-mapping-*.txt
-host-go/vidgrab-host
+host-go/anysave-host
 host-go/*.exe
 android/.gradle/
 android/.kotlin/

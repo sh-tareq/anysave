@@ -1,15 +1,15 @@
 #!/bin/bash
-# Makes the desktop app icons from the logo (dist-assets/vidgrab-logo-1024.png):
+# Makes the desktop app icons from the logo (dist-assets/anysave-logo-1024.png):
 #   installers/mac/app/AppIcon.icns        Mac app + disk image icon
 #   installers/windows/anysave.ico         Windows icon (shortcuts)
-#   host-go/rsrc_windows_amd64.syso        icon inside vidgrab-host.exe
+#   host-go/rsrc_windows_amd64.syso        icon inside anysave-host.exe
 #   host-go/cmd/installer-win/rsrc_windows_amd64.syso   icon inside AnySave-Setup.exe
 # The results are committed, so a normal build doesn't need to run this.
 # Run it again only when the logo changes (macOS, needs sips + iconutil + python3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LOGO="$ROOT/dist-assets/vidgrab-logo-1024.png"
+LOGO="$ROOT/dist-assets/anysave-logo-1024.png"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.content.Context
 import com.yausername.ffmpeg.FFmpeg
@@ -42,7 +42,7 @@ object Engine {
 
     /** Sites change often; keep yt-dlp fresh by checking at most every 2 days. */
     private fun autoUpdate(ctx: Context) {
-        val prefs = ctx.getSharedPreferences("vidgrab", Context.MODE_PRIVATE)
+        val prefs = ctx.getSharedPreferences("anysave", Context.MODE_PRIVATE)
         val last = prefs.getLong("lastUpdateCheck", 0)
         if (System.currentTimeMillis() - last < 2 * 24 * 3600 * 1000L) return
         runCatching {
@@ -56,7 +56,7 @@ object Engine {
         state.value = State.STARTING
         try {
             val s = YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)
-            ctx.getSharedPreferences("vidgrab", Context.MODE_PRIVATE).edit()
+            ctx.getSharedPreferences("anysave", Context.MODE_PRIVATE).edit()
                 .putLong("lastUpdateCheck", System.currentTimeMillis()).apply()
             return if (s == YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE) "Already up to date"
             else "Updated to ${YoutubeDL.getInstance().versionName(ctx)}"

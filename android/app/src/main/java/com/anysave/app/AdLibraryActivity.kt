@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -88,7 +88,7 @@ class AdLibraryActivity : ComponentActivity() {
                     val w = web ?: return@LaunchedEffect
                     while (true) {
                         w.evaluateJavascript(script, null)
-                        w.evaluateJavascript("window.__vgList ? window.__vgList() : '[]'") { raw ->
+                        w.evaluateJavascript("window.__anysaveList ? window.__anysaveList() : '[]'") { raw ->
                             ads = parseAds(raw)
                         }
                         delay(1500)

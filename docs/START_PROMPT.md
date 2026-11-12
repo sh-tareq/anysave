@@ -30,5 +30,5 @@ How I want you to work:
   with `adb install -r` (keeps my data).
 - Ask before committing. Branch, then fast-forward `main` and push. I publish GitHub releases myself: give me
   the release notes file and the exact `gh release create` command.
-- Never rename the internal "vidgrab" IDs (`com.vidgrab.host`, `vidgrab-host`, `com.vidgrab.app`, extension key).
+- Never rename the internal IDs (`com.anysave.host`, `anysave-host`, `com.anysave.app`, extension key).
 - My goal: really advanced, ultra high tech, robust and flawless. Suggest better ideas when you see them.

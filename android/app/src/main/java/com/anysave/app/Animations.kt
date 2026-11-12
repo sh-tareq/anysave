@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -34,7 +34,7 @@ fun AnimatedLogo(size: Dp, modifier: Modifier = Modifier) {
     )
     Box(modifier.size(width = size, height = size * 1.08f), contentAlignment = Alignment.TopCenter) {
         Image(
-            painterResource(R.drawable.vidgrab_logo), contentDescription = "AnySave",
+            painterResource(R.drawable.anysave_logo), contentDescription = "AnySave",
             modifier = Modifier.size(size).graphicsLayer {
                 rotationY = tilt
                 rotationX = 6f * (lift - 0.5f)

@@ -65,7 +65,7 @@ jobs:
           go vet ./...
           go test -v ./...
           New-Item -ItemType Directory -Force -Path ../dist/AnySave-windows/helper | Out-Null
-          go build -trimpath -ldflags "-s -w" -o ../dist/AnySave-windows/helper/vidgrab-host.exe .
+          go build -trimpath -ldflags "-s -w" -o ../dist/AnySave-windows/helper/anysave-host.exe .
           Copy-Item -Recurse ../extension ../dist/AnySave-windows/extension
           Copy-Item ../installers/windows/install.ps1 ../dist/AnySave-windows/install.ps1
           Copy-Item "../installers/windows/Install AnySave.bat" "../dist/AnySave-windows/Install AnySave.bat"
@@ -81,9 +81,9 @@ jobs:
           $Ext = Join-Path $env:USERPROFILE 'AnySave\extension'
 
           foreach ($f in @(
-            (Join-Path $App 'vidgrab-host.exe'),
+            (Join-Path $App 'anysave-host.exe'),
             (Join-Path $App 'AnySave.exe'),
-            (Join-Path $App 'com.vidgrab.host.json'),
+            (Join-Path $App 'com.anysave.host.json'),
             (Join-Path $Bin 'yt-dlp.exe'),
             (Join-Path $Bin 'ffmpeg.exe'),
             (Join-Path $Bin 'deno.exe'),
@@ -94,13 +94,13 @@ jobs:
 
           # Verify registry keys for Chrome, Edge, Brave, Chromium
           foreach ($r in @(
-            'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.vidgrab.host',
-            'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.vidgrab.host',
-            'HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.vidgrab.host',
-            'HKCU:\Software\Chromium\NativeMessagingHosts\com.vidgrab.host'
+            'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anysave.host',
+            'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.anysave.host',
+            'HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.anysave.host',
+            'HKCU:\Software\Chromium\NativeMessagingHosts\com.anysave.host'
           )) {
             $val = (Get-ItemProperty -Path $r).'(default)'
-            if ($val -ne (Join-Path $App 'com.vidgrab.host.json')) {
+            if ($val -ne (Join-Path $App 'com.anysave.host.json')) {
               throw "Registry mismatch at $r : $val"
             }
           }
@@ -109,7 +109,7 @@ jobs:
         working-directory: host-go
         shell: pwsh
         run: |
-          $HostExe = Join-Path $env:LOCALAPPDATA 'AnySave\vidgrab-host.exe'
+          $HostExe = Join-Path $env:LOCALAPPDATA 'AnySave\anysave-host.exe'
           go run ./cmd/test-helper -bin $HostExe -live
 
           # Test the installer's "busy" guard while a helper process is running
@@ -117,9 +117,9 @@ jobs:
           try {
             $out = & pwsh -NoProfile -File ../dist/AnySave-windows/install.ps1 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0 -or $out -notmatch 'AnySave is busy') {
-              throw "Expected installer to refuse when vidgrab-host.exe is running, got exit=$LASTEXITCODE out=$out"
+              throw "Expected installer to refuse when anysave-host.exe is running, got exit=$LASTEXITCODE out=$out"
             }
-            Write-Host "[OK] Windows installer busy check refused cleanly while vidgrab-host.exe was running"
+            Write-Host "[OK] Windows installer busy check refused cleanly while anysave-host.exe was running"
             $global:LASTEXITCODE = 0
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
@@ -156,9 +156,9 @@ jobs:
           unzip -q dist/AnySave-Desktop-Mac-Windows.zip -d "$TMP_DIR"
           bash "$TMP_DIR/AnySave-Desktop/AnySave-mac/Install AnySave.command"
           APP="$HOME/Library/Application Support/AnySave"
-          test -x "$APP/vidgrab-host"
+          test -x "$APP/anysave-host"
           test -x "$APP/bin/yt-dlp_app/yt-dlp_macos"
           test -x "$APP/bin/ffmpeg"
           test -x "$APP/bin/deno"
           test -f "$HOME/AnySave/extension/manifest.json"
-          cd host-go && go run ./cmd/test-helper -bin "$APP/vidgrab-host" -live
+          cd host-go && go run ./cmd/test-helper -bin "$APP/anysave-host" -live

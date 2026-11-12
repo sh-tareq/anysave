@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"vidgrab-host/updater"
+	"anysave-host/updater"
 )
 
 //go:embed desktop_assets/*
@@ -103,7 +103,6 @@ func findExtensionDir() string {
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
 			filepath.Join(home, "AnySave", "extension"),
-			filepath.Join(home, "VidGrab", "extension"),
 		)
 	}
 	for _, c := range candidates {

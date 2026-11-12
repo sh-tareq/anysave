@@ -33,7 +33,7 @@ with all of Internet Download Manager's (IDM) features plus AnySave's own. See R
 |---|---|---|
 | Desktop extension | 1.1.0 | `extension/manifest.json` → `"version"` |
 | Android app | 1.0.4 (versionCode 12) | `android/app/build.gradle.kts` (`FastFileEngine.kt` multi-connection engine). Not released yet: the last published APK is 1.0.3. Bump before the next release. |
-| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion`. The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `vidgrab-host --daemon`). |
+| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion`. The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `anysave-host --daemon`). |
 | Latest GitHub release | **v1.0.5** (v1.1.0 ready to publish) | github.com/sh-tareq/anysave/releases |
 
 The owner's Mac and his Android phone (Xiaomi Mi 8, Android 10, adb serial `cb5fdfb5`) run these builds.
@@ -51,7 +51,7 @@ launched against a scratch home, and a release build on the owner's phone (see �
   the rules (excluded sites, file types, minimum size), speed limit (measured 1.01 MB/s for a 1 MB/s cap),
   video overlay button, site grabber, pattern links (`part[01-03].zip`), the manager page during a download.
 - Helper: a real YouTube download (360p) with yt-dlp.
-- Desktop service (`--daemon`): token check, add link, pause/resume, cancel, speed limit, `vidgrab-host <url>`,
+- Desktop service (`--daemon`): token check, add link, pause/resume, cancel, speed limit, `anysave-host <url>`,
   quit mid-download then resume after restart. Mac app: starts the service, installs the helper, downloads, quits cleanly.
 - Android (release build on the Mi 8): 100 MB from both test servers with correct SHA-256 (the OVH one failed
   before the fix: the server blocked the phone), pause and resume.
@@ -86,6 +86,13 @@ launched against a scratch home, and a release build on the owner's phone (see �
 - Not tested for these: a computer that really has a system proxy, HTTPS-through-proxy and SOCKS5 against a real
   proxy, yt-dlp with `--proxy`, the Windows PATH step and console output on Windows, the Mac installer's PATH step
   on a real home folder, and the new dialogs / Import / Export inside the Mac app (they are tested in Chrome only).
+
+**Internal names changed (13 November 2026, at the owner's request):** every internal ID now says AnySave:
+native host `com.anysave.host`, helper binary `anysave-host`, Android package `com.anysave.app`, Mac bundle
+`com.anysave.desktop`, log file `anysave.log`, keystore `android/anysave-release.jks` (alias `anysave`, same key).
+The extension key/ID did not change. Consequences: the Android app is a **new app** to Android (it installs beside
+any older copy and does not carry over its data; older copies cannot update to it), and desktop users must run the
+new installer once so the browser finds the helper under its new name. These are now the IDs that must never change.
 
 **Listed in the roadmap as done, but not built at all:** scheduler, named queues, site crawler (depth/filters),
 after-done sleep / shut down / quit (only "show" and "open" exist), finish/fail notifications in the extension
@@ -129,7 +136,7 @@ dist-assets/    marketing images (LinkedIn, Facebook carousel EN + BN) and R8 ma
 ```
 
 Key protocol facts:
-- Native host name `com.vidgrab.host`, binary `vidgrab-host`, extension ID `jgkodjdjabccfmfbfmiinmppmcpgomai`
+- Native host name `com.anysave.host`, binary `anysave-host`, extension ID `jgkodjdjabccfmfbfmiinmppmcpgomai`
   (fixed by `key` in the manifest). **Never rename** (breaks installed copies). `keys/` is not in git.
 - Video jobs: the extension sends `{action:"download", job:<id>, url, format, sort, audioOnly, cookies, folder}`.
   Each job keeps unfinished pieces in `Downloads/AnySave/<folder>/.anysave-parts/<job>`; `{action:"cancel"}`
@@ -156,8 +163,7 @@ Key protocol facts:
   Start from the previous release body: `gh release view vX -R sh-tareq/anysave --json body -q .body`.
 - Desktop install on his Mac: `./scripts/build.sh`, unzip `dist/AnySave-Desktop-Mac-Windows.zip` somewhere temporary,
   run `bash "AnySave-Desktop/AnySave-mac/Install AnySave.command"`, then he clicks **reload** on AnySave in
-  `chrome://extensions`. For extension-only changes you can `rsync -a --delete extension/ ~/AnySave/extension/`
-  (and `~/VidGrab/extension/`, an old path his Chrome may still load).
+  `chrome://extensions`. For extension-only changes you can `rsync -a --delete extension/ ~/AnySave/extension/`.
 - Communication: plain, clear language; he follows on his phone too. He is non-native in English; he writes
   Bangla posts. Don't brag about AnySave in his personal "About" texts. On his own page don't refer to him in
   the third person in Bangla (use "— Shahidul H Tareq" as a signature).
@@ -172,17 +178,17 @@ Key protocol facts:
   (`startFile`, `updateJob`, `getJobs`, `adoptDownload`, `ring` …). For the popup, open `popup.html` in a tab and
   patch `chrome.tabs.query` with `page.evaluateOnNewDocument` to fake the active page URL.
 - **Extension + real helper:** Chrome for Testing reads native hosts from `<userDataDir>/NativeMessagingHosts/`.
-  Use a fixed `userDataDir`, put `com.vidgrab.host.json` there pointing to a wrapper script that runs the helper with
+  Use a fixed `userDataDir`, put `com.anysave.host.json` there pointing to a wrapper script that runs the helper with
   `HOME=<scratch>/home` (so test downloads don't go to the owner's real Downloads) and symlink `bin/` to
   `~/Library/Application Support/AnySave/bin` for yt-dlp/ffmpeg/deno.
 - **Helper alone:** send one native-messaging frame (4-byte little-endian length + JSON) on stdin and read the reply,
   e.g. `{"action":"playlist","url":"https://www.youtube.com/@BlenderStudio/shorts"}`. Real downloads: use the Blender
   channel shorts or `https://www.youtube.com/watch?v=aqz-KE-bpKQ` (Big Buck Bunny).
-- **Android:** release build + `adb install -r`; drive with `adb shell am start -n com.vidgrab.app/.MainActivity
+- **Android:** release build + `adb install -r`; drive with `adb shell am start -n com.anysave.app/.MainActivity
   -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT '<url>'`, `adb shell input tap/swipe`,
   `adb exec-out screencap -p > shot.png`. Screen is 1080×2248.
 - Go: `go vet ./... && GOOS=windows go vet ./...` in `host-go/`. Go may be at `~/.local/go/bin`.
-- **Engine trace:** run the helper with `ANYSAVE_TRACE=1` to get one line per HTTP request in `vidgrab.log`
+- **Engine trace:** run the helper with `ANYSAVE_TRACE=1` to get one line per HTTP request in `anysave.log`
   (range, status, `Retry-After`). This is how the connection-burst bug was found.
 - **Be gentle with public test servers.** `proof.ovh.net` allows about 4 requests, then answers 429 with
   `Retry-After: 10`, and silently blocks the IP for 10+ minutes after a burst of refused requests. Use the local

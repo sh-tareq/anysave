@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.content.ClipboardManager
 import androidx.compose.foundation.background
@@ -70,7 +70,7 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
     ScreenScaffold(
         title = "AnySave",
         subtitle = "Download videos & files. Convert anything.",
-        leading = { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.vidgrab_logo), null, Modifier.size(34.dp)) },
+        leading = { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.anysave_logo), null, Modifier.size(34.dp)) },
     ) { pad ->
     Box(Modifier.fillMaxSize().padding(pad)) {
     LazyColumn(

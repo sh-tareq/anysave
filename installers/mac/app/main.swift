@@ -239,16 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func appSupportDir() -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let primary = (home as NSString).appendingPathComponent("Library/Application Support/AnySave")
-        let legacy = (home as NSString).appendingPathComponent("VidGrab")
-        let fm = FileManager.default
-        if fm.fileExists(atPath: (primary as NSString).appendingPathComponent("vidgrab-host")) {
-            return primary
-        }
-        if fm.fileExists(atPath: (legacy as NSString).appendingPathComponent("vidgrab-host")) {
-            return legacy
-        }
-        return primary
+        return (home as NSString).appendingPathComponent("Library/Application Support/AnySave")
     }
 
     func daemonJsonPath() -> String {
@@ -282,8 +273,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let fm = FileManager.default
         let supportDir = appSupportDir()
-        let installedHost = (supportDir as NSString).appendingPathComponent("vidgrab-host")
-        let bundledHost = Bundle.main.bundlePath + "/Contents/MacOS/vidgrab-host"
+        let installedHost = (supportDir as NSString).appendingPathComponent("anysave-host")
+        let bundledHost = Bundle.main.bundlePath + "/Contents/MacOS/anysave-host"
 
         // Ensure ~/Library/Application Support/AnySave is populated from the app bundle if not yet installed.
         if !fm.isExecutableFile(atPath: installedHost), fm.isExecutableFile(atPath: bundledHost) {

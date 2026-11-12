@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box

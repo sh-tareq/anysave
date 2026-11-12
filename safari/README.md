@@ -21,7 +21,7 @@ If you have full Xcode installed on macOS, run:
 xcrun safari-web-extension-converter ../extension \
   --project-location ./build \
   --app-name "AnySave Safari" \
-  --bundle-identifier com.vidgrab.safari \
+  --bundle-identifier com.anysave.safari \
   --swift \
   --macos-only
 ```

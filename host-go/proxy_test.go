@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"vidgrab-host/engine"
-	"vidgrab-host/torture"
+	"anysave-host/engine"
+	"anysave-host/torture"
 )
 
 func TestParseScutilProxy(t *testing.T) {

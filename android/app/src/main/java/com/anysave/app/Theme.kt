@@ -1,4 +1,4 @@
-package com.vidgrab.app
+package com.anysave.app
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme

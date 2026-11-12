@@ -64,7 +64,7 @@ one-time token, serve only that file.
 
 ### Phase 2: desktop app (as built: a Swift menu-bar app on Mac and a hand-written tray app on Windows, both showing the extension's manager UI served by the Go helper; Wails was the plan but was not used)
 - Menu bar (Mac) / tray (Windows) app with live progress; downloads continue with Chrome closed.
-- The extension talks to the app (keep the native host name `com.vidgrab.host` for compatibility).
+- The extension talks to the app (keep the native host name `com.anysave.host` for compatibility).
 - Floating drop box, global shortcut (download copied link), system-wide clipboard watch, Mac Share menu /
   Windows "Send to", native notifications and sounds.
 - Real installers (`.dmg`, `.exe`), self-update of the app and yt-dlp with signature checks.
