@@ -19,7 +19,7 @@ object FileKinds {
     private val archives = setOf("zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "iso", "dmg")
     private val apps = setOf("apk", "xapk", "apks", "exe", "msi", "pkg", "deb", "rpm", "appimage")
     /** Extensions that mean "this link is a file", not a web page. */
-    val fileExtensions = video + audio + image + docs + archives + apps
+    val fileExtensions = video + audio + image + docs + archives + apps + setOf("bin", "img")
 
     /** "report.pdf" -> "pdf", "https://x.com/a/file.zip?x=1" -> "zip", "readme" -> "". */
     fun extOf(name: String?) = name.orEmpty().substringBefore('?').substringBefore('#')
@@ -51,24 +51,35 @@ object FileKinds {
      */
     fun probe(url: String): Probe? = probeWith(url, FILE_USER_AGENT)?.takeIf { it.status != 403 } ?: probeWith(url, USER_AGENT)
 
-    private fun probeWith(url: String, ua: String): Probe? = runCatching {
+    // HEAD first. Some servers don't answer HEAD (they hang up or say 405), so fall back to a
+    // GET for the first byte only, which every file server understands.
+    private fun probeWith(url: String, ua: String): Probe? =
+        probeRequest(url, ua, head = true)?.takeIf { it.status < 400 || it.status == 403 }
+            ?: probeRequest(url, ua, head = false)
+
+    private fun probeRequest(url: String, ua: String, head: Boolean): Probe? = runCatching {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "HEAD"; instanceFollowRedirects = true
+            requestMethod = if (head) "HEAD" else "GET"; instanceFollowRedirects = true
             connectTimeout = 8000; readTimeout = 8000
             setRequestProperty("User-Agent", ua)
+            if (!head) setRequestProperty("Range", "bytes=0-0")
         }
         try {
             c.connect()
+            val code = c.responseCode
             val type = c.contentType?.substringBefore(';')?.trim()?.lowercase()
             val disposition = c.getHeaderField("Content-Disposition")
             val name = disposition?.let { fileNameFromDisposition(it) }
                 ?: URLDecoder.decode(c.url.path.substringAfterLast('/'), "UTF-8").ifBlank { null }
             val isHtml = type == null || type.startsWith("text/html") || type.contains("xhtml")
+            // Answer to the 1-byte GET: the real size is after the slash ("bytes 0-0/104857600").
+            val length = if (code == 206) c.getHeaderField("Content-Range")?.substringAfterLast('/')?.trim()?.toLongOrNull() ?: -1L
+                else c.contentLengthLong
             Probe(
-                isFile = c.responseCode in 200..299 && (!isHtml || disposition?.contains("attachment") == true),
-                name = name, mime = type, length = c.contentLengthLong,
-                resumable = c.getHeaderField("Accept-Ranges")?.contains("bytes") == true,
-                status = c.responseCode,
+                isFile = code in 200..299 && (!isHtml || disposition?.contains("attachment") == true),
+                name = name, mime = type, length = length,
+                resumable = code == 206 || c.getHeaderField("Accept-Ranges")?.contains("bytes") == true,
+                status = code,
             )
         } finally { c.disconnect() }
     }.getOrNull()

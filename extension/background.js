@@ -59,6 +59,7 @@ function safeFile(s) {
 function siteLabel(url) {
   try {
     const host = new URL(url).hostname.replace(/^(www|m)\./, "");
+    if (/^[\d.]+$/.test(host) || host.includes(":")) return host; // an IP address has no site name
     const parts = host.split(".");
     const name = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
     return name.charAt(0).toUpperCase() + name.slice(1);
@@ -266,6 +267,25 @@ function matchesFileTypes(nameOrUrl, typesStr) {
 }
 
 const ownUrls = new Set();
+// Where each of our own downloads should be saved (url -> "AnySave/<type>/<name>"). Chrome drops
+// the folder given to downloads.download() when a filename listener exists, unless that listener
+// suggests it again (see onDeterminingFilename below).
+const ownTargets = new Map();
+function chromeDownload(url, target) {
+  ownUrls.add(url);
+  ownTargets.set(url, target);
+  setTimeout(() => { ownUrls.delete(url); ownTargets.delete(url); }, 15000);
+  return chrome.downloads.download({ url, filename: target, conflictAction: "uniquify" });
+}
+// Waits until Chrome has finished writing a download (or gave up on it).
+async function chromeDownloadSettled(downloadId, ms = 20000) {
+  const t0 = Date.now();
+  for (;;) {
+    const [d] = await chrome.downloads.search({ id: downloadId });
+    if (!d || d.state !== "in_progress" || Date.now() - t0 > ms) return d;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
 
 async function startChromeFile({ url, name, title, id, qualityLabel = "Chrome" }) {
   id = id || newId();
@@ -273,17 +293,14 @@ async function startChromeFile({ url, name, title, id, qualityLabel = "Chrome" }
   const folder = categoryOf(fileName, "file");
   await updateJob(id, { kind: "file", engine: "chrome", url, title: title || fileName, fileName, site: siteLabel(url),
     status: "starting", percent: 0, qualityLabel, error: null, downloadId: null, doneBytes: 0, totalBytes: 0 });
-  ownUrls.add(url); // so onCreated doesn't adopt it a second time as a "website download"
   try {
-    const downloadId = await chrome.downloads.download({
-      url, filename: `AnySave/${folder}/${fileName}`, conflictAction: "uniquify",
-    });
+    // chromeDownload also marks the URL as ours, so onCreated doesn't adopt it a second time.
+    const downloadId = await chromeDownload(url, `AnySave/${folder}/${fileName}`);
     await updateJob(id, { downloadId, status: "downloading" });
     pollFiles();
   } catch (e) {
     await updateJob(id, { status: "error", error: String(e.message || e) });
   }
-  setTimeout(() => ownUrls.delete(url), 5000);
   return id;
 }
 
@@ -317,16 +334,12 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
     } else if (msg.type === "handover" && msg.url) {
       // Offer the verified file from 127.0.0.1:<port>/<one-time-token> to Chrome so it appears
       // in Chrome's native download list (drag/open/show work natively).
-      ownUrls.add(msg.url);
       try {
         const dlName = safeFile(msg.fileName || fileName);
         const dlFolder = categoryOf(dlName, "file");
-        handedOverId = await chrome.downloads.download({
-          url: msg.url, filename: `AnySave/${dlFolder}/${dlName}`, conflictAction: "uniquify",
-        });
+        handedOverId = await chromeDownload(msg.url, `AnySave/${dlFolder}/${dlName}`);
         await updateJob(id, { downloadId: handedOverId, fileName: dlName });
       } catch {}
-      setTimeout(() => ownUrls.delete(msg.url), 10000);
     } else if (msg.type === "fallback") {
       finished = true;
       ports.delete(id);
@@ -340,7 +353,8 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
       let finalName = msg.fileName || cur.fileName || fileName;
       const dlId = handedOverId || cur.downloadId;
       if (dlId) {
-        const [d] = await chrome.downloads.search({ id: dlId });
+        // The helper has sent the last byte; give Chrome a moment to finish writing the file.
+        const d = await chromeDownloadSettled(dlId);
         if (d?.filename) {
           finalFile = d.filename;
           finalName = d.filename.split(/[\\/]/).pop();
@@ -441,6 +455,24 @@ async function startFile({ url, name, title, id, forceHandler, referrer, sha256 
   return startFastFile({ url, name: fileName, title, id, referrer, sha256 });
 }
 
+// Chrome sometimes holds a download until the user confirms it in Chrome's own download bubble
+// ("Keep" for a file from a plain http site, or one it calls dangerous). All bytes are there but
+// the download never completes. AnySave hides that bubble, so say it on the row and bring the
+// bubble back until the user has answered.
+const heldSince = new Map(); // download id -> when it was first seen waiting
+const needsChromeOk = new Set();
+function chromeIsHolding(d) {
+  const waiting = (d.totalBytes > 0 && d.bytesReceived >= d.totalBytes) || (d.danger && !["safe", "accepted"].includes(d.danger));
+  if (!waiting) { heldSince.delete(d.id); return false; }
+  if (!heldSince.has(d.id)) heldSince.set(d.id, Date.now());
+  return Date.now() - heldSince.get(d.id) > 2500;
+}
+function setNeedsChromeOk(downloadId, on) {
+  if (on === needsChromeOk.has(downloadId)) return;
+  if (on) needsChromeOk.add(downloadId); else { needsChromeOk.delete(downloadId); heldSince.delete(downloadId); }
+  applyChromeBubble();
+}
+
 let polling = null;
 function pollFiles() {
   if (polling) return;
@@ -451,9 +483,17 @@ function pollFiles() {
     for (const j of active) {
       const [d] = await chrome.downloads.search({ id: j.downloadId });
       if (!d) continue;
+      if (d.state !== "in_progress") setNeedsChromeOk(d.id, false);
       if (d.state === "complete") {
         await updateJob(j.id, { status: "done", percent: 100, file: d.filename, fileName: d.filename.split(/[\\/]/).pop(),
-          totalBytes: d.totalBytes, doneBytes: d.totalBytes, speed: "", eta: "", finishedAt: j.finishedAt || Date.now() });
+          totalBytes: d.totalBytes, doneBytes: d.totalBytes, speed: "", eta: "", finishedAt: j.finishedAt || Date.now(),
+          qualityLabel: j.heldLabel || j.qualityLabel, heldLabel: undefined });
+      } else if (chromeIsHolding(d)) {
+        setNeedsChromeOk(d.id, true);
+        if (!j.heldLabel) {
+          await updateJob(j.id, { status: "downloading", percent: 100, doneBytes: d.bytesReceived, totalBytes: d.totalBytes,
+            speed: "", eta: "", heldLabel: j.qualityLabel || "Chrome", qualityLabel: "Click Keep in Chrome's downloads" });
+        }
       } else if (d.state === "interrupted") {
         await updateJob(j.id, { status: d.error === "USER_CANCELED" ? "cancelled" : "error", error: d.error, speed: "", eta: "" });
       } else if (d.paused) {
@@ -736,7 +776,7 @@ async function iconPinned() {
   try { return (await chrome.action.getUserSettings()).isOnToolbar !== false; } catch { return true; }
 }
 async function applyChromeBubble() {
-  const hide = captureCache && (await iconPinned());
+  const hide = captureCache && !needsChromeOk.size && (await iconPinned());
   try { await chrome.downloads.setUiOptions({ enabled: !hide }); } catch {}
 }
 captureOn().then((v) => { captureCache = v; applyChromeBubble(); });
@@ -764,8 +804,22 @@ function isNewDownload(item) {
   return item.state === "in_progress" && !(started && Date.now() - started > ADOPT_WINDOW_MS);
 }
 
+// Names Chrome has decided for downloads (download id -> file name). When a download is created
+// Chrome often doesn't know the name yet (it comes with the server's answer, e.g. "report.zip"
+// for a link ending in /download); it arrives a moment later in onDeterminingFilename.
+const determinedNames = new Map();
+async function settledItem(item, ms = 1500) {
+  const t0 = Date.now();
+  while (!determinedNames.has(item.id) && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 50));
+  const [fresh] = await chrome.downloads.search({ id: item.id });
+  const name = determinedNames.get(item.id);
+  determinedNames.delete(item.id);
+  return { ...item, ...(fresh || {}), filename: name || fresh?.filename || item.filename };
+}
+
 async function adoptDownload(item) {
   if (!isNewDownload(item) || (await isOurs(item)) || !(await captureOn())) return;
+  if (!(item.filename || "").split(/[\\/]/).pop()) item = await settledItem(item);
   const url = item.finalUrl || item.url || "";
   const clickChoice = consumeClickModifier(url) || consumeClickModifier(item.url);
   if (clickChoice === "chrome") return; // Alt-click: leave this one untouched to Chrome
@@ -864,8 +918,12 @@ removeAdoptedHistory().catch(() => {});
 
 // Route website downloads into Downloads/AnySave/<type>/ (Chrome asks every listener for a name).
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  const target = ownTargets.get(item.url) || ownTargets.get(item.finalUrl);
+  if (target) { suggest({ filename: target, conflictAction: "uniquify" }); return; }
   if (item.byExtensionId === chrome.runtime.id || ownUrls.has(item.url) || !captureCache) { suggest(); return; }
   const base = (item.filename || "download").split(/[\\/]/).pop();
+  determinedNames.set(item.id, base);
+  setTimeout(() => determinedNames.delete(item.id), 10000);
   if (/^AnySave[\\/]/.test(item.filename || "")) { suggest(); return; }
   suggest({ filename: `AnySave/${categoryOf(base, "file")}/${safeFile(base)}`, conflictAction: "uniquify" });
   // Update the job's name once Chrome has decided it.

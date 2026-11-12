@@ -544,7 +544,8 @@ $("openManager").addEventListener("click", () => { chrome.runtime.sendMessage({ 
 $("openConvert").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager", tab: "convert" }); window.close(); });
 
 function collectPageDownloadLinks() {
-  const extRe = /\.(pdf|zip|rar|7z|tar|gz|tgz|bz2|xz|dmg|pkg|exe|msi|iso|apk|mp4|mkv|webm|mov|avi|m4v|mp3|m4a|aac|wav|flac|ogg|opus|docx?|xlsx?|pptx?|csv|txt|epub|jpe?g|png|gif|webp|svg)$/i;
+  // Same file types the background script treats as files (FILE_EXT there).
+  const extRe = /\.(mp4|mkv|webm|mov|avi|m4v|3gp|flv|wmv|ts|mpe?g|mp3|m4a|aac|wav|flac|ogg|opus|wma|jpe?g|png|gif|webp|heic|bmp|svg|tiff?|pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg|apk|exe|msi|pkg|deb|rpm|appimage|bin)$/i;
   const seen = new Set();
   const out = [];
   const add = (rawHref, label, badge) => {

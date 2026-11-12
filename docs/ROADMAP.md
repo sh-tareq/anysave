@@ -4,7 +4,10 @@ Goal (owner's words): make AnySave **really advanced, ultra high tech, robust an
 feature of Internet Download Manager (IDM) plus AnySave's own, as a **desktop app (Mac + Windows) + browser
 extension + Android app**. The extension works alone; extension + app together unlock everything.
 
-Status: **Phases 0, 1, 2, and 3 completed and verified.** Phase 4 is next.
+Status: **Phases 0–3 are built, with gaps.** They were first tested for real on 13 November 2026 (until then only
+by automated tests); see HANDOFF.md §2a for what was verified and fixed. Not built yet although listed below:
+scheduler, named queues, site crawler, after-done sleep/shut down/quit, extension notifications.
+Phase 4 has started with its quick pieces.
 
 ---
 
@@ -57,7 +60,7 @@ one-time token, serve only that file.
 - "Who handles downloads" switch + rules + Alt/Ctrl click + fallback; hand-over to Chrome when finished.
 - Speed test: 1 connection vs engine on large public test files; show the owner the numbers.
 
-### Phase 2: desktop app (recommended: **Wails v2**: Go engine + web UI shared with the extension's manager)
+### Phase 2: desktop app (as built: a Swift menu-bar app on Mac and a hand-written tray app on Windows, both showing the extension's manager UI served by the Go helper; Wails was the plan but was not used)
 - Menu bar (Mac) / tray (Windows) app with live progress; downloads continue with Chrome closed.
 - The extension talks to the app (keep the native host name `com.vidgrab.host` for compatibility).
 - Floating drop box, global shortcut (download copied link), system-wide clipboard watch, Mac Share menu /
@@ -98,7 +101,9 @@ Never use IDM's name or look in the product.
 
 Confirmed with the owner (12 November 2026) — industry-standard defaults locked in:
 
-1. **App toolkit:** **Wails v2** (Go backend + shared HTML/CSS/JS manager UI).
+1. **App toolkit:** planned as Wails v2; **built instead** as a native Swift app (Mac, `installers/mac/app/main.swift`)
+   and a hand-written tray app (Windows, `host-go/desktop_windows.go`) around the Go helper's local service and
+   the shared HTML/CSS/JS manager UI. No Wails dependency.
 2. **Build order:** **Engine first (Phase 1), then Desktop App (Phase 2)**.
 3. **Code signing:** **Sign before public desktop app launch in Phase 2** (unsigned builds + Ed25519 signed update manifests until then).
 4. **Default "Who handles downloads":** **AnySave (fast engine) with automatic silent fallback to Chrome** (plus `Alt`-click to bypass AnySave, `Ctrl`-click to force AnySave).

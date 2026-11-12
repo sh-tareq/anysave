@@ -4,7 +4,9 @@ Read this first if you are picking up the project (a new Claude account, another
 Then read [ROADMAP.md](ROADMAP.md) for what to build next, and the main [README](../README.md),
 especially "Things that are easy to break".
 
-Last updated: 12 November 2026, after completing **Phases 0, 1, 2, and 3** (`v1.1.0`).
+Last updated: 13 November 2026. Phases 0–3 are **built**, and on 13 November they were tested for real for
+the first time (before that they had only passed automated tests). That testing found and fixed serious bugs:
+see §2a for what was verified, what was fixed, and what still is not built or not tested.
 
 ---
 
@@ -30,13 +32,53 @@ with all of Internet Download Manager's (IDM) features plus AnySave's own. See R
 | Part | Version | Where |
 |---|---|---|
 | Desktop extension | 1.1.0 | `extension/manifest.json` → `"version"` |
-| Android app | 1.1.0 (versionCode 12) | `android/app/build.gradle.kts` (`FastFileEngine.kt` multi-connection engine) |
-| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion` |
+| Android app | 1.0.4 (versionCode 12) | `android/app/build.gradle.kts` (`FastFileEngine.kt` multi-connection engine). Not released yet: the last published APK is 1.0.3. Bump before the next release. |
+| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion`. The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `vidgrab-host --daemon`). |
 | Latest GitHub release | **v1.0.5** (v1.1.0 ready to publish) | github.com/sh-tareq/anysave/releases |
 
 The owner's Mac and his Android phone (Xiaomi Mi 8, Android 10, adb serial `cb5fdfb5`) run these builds.
 
-**Not yet tested / known gaps:**
+## 2a. What was really tested on 13 November 2026
+
+Method: the real helper on real servers, Puppeteer + Chrome for Testing with the helper registered, the Mac app
+launched against a scratch home, and a release build on the owner's phone (see §5).
+
+**Verified working (after fixes):**
+- Engine on real servers: 100 MB from `proof.ovh.net` in 5.6 s vs 6.3 s for one `curl`, same SHA-256;
+  `ash-speed.hetzner.com` (allows 2 connections); pause/resume and cancel cleanup.
+- Extension: the "who handles downloads" switch (AnySave / Chrome / Ask), hand-over to Chrome's download list,
+  automatic fallback to Chrome, pause/resume/cancel, taking over a website's own download, Alt-click and Cmd-click,
+  the rules (excluded sites, file types, minimum size), speed limit (measured 1.01 MB/s for a 1 MB/s cap),
+  video overlay button, site grabber, pattern links (`part[01-03].zip`), the manager page during a download.
+- Helper: a real YouTube download (360p) with yt-dlp.
+- Desktop service (`--daemon`): token check, add link, pause/resume, cancel, speed limit, `vidgrab-host <url>`,
+  quit mid-download then resume after restart. Mac app: starts the service, installs the helper, downloads, quits cleanly.
+- Android (release build on the Mi 8): 100 MB from both test servers with correct SHA-256 (the OVH one failed
+  before the fix: the server blocked the phone), pause and resume.
+
+**Bugs found and fixed that day:**
+- Engine (desktop and Android): opened a burst of connections, got the client blocked by the server, then froze or
+  failed. Now: one new connection at a time, learns the server's limit, honours `Retry-After`, gives a refused piece
+  back to the connection it was split from. Honest `AnySave/…` client name first, browser name only after a 403.
+- Extension: files were saved into the Downloads root instead of `AnySave/<type>/` (Chrome drops the folder unless
+  `onDeterminingFilename` suggests it again); a job was marked done before Chrome finished writing the file; a
+  taken-over download lost its real name (`report.zip` became `attach`), which also broke the file-type rule; a
+  Chrome download waiting for the user's "Keep" sat at 100% forever because AnySave hides Chrome's bubble.
+- Link check (`probe`, desktop and Android) used HEAD only; some servers never answer HEAD. Falls back to a 1-byte GET.
+- Desktop service handed its secret token to anyone who opened `/` without one.
+
+**Listed in the roadmap as done, but not built at all:** scheduler, named queues, site crawler (depth/filters),
+after-done sleep / shut down / quit (only "show" and "open" exist), finish/fail notifications in the extension
+(the desktop service has them).
+
+**Still not tested:** anything on real Windows; how the Mac app window, menu-bar item, drop box, global shortcut,
+clipboard watch and notifications look and behave (the test session could not take screenshots of the Mac);
+the `.dmg`/`.exe` installers; self-update; Safari; refresh-expired-link; aria2c; cancel cleanup on Android;
+Android engine speed against a single connection; the "Keep" prompt being answered by a person; Alt/Cmd-click and
+the overlay on sites other than the five built-in ones (needs the optional all-sites permission);
+a real Option-click (the test simulated it in two steps).
+
+**Other known gaps:**
 - The **Windows installer** (`installers/windows/install.ps1`) has never run on real Windows. Phase 0 of the
   roadmap adds a GitHub Actions Windows test for this.
 - Meta ads through the helper inside the new video queue; Watch later / Liked lists with a real YouTube login;
@@ -120,6 +162,18 @@ Key protocol facts:
   -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT '<url>'`, `adb shell input tap/swipe`,
   `adb exec-out screencap -p > shot.png`. Screen is 1080×2248.
 - Go: `go vet ./... && GOOS=windows go vet ./...` in `host-go/`. Go may be at `~/.local/go/bin`.
+- **Engine trace:** run the helper with `ANYSAVE_TRACE=1` to get one line per HTTP request in `vidgrab.log`
+  (range, status, `Retry-After`). This is how the connection-burst bug was found.
+- **Be gentle with public test servers.** `proof.ovh.net` allows about 4 requests, then answers 429 with
+  `Retry-After: 10`, and silently blocks the IP for 10+ minutes after a burst of refused requests. Use the local
+  torture server (`host-go/torture`) for anything repetitive.
+- Chrome for Testing: headless works with `enableExtensions`; set the download folder through
+  `<profile>/Default/Preferences` (`download.default_directory`). Content scripts only run on the five built-in
+  sites unless the optional all-sites permission is granted; to test them locally, launch with
+  `--host-resolver-rules=MAP dl.youtube.com 127.0.0.1` (links must still point to `127.0.0.1`, the helper can't
+  resolve the fake name). An automated Alt-click does not start a download.
+- Mac app without touching the owner's files: launch `AnySave.app/Contents/MacOS/AnySave` with `HOME` and
+  `CFFIXED_USER_HOME` set to a scratch folder.
 - AI tool limits seen: running downloaded third-party binaries on the Mac and publishing releases were blocked by the
   agent's safety mode; heredocs with `<<'EOF'` sometimes tripped a command checker (write files with the editor tool).
 

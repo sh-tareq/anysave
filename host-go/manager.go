@@ -37,9 +37,21 @@ func actionProbe(msg map[string]any) map[string]any {
 		return map[string]any{"ok": false, "error": "Not a web link"}
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
+	// Ask with HEAD first. Some servers don't answer HEAD (they hang up or say 405), so fall
+	// back to a GET for the first byte only, which every file server understands.
 	try := func(ua string) (*http.Response, error) {
 		req, _ := http.NewRequest("HEAD", raw, nil)
 		req.Header.Set("User-Agent", ua)
+		resp, err := client.Do(req)
+		if err == nil && (resp.StatusCode < 400 || resp.StatusCode == 403) {
+			return resp, nil
+		}
+		if err == nil {
+			resp.Body.Close()
+		}
+		req, _ = http.NewRequest("GET", raw, nil)
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("Range", "bytes=0-0")
 		return client.Do(req)
 	}
 	resp, err := try(fileUA)
@@ -67,7 +79,16 @@ func actionProbe(msg map[string]any) map[string]any {
 	}
 	isHTML := ctype == "" || strings.HasPrefix(ctype, "text/html") || strings.Contains(ctype, "xhtml")
 	isFile := resp.StatusCode >= 200 && resp.StatusCode < 300 && (!isHTML || strings.Contains(disp, "attachment"))
-	return map[string]any{"ok": true, "isFile": isFile, "name": name, "mime": ctype, "length": resp.ContentLength}
+	length := resp.ContentLength
+	if cr := resp.Header.Get("Content-Range"); resp.StatusCode == http.StatusPartialContent && strings.Contains(cr, "/") {
+		// Answer to the 1-byte GET: the real size is after the slash ("bytes 0-0/104857600").
+		if n, err := strconv.ParseInt(strings.TrimSpace(cr[strings.LastIndex(cr, "/")+1:]), 10, 64); err == nil {
+			length = n
+		} else {
+			length = -1
+		}
+	}
+	return map[string]any{"ok": true, "isFile": isFile, "name": name, "mime": ctype, "length": length}
 }
 
 // ---------- pick a file ----------

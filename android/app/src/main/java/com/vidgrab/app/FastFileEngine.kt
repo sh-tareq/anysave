@@ -26,6 +26,8 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 import kotlin.math.max
 import kotlin.math.min
 
@@ -43,6 +45,7 @@ import kotlin.math.min
 object FastFileEngine {
     private const val MIN_SPLIT_SIZE = 256 * 1024L
     private const val DEFAULT_MAX_CONNECTIONS = 6
+    private const val INITIAL_CONNECTIONS = 4
     private const val MAX_RETRIES = 6
 
     data class Segment(
@@ -53,6 +56,11 @@ object FastFileEngine {
         var done: Boolean = false,
         var busy: Boolean = false,
         var inFlight: Long = 0L,
+        // The response this piece is being read from delivers bytes up to streamEnd (exclusive;
+        // -1 = no response open). It can reach beyond `end` after the piece was split.
+        // streamPos is how far that response has been read.
+        var streamEnd: Long = -1L,
+        var streamPos: Long = 0L,
     )
 
     data class State(
@@ -64,7 +72,16 @@ object FastFileEngine {
         var etag: String,
         var lastModified: String,
         val segments: MutableList<Segment>,
+        var userAgent: String = "",
     )
+
+    /** What the download has learned about the server while running (all guarded by the state lock). */
+    private class Ramp {
+        val active = AtomicInteger(0)   // workers running
+        val opening = AtomicInteger(0)  // new connections asked for but not answered yet
+        var connLimit = 0               // connections the server allows (0 = no limit seen); only goes down
+        var noSplitUntilMs = 0L         // after a refusal, no new piece is split off before this time
+    }
 
     data class Progress(
         val doneBytes: Long,
@@ -136,7 +153,16 @@ object FastFileEngine {
 
         var state = loadState(stateFile, partFile, url)
         if (state == null) {
-            val probe = probeServer(url, preferredFilename, cookies, userAgent)
+            // Say honestly who we are first; only if the server refuses that, use the browser name.
+            var ua = FileKinds.FILE_USER_AGENT
+            var probe = probeServer(url, preferredFilename, cookies, ua)
+            if (probe.status == 403 || probe.status <= 0) {
+                val second = probeServer(url, preferredFilename, cookies, userAgent)
+                if (second.status in 200..299 || probe.status <= 0) {
+                    probe = second
+                    ua = userAgent
+                }
+            }
             val initSeg = Segment(
                 id = 0,
                 start = 0L,
@@ -152,6 +178,7 @@ object FastFileEngine {
                 etag = probe.etag,
                 lastModified = probe.lastModified,
                 segments = mutableListOf(initSeg),
+                userAgent = ua,
             )
             RandomAccessFile(partFile, "rw").use { raf ->
                 if (probe.totalBytes > 0L) {
@@ -164,6 +191,8 @@ object FastFileEngine {
         }
 
         onMeta(state.filename, state.totalBytes)
+        @Suppress("NAME_SHADOWING")
+        val userAgent = state.userAgent.ifBlank { userAgent }
 
         var raf = RandomAccessFile(partFile, "rw")
         var channel = raf.channel
@@ -227,6 +256,11 @@ object FastFileEngine {
             throw CancellationException("Paused")
         }
 
+        // The part file is created at its full size, so its size alone doesn't prove every piece arrived.
+        if (!allSegmentsDone(state, lock)) {
+            saveState(stateFile, state, lock)
+            throw IOException("Incomplete download: some pieces are missing")
+        }
         val actualSize = partFile.length()
         if (state.totalBytes > 0L && actualSize != state.totalBytes) {
             saveState(stateFile, state, lock)
@@ -262,74 +296,73 @@ object FastFileEngine {
         lock: Any,
         onProgress: (Progress) -> Unit,
     ) = coroutineScope {
-        val activeWorkers = AtomicInteger(0)
-        val targetWorkers = AtomicInteger(min(2, maxConnections))
-        val rateLimitedUntilMs = AtomicLong(0L)
+        val ramp = Ramp()
+        val initialConns = min(INITIAL_CONNECTIONS, maxConnections)
         val workerJobs = mutableListOf<Job>()
         val workerScope = CoroutineScope(coroutineContext + SupervisorJob())
-        var fatalError: Throwable? = null
+        val fatalError = AtomicReference<Throwable?>(null)
 
-        fun spawnWorker() {
+        // Starts one more connection, if there is a piece for it and the server's limit allows.
+        // Connections are opened one at a time: the next is only asked for after this one was
+        // accepted, so a server with a limit sees one refused request, not a burst.
+        fun spawnWorker(): Boolean {
+            val first = synchronized(lock) {
+                if (ramp.active.get() >= maxConnections) return@synchronized null
+                val seg = claimOrSplitSegment(state, lock, ramp, self = false) ?: return@synchronized null
+                ramp.active.incrementAndGet()
+                ramp.opening.incrementAndGet()
+                seg
+            } ?: return false
+            val unanswered = AtomicBoolean(true)
             val job = workerScope.launch {
-                activeWorkers.incrementAndGet()
                 try {
-                    while (isActive && !paused.get()) {
-                        if (activeWorkers.get() > targetWorkers.get()) return@launch
-                        val waitMs = rateLimitedUntilMs.get() - System.currentTimeMillis()
-                        if (waitMs > 0) {
-                            delay(min(waitMs, 500L))
-                            continue
-                        }
-                        val seg = claimOrSplitSegment(state, lock)
-                        if (seg == null) {
-                            if (allSegmentsDone(state, lock)) return@launch
-                            delay(80L)
-                            continue
-                        }
-                        try {
-                            downloadSegment(
-                                state = state,
-                                stateFile = stateFile,
-                                seg = seg,
-                                channel = channel,
-                                cookies = cookies,
-                                userAgent = userAgent,
-                                paused = paused,
-                                lock = lock,
-                                onRateLimited = {
-                                    rateLimitedUntilMs.set(System.currentTimeMillis() + 600L)
-                                    val cur = targetWorkers.get()
-                                    if (cur > 1) targetWorkers.compareAndSet(cur, cur - 1)
-                                },
-                            )
-                        } catch (e: CancellationException) {
-                            synchronized(lock) { seg.busy = false }
-                            throw e
-                        } catch (e: Throwable) {
-                            synchronized(lock) { seg.busy = false }
-                            if (fatalError == null) fatalError = e
-                            return@launch
-                        }
+                    var seg: Segment? = first
+                    while (seg != null && isActive && !paused.get()) {
+                        val gaveUp = downloadSegment(
+                            state = state,
+                            stateFile = stateFile,
+                            seg = seg,
+                            channel = channel,
+                            cookies = cookies,
+                            userAgent = userAgent,
+                            paused = paused,
+                            lock = lock,
+                            ramp = ramp,
+                            onAnswer = { accepted ->
+                                if (unanswered.compareAndSet(true, false)) {
+                                    ramp.opening.decrementAndGet()
+                                    if (accepted && ramp.active.get() < initialConns) spawnWorker()
+                                }
+                            },
+                        )
+                        if (gaveUp) break // the server didn't want this connection
+                        seg = claimOrSplitSegment(state, lock, ramp, self = true)
                     }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    fatalError.compareAndSet(null, e)
                 } finally {
-                    activeWorkers.decrementAndGet()
+                    if (unanswered.compareAndSet(true, false)) ramp.opening.decrementAndGet()
+                    ramp.active.decrementAndGet()
                 }
             }
             synchronized(workerJobs) { workerJobs.add(job) }
+            return true
         }
 
-        val initial = targetWorkers.get()
-        repeat(initial) { spawnWorker() }
+        spawnWorker()
 
         var lastBytes = currentDoneBytes(state, lock)
         var lastTickMs = System.currentTimeMillis()
         var ewmaSpeed = 0.0
-        var scaleTicks = 0
+        var prevSpeed = 0.0
+        var ticks = 0
 
         try {
             while (isActive && !paused.get()) {
                 delay(250L)
-                fatalError?.let { throw it }
+                fatalError.get()?.let { throw it }
 
                 val nowMs = System.currentTimeMillis()
                 val done = currentDoneBytes(state, lock)
@@ -350,7 +383,7 @@ object FastFileEngine {
                         percent = pct,
                         speedBps = ewmaSpeed.toLong(),
                         etaSeconds = eta,
-                        activeWorkers = activeWorkers.get(),
+                        activeWorkers = ramp.active.get(),
                         segments = segCount,
                     )
                 )
@@ -358,28 +391,29 @@ object FastFileEngine {
 
                 if (allSegmentsDone(state, lock)) break
 
-                // Scale up workers every ~500ms if not rate-limited and splittable work remains
-                scaleTicks++
-                if (scaleTicks % 2 == 0 && System.currentTimeMillis() >= rateLimitedUntilMs.get()) {
-                    val curTarget = targetWorkers.get()
-                    if (curTarget < maxConnections && hasSplittableWork(state, lock)) {
-                        targetWorkers.incrementAndGet()
-                        spawnWorker()
-                    } else if (activeWorkers.get() == 0 && !allSegmentsDone(state, lock)) {
-                        spawnWorker()
-                    }
+                if (ramp.active.get() == 0) {
+                    // Every worker ended but pieces remain (handed back after a refusal): carry on.
+                    spawnWorker()
+                } else if (++ticks % 4 == 0) {
+                    // About once a second: one more connection while the speed is still growing.
+                    if (ewmaSpeed > prevSpeed * 1.08) spawnWorker()
+                    prevSpeed = ewmaSpeed
                 }
             }
         } finally {
             val jobs = synchronized(workerJobs) { workerJobs.toList() }
             jobs.forEach { it.cancel() }
-            jobs.forEach { runCatching { it. cancelAndJoin() } }
+            jobs.forEach { runCatching { it.cancelAndJoin() } }
             saveState(stateFile, state, lock)
         }
 
-        fatalError?.let { throw it }
+        fatalError.get()?.let { throw it }
     }
 
+    /**
+     * Downloads one piece. Returns true when the worker should stop because the server refused
+     * this connection while others are still downloading (the piece was handed back).
+     */
     private suspend fun downloadSegment(
         state: State,
         stateFile: File,
@@ -389,102 +423,119 @@ object FastFileEngine {
         userAgent: String,
         paused: AtomicBoolean,
         lock: Any,
-        onRateLimited: () -> Unit,
-    ) {
-        var attempt = 0
+        ramp: Ramp,
+        onAnswer: (accepted: Boolean) -> Unit,
+    ): Boolean {
+        var failures = 0
         val buf = ByteArray(32 * 1024)
-        while (!paused.get()) {
-            val (cur, end) = synchronized(lock) { seg.current to seg.end }
-            if (end in 0..cur) {
-                synchronized(lock) {
-                    seg.done = true
-                    seg.busy = false
+        try {
+            while (!paused.get()) {
+                coroutineContext.ensureActive()
+                val (cur, end) = synchronized(lock) {
+                    seg.streamPos = seg.current
+                    seg.streamEnd = seg.end
+                    seg.current to seg.end
                 }
-                saveState(stateFile, state, lock)
-                return
-            }
-
-            var conn: HttpURLConnection? = null
-            try {
-                val targetUrl = synchronized(lock) { state.resolvedUrl.ifBlank { state.url } }
-                conn = openRedirectingConnection(targetUrl, cookies, userAgent) { c ->
-                    c.requestMethod = "GET"
-                    if (end > 0L) {
-                        c.setRequestProperty("Range", "bytes=$cur-${end - 1}")
-                    } else if (cur > 0L) {
-                        c.setRequestProperty("Range", "bytes=$cur-")
+                if (end in 0..cur) {
+                    synchronized(lock) {
+                        seg.done = true
+                        seg.busy = false
                     }
-                    val validator = synchronized(lock) { state.etag.ifBlank { state.lastModified } }
-                    if (validator.isNotBlank() && cur > 0L) {
-                        c.setRequestProperty("If-Range", validator)
+                    saveState(stateFile, state, lock)
+                    return false
+                }
+
+                var conn: HttpURLConnection? = null
+                var progressed = false
+                var refused = false
+                var retryAfter: String? = null
+                var lastError: IOException? = null
+                try {
+                    val targetUrl = synchronized(lock) { state.resolvedUrl.ifBlank { state.url } }
+                    conn = openRedirectingConnection(targetUrl, cookies, userAgent) { c ->
+                        c.requestMethod = "GET"
+                        if (end > 0L) {
+                            c.setRequestProperty("Range", "bytes=$cur-${end - 1}")
+                        } else if (cur > 0L) {
+                            c.setRequestProperty("Range", "bytes=$cur-")
+                        }
+                        val validator = synchronized(lock) { state.etag.ifBlank { state.lastModified } }
+                        if (validator.isNotBlank() && cur > 0L) {
+                            c.setRequestProperty("If-Range", validator)
+                        }
                     }
-                }
 
-                val code = conn.responseCode
-                if (code == 403 || code == 429 || code == 503) {
-                    onRateLimited()
-                    attempt++
-                    if (attempt > MAX_RETRIES) throw IOException("HTTP $code after $MAX_RETRIES retries")
-                    delay(350L * attempt)
-                    continue
-                }
-                if (code == 200 && cur > 0L) {
-                    throw StaleResetException()
-                }
-                if (code != 200 && code != 206) {
-                    throw IOException("HTTP $code")
-                }
+                    val code = conn.responseCode
+                    if (code == 403 || code == 429 || code == 503) {
+                        // Too many connections or requests for this server's taste.
+                        refused = true
+                        retryAfter = conn.getHeaderField("Retry-After")
+                    } else {
+                        if (code == 200 && cur > 0L) throw StaleResetException()
+                        if (code != 200 && code != 206) throw IOException("HTTP $code")
+                        onAnswer(true)
 
-                conn.inputStream.use { input ->
-                    while (!paused.get()) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        waitRateLimit(n)
+                        conn.inputStream.use { input ->
+                            while (!paused.get()) {
+                                val n = input.read(buf)
+                                if (n <= 0) break
+                                waitRateLimit(n)
 
-                        var writeOff = 0L
-                        var toWrite = 0
-                        var finishedNow = false
-                        synchronized(lock) {
-                            val dynamicEnd = seg.end
-                            val remaining = if (dynamicEnd > 0L) dynamicEnd - seg.current else n.toLong()
-                            if (remaining <= 0L) {
-                                seg.done = true
-                                seg.busy = false
-                                finishedNow = true
-                            } else {
-                                toWrite = min(n.toLong(), remaining).toInt()
-                                writeOff = seg.current
-                                seg.inFlight = writeOff + toWrite
-                            }
-                        }
-                        if (finishedNow) {
-                            saveState(stateFile, state, lock)
-                            return
-                        }
-                        if (toWrite > 0) {
-                            writeAt(channel, buf, toWrite, writeOff)
-                            val reachedEnd = synchronized(lock) {
-                                seg.current = writeOff + toWrite
-                                if (seg.end > 0L && seg.current >= seg.end) {
-                                    seg.done = true
-                                    seg.busy = false
-                                    true
-                                } else {
-                                    false
+                                var writeOff = 0L
+                                var toWrite = 0
+                                var finishedNow = false
+                                synchronized(lock) {
+                                    val dynamicEnd = seg.end
+                                    val remaining = if (dynamicEnd > 0L) dynamicEnd - seg.current else n.toLong()
+                                    if (remaining <= 0L) {
+                                        seg.done = true
+                                        seg.busy = false
+                                        finishedNow = true
+                                    } else {
+                                        toWrite = min(n.toLong(), remaining).toInt()
+                                        writeOff = seg.current
+                                        seg.inFlight = writeOff + toWrite
+                                        seg.streamPos = writeOff + n
+                                    }
+                                }
+                                if (finishedNow) {
+                                    saveState(stateFile, state, lock)
+                                    return false
+                                }
+                                if (toWrite > 0) {
+                                    writeAt(channel, buf, toWrite, writeOff)
+                                    progressed = true
+                                    val reachedEnd = synchronized(lock) {
+                                        seg.current = writeOff + toWrite
+                                        if (seg.end > 0L && seg.current >= seg.end) {
+                                            seg.done = true
+                                            seg.busy = false
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    if (reachedEnd) {
+                                        saveState(stateFile, state, lock)
+                                        return false
+                                    }
                                 }
                             }
-                            if (reachedEnd) {
-                                saveState(stateFile, state, lock)
-                                return
-                            }
                         }
                     }
+                } catch (e: StaleResetException) {
+                    throw e
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: IOException) {
+                    lastError = e
+                    if (!progressed) refused = true // couldn't even connect: treat like a refusal
+                } finally {
+                    conn?.disconnect()
+                    synchronized(lock) { seg.streamEnd = -1L }
                 }
 
-                if (paused.get()) {
-                    synchronized(lock) { seg.busy = false }
-                    return
-                }
+                if (paused.get()) return false
 
                 val doneNow = synchronized(lock) {
                     if (seg.end <= 0L || seg.current >= seg.end) {
@@ -497,32 +548,83 @@ object FastFileEngine {
                 }
                 if (doneNow) {
                     saveState(stateFile, state, lock)
-                    return
+                    return false
                 }
-                // Premature EOF: retry remaining range
-                attempt++
-                if (attempt > MAX_RETRIES) {
-                    throw IOException("Connection closed before segment finished")
+
+                if (refused) {
+                    onAnswer(false)
+                    // Other connections are getting data, so this one is simply one too many:
+                    // remember the limit, hand the piece back and stop, instead of failing.
+                    if (yieldToOthers(state, lock, seg, ramp, retryAfter)) {
+                        saveState(stateFile, state, lock)
+                        return true
+                    }
                 }
-                delay(200L * attempt)
-            } catch (e: StaleResetException) {
-                synchronized(lock) { seg.busy = false }
-                throw e
-            } catch (e: CancellationException) {
-                synchronized(lock) { seg.busy = false }
-                throw e
-            } catch (e: IOException) {
-                attempt++
-                if (attempt > MAX_RETRIES) {
-                    synchronized(lock) { seg.busy = false }
-                    throw e
+
+                // The only connection left (or the stream broke off): wait and try again.
+                if (progressed) failures = 0 // only count failures in a row
+                failures++
+                if (failures > MAX_RETRIES) {
+                    throw lastError ?: IOException("Connection closed before the piece finished")
                 }
-                delay(250L * attempt)
-            } finally {
-                conn?.disconnect()
+                delay(backoffMs(failures, retryAfter))
+            }
+            return false
+        } finally {
+            synchronized(lock) {
+                if (!seg.done) seg.busy = false
+                seg.streamEnd = -1L
             }
         }
-        synchronized(lock) { seg.busy = false }
+    }
+
+    /** Seconds from a Retry-After header (0 when missing or not a number). */
+    private fun retryAfterMs(header: String?): Long =
+        (header?.trim()?.toLongOrNull() ?: 0L).coerceIn(0L, 30L) * 1000L
+
+    /** Wait before retry number n: 0.3 s doubling up to 20 s, or what the server asked for (max 30 s). */
+    private fun backoffMs(n: Int, retryAfter: String?): Long {
+        var d = 300L
+        repeat((n - 1).coerceIn(0, 10)) { d = min(d * 2, 20_000L) }
+        return max(d, retryAfterMs(retryAfter))
+    }
+
+    /**
+     * Called when a connection was refused or couldn't be opened. If other workers are still
+     * downloading, the server allows fewer connections than we tried: remember that, hand the
+     * piece back and return true (the worker ends). False when this is the only worker.
+     */
+    private fun yieldToOthers(state: State, lock: Any, seg: Segment, ramp: Ramp, retryAfter: String?): Boolean =
+        synchronized(lock) {
+            val until = System.currentTimeMillis() + max(3_000L, retryAfterMs(retryAfter))
+            if (until > ramp.noSplitUntilMs) ramp.noSplitUntilMs = until
+            val n = ramp.active.get()
+            if (n <= 1) return@synchronized false
+            if (ramp.connLimit == 0 || n - 1 < ramp.connLimit) ramp.connLimit = n - 1
+            seg.streamEnd = -1L
+            if (!mergeBack(state, seg)) seg.busy = false
+            true
+        }
+
+    /**
+     * Gives an untouched piece back to the piece just before it, when that one is still being
+     * downloaded and its open response already covers these bytes (it was split off from it), or
+     * it has no response open yet. The bytes then arrive without a new request, which matters on
+     * servers that limit how many requests a visitor may make. Call with the lock held.
+     */
+    private fun mergeBack(state: State, seg: Segment): Boolean {
+        if (seg.current != seg.start || seg.end <= 0L || seg.current >= seg.end) return false
+        for (prev in state.segments) {
+            if (prev === seg || prev.done || !prev.busy || prev.end != seg.start || prev.current >= prev.end) continue
+            // Not if its response stops short of the piece, or was already read past its own end
+            // (those extra bytes were thrown away).
+            if (prev.streamEnd != -1L && (prev.streamEnd < seg.end || prev.streamPos > prev.end)) return false
+            prev.end = seg.end
+            state.segments.remove(seg)
+            seg.done = true
+            return true
+        }
+        return false
     }
 
     private suspend fun runSingleStream(
@@ -653,7 +755,16 @@ object FastFileEngine {
         }
     }
 
-    private fun claimOrSplitSegment(state: State, lock: Any): Segment? = synchronized(lock) {
+    /**
+     * Takes a waiting piece, or splits the largest one being downloaded. Returns null when there
+     * is nothing to take or the server's connection limit is already in use. `self` is true when
+     * a running worker asks for its next piece (it reuses its own slot).
+     */
+    private fun claimOrSplitSegment(state: State, lock: Any, ramp: Ramp, self: Boolean): Segment? = synchronized(lock) {
+        val others = ramp.active.get() - (if (self) 1 else 0)
+        if (!self && ramp.opening.get() > 0) return null
+        if (ramp.connLimit > 0 && others >= ramp.connLimit) return null
+
         for (seg in state.segments) {
             if (!seg.done && !seg.busy) {
                 if (seg.end > 0L && seg.current >= seg.end) {
@@ -664,6 +775,9 @@ object FastFileEngine {
                 return seg
             }
         }
+        // A refused request means the server wants fewer of them: don't ask again too soon.
+        if (System.currentTimeMillis() < ramp.noSplitUntilMs) return null
+
         var best: Segment? = null
         var bestRem = 0L
         for (seg in state.segments) {
@@ -684,7 +798,7 @@ object FastFileEngine {
         val oldEnd = best.end
         best.end = mid
         val newSeg = Segment(
-            id = state.segments.size,
+            id = (state.segments.maxOfOrNull { it.id } ?: -1) + 1,
             start = mid,
             current = mid,
             end = oldEnd,
@@ -722,6 +836,7 @@ object FastFileEngine {
     }
 
     private data class ProbeResult(
+        val status: Int, // HTTP status of the probe, or -1 when the server couldn't be reached
         val resolvedUrl: String,
         val filename: String,
         val totalBytes: Long,
@@ -742,6 +857,7 @@ object FastFileEngine {
         var etag = ""
         var lastModified = ""
         var cdFilename: String? = null
+        var status = -1
 
         // Range 0-0 GET probe is the most reliable way to test real Range support + Content-Range total size
         var conn: HttpURLConnection? = null
@@ -751,6 +867,7 @@ object FastFileEngine {
                 c.setRequestProperty("Range", "bytes=0-0")
             }
             val code = conn.responseCode
+            status = code
             resolvedUrl = conn.url.toString()
             etag = conn.getHeaderField("ETag").orEmpty()
             lastModified = conn.getHeaderField("Last-Modified").orEmpty()
@@ -777,6 +894,7 @@ object FastFileEngine {
                 ?: filenameFromUrl(resolvedUrl)
         )
         return ProbeResult(
+            status = status,
             resolvedUrl = resolvedUrl,
             filename = finalName,
             totalBytes = totalBytes,
@@ -860,6 +978,7 @@ object FastFileEngine {
                 etag = o.optString("etag", ""),
                 lastModified = o.optString("lastModified", ""),
                 segments = segs,
+                userAgent = o.optString("userAgent", ""),
             )
         } catch (_: Exception) {
             null
@@ -887,6 +1006,7 @@ object FastFileEngine {
                 .put("acceptRanges", state.acceptRanges)
                 .put("etag", state.etag)
                 .put("lastModified", state.lastModified)
+                .put("userAgent", state.userAgent)
                 .put("segments", segs)
                 .toString()
         }

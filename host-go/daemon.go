@@ -432,7 +432,9 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
 		if p == "" || p == "." || p == "manager.html" {
-			if tok := r.URL.Query().Get("token"); tok != "" && tok != d.token {
+			// The page carries the secret token, so it is only given to someone who already has it
+			// (the app always opens it with ?token=...). Without this any local program could read it.
+			if !d.checkAuth(r) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
