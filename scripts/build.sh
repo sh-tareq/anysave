@@ -23,8 +23,21 @@ echo "Building helper…"
 GOOS=darwin  GOARCH=arm64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host-arm64" .
 GOOS=darwin  GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host-amd64" .
 GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/vidgrab-host.exe" .
+GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/installer-stub.exe" ./cmd/installer-win
 lipo -create -output "$BUILD/vidgrab-host" "$BUILD/vidgrab-host-arm64" "$BUILD/vidgrab-host-amd64"
 codesign --force --sign - "$BUILD/vidgrab-host"   # ad-hoc signature, required on Apple Silicon
+
+# ---- Native macOS AnySave.app bundle ----
+echo "Building native macOS AnySave.app…"
+APP_BUNDLE="$BUILD/AnySave.app"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+swiftc -O -target arm64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o "$BUILD/AnySave-app-arm64"
+swiftc -O -target x86_64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o "$BUILD/AnySave-app-amd64"
+lipo -create -output "$APP_BUNDLE/Contents/MacOS/AnySave" "$BUILD/AnySave-app-arm64" "$BUILD/AnySave-app-amd64"
+cp "$BUILD/vidgrab-host" "$APP_BUNDLE/Contents/MacOS/vidgrab-host"
+cp "$ROOT/installers/mac/app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp -R "$ROOT/extension" "$APP_BUNDLE/Contents/Resources/extension"
+codesign --force --deep --sign - "$APP_BUNDLE"
 
 # ---- One desktop zip: Mac + Windows folders side by side ----
 PKG="$BUILD/AnySave-Desktop"
@@ -32,6 +45,7 @@ PKG="$BUILD/AnySave-Desktop"
 MAC="$PKG/AnySave-mac"
 mkdir -p "$MAC/helper"
 cp "$BUILD/vidgrab-host" "$MAC/helper/"
+cp -R "$APP_BUNDLE" "$MAC/AnySave.app"
 cp -R "$ROOT/extension" "$MAC/extension"
 cp "$ROOT/installers/mac/install-mac.sh" "$MAC/Install AnySave.command"
 cp "$ROOT/installers/mac/How to install.txt" "$MAC/"
@@ -52,6 +66,28 @@ cp "$ROOT/LEGAL.md" "$PKG/Legal notice.txt"
 cp "$ROOT/LICENSE" "$PKG/LICENSE.txt"
 # ditto keeps the Mac installer's "executable" flag; Windows unzips it normally
 (cd "$BUILD" && ditto -c -k --norsrc --keepParent AnySave-Desktop "$DIST/AnySave-Desktop-Mac-Windows.zip")
+
+# ---- Single-file Windows Setup executable (dist/AnySave-Setup.exe) ----
+echo "Building dist/AnySave-Setup.exe…"
+(cd "$WIN" && zip -qr "$BUILD/win-payload.zip" .)
+python3 - "$BUILD/installer-stub.exe" "$BUILD/win-payload.zip" "$DIST/AnySave-Setup.exe" <<'PY'
+import struct, sys
+stub_path, zip_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(stub_path, "rb") as f1, open(zip_path, "rb") as f2:
+    stub = f1.read()
+    payload = f2.read()
+trailer = struct.pack("<Q", len(payload)) + b"ANYSAVE1"
+with open(out_path, "wb") as out:
+    out.write(stub)
+    out.write(payload)
+    out.write(trailer)
+PY
+
+# ---- Native macOS Disk Image (dist/AnySave-Mac.dmg) ----
+if command -v hdiutil >/dev/null 2>&1; then
+  echo "Building dist/AnySave-Mac.dmg…"
+  hdiutil create -volname "AnySave" -srcfolder "$MAC" -ov -format UDZO "$DIST/AnySave-Mac.dmg" >/dev/null
+fi
 
 # ---- Android APK (build first with: cd android && ./gradlew assembleRelease) ----
 APKS="$ROOT/android/app/build/outputs/apk/release"

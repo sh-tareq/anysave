@@ -419,6 +419,14 @@ func actionFastDownload(msg map[string]any) {
 		cancel()
 	}()
 
+	var liveStream *engine.LiveStreamServer
+	var liveServed atomic.Bool
+	defer func() {
+		if liveStream != nil {
+			liveStream.Close()
+		}
+	}()
+
 	res, err := engine.Download(ctx, engine.Options{
 		URL:            rawURL,
 		DestDir:        destDir,
@@ -427,6 +435,35 @@ func actionFastDownload(msg map[string]any) {
 		Cookies:        str(msg, "cookies"),
 		Referrer:       str(msg, "referrer"),
 		ExpectedSHA256: str(msg, "sha256"),
+		OnStart: func(info engine.StartInfo) {
+			if !handover {
+				return
+			}
+			ls, lerr := engine.ServeLiveStream(info, 20*time.Second)
+			if lerr != nil {
+				return
+			}
+			liveStream = ls
+			send(map[string]any{
+				"type":       "handover",
+				"url":        ls.URL,
+				"fileName":   info.FileName,
+				"totalBytes": info.TotalBytes,
+				"live":       true,
+			})
+		},
+		OnVerified: func() bool {
+			if liveStream == nil {
+				return false
+			}
+			ok := <-liveStream.Done
+			liveStream.Close()
+			liveStream = nil
+			if ok {
+				liveServed.Store(true)
+			}
+			return ok
+		},
 		OnProgress: func(p engine.Progress) {
 			if paused.Load() || cancelled.Load() {
 				return
@@ -472,6 +509,20 @@ func actionFastDownload(msg map[string]any) {
 	}
 
 	if handover {
+		if liveServed.Load() {
+			_ = os.RemoveAll(destDir)
+			send(map[string]any{
+				"type":       "done",
+				"file":       filepath.Join(outDir, res.FileName),
+				"fileName":   res.FileName,
+				"totalBytes": res.TotalBytes,
+				"sha256":     res.SHA256,
+				"multiConn":  res.MultiConn,
+				"peakConns":  res.PeakConns,
+				"handedOver": true,
+			})
+			return
+		}
 		h, herr := engine.ServeOneTimeFile(res.FilePath, res.FileName, 20*time.Second, true)
 		if herr == nil {
 			send(map[string]any{

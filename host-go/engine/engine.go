@@ -78,7 +78,12 @@ type Options struct {
 	MinSplitSize   int64
 	MaxRetries     int
 	RetryBaseDelay time.Duration
+	OnStart        func(StartInfo)
 	OnProgress     func(Progress)
+	// OnVerified is called after SHA-256 and size verification succeed, while partPath is still intact.
+	// If it returns streamed=true, the caller has already streamed the file out (e.g. via LiveStreamServer),
+	// so the engine deletes the part file instead of moving it to DestDir.
+	OnVerified     func() (streamed bool)
 }
 
 // Result describes a completed download.
@@ -179,6 +184,49 @@ type activeDownload struct {
 	peakWorkers    atomic.Int32
 	downloadedNow  atomic.Int64
 	resumed        bool
+	verifiedDone   bool
+	verifiedSize   int64
+	terminalErr    error
+}
+
+func (d *activeDownload) progressState() (int64, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.terminalErr != nil {
+		return 0, false, d.terminalErr
+	}
+	if d.verifiedDone {
+		return d.verifiedSize, true, nil
+	}
+	if !d.state.AcceptRanges {
+		return d.downloadedNow.Load(), false, nil
+	}
+	var offset int64
+	for {
+		progressed := false
+		for _, seg := range d.state.Segments {
+			if seg.Start <= offset {
+				if seg.Status == SegDone && seg.End+1 > offset {
+					offset = seg.End + 1
+					progressed = true
+				} else if seg.Status != SegDone && seg.Current > offset {
+					offset = seg.Current
+				}
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return offset, false, nil
+}
+
+func (d *activeDownload) setTerminalErr(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.terminalErr == nil {
+		d.terminalErr = err
+	}
 }
 
 func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Result, error) {
@@ -303,6 +351,16 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 		}
 	}()
 
+	if opts.OnStart != nil {
+		opts.OnStart(StartInfo{
+			FileName:      d.state.FileName,
+			TotalBytes:    d.state.TotalBytes,
+			AcceptRanges:  d.state.AcceptRanges,
+			PartPath:      d.partPath,
+			ProgressState: d.progressState,
+		})
+	}
+
 	// Progress reporter & adaptive connection scaler
 	progDone := make(chan struct{})
 	go d.progressAndScaleLoop(attemptCtx, progDone, cancelAttempt)
@@ -366,6 +424,7 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 		for {
 			wg.Wait()
 			if d.etagChanged.Load() {
+				d.setTerminalErr(errETagChanged)
 				close(progDone)
 				_ = d.partFile.Close()
 				return nil, errETagChanged
@@ -392,10 +451,12 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 	close(progDone)
 
 	if d.etagChanged.Load() {
+		d.setTerminalErr(errETagChanged)
 		_ = d.partFile.Close()
 		return nil, errETagChanged
 	}
 	if ctx.Err() != nil {
+		d.setTerminalErr(ctx.Err())
 		d.mu.Lock()
 		d.resetActiveToPendingLocked()
 		d.saveStateLocked()
@@ -403,6 +464,7 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 		return nil, ctx.Err()
 	}
 	if workerErr != nil {
+		d.setTerminalErr(workerErr)
 		d.mu.Lock()
 		d.resetActiveToPendingLocked()
 		d.saveStateLocked()
@@ -418,8 +480,39 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 	// Verify exact size and SHA-256 hash.
 	gotHash, gotSize, err := verifyFileIntegrity(d.partPath, d.state.TotalBytes, d.state.SHA256)
 	if err != nil {
+		d.setTerminalErr(err)
 		_ = os.RemoveAll(partsDir)
 		return nil, err
+	}
+
+	d.mu.Lock()
+	d.verifiedDone = true
+	d.verifiedSize = gotSize
+	d.mu.Unlock()
+
+	if opts.OnVerified != nil && opts.OnVerified() {
+		finalPath := filepath.Join(opts.DestDir, d.state.FileName)
+		_ = os.RemoveAll(partsDir)
+		if opts.OnProgress != nil {
+			opts.OnProgress(Progress{
+				DoneBytes:   gotSize,
+				TotalBytes:  gotSize,
+				Percent:     100,
+				SpeedBPS:    0,
+				ETASeconds:  0,
+				ActiveConns: 0,
+			})
+		}
+		return &Result{
+			FilePath:   finalPath,
+			FileName:   d.state.FileName,
+			TotalBytes: gotSize,
+			SHA256:     gotHash,
+			ETag:       d.state.ETag,
+			Resumed:    d.resumed,
+			MultiConn:  d.state.AcceptRanges && !d.singleConnOnly,
+			PeakConns:  int(d.peakWorkers.Load()),
+		}, nil
 	}
 
 	finalPath := uniqueDestPath(opts.DestDir, d.state.FileName)

@@ -100,6 +100,19 @@ fi
 xattr -dr com.apple.quarantine "$APP" "$EXT_DEST" 2>/dev/null || true
 [ -n "$UPGRADED" ] && xattr -dr com.apple.quarantine "$OLD_EXT" 2>/dev/null || true
 
+# 5b. Native macOS Desktop App (AnySave.app -> /Applications or ~/Applications)
+if [ -d "$SRC/AnySave.app" ]; then
+  APP_DEST="/Applications/AnySave.app"
+  if [ ! -w "/Applications" ]; then
+    mkdir -p "$HOME/Applications"
+    APP_DEST="$HOME/Applications/AnySave.app"
+  fi
+  rm -rf "$APP_DEST"
+  cp -R "$SRC/AnySave.app" "$APP_DEST"
+  xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
+  echo "✓ Installed AnySave.app -> $APP_DEST"
+fi
+
 # 6. Register the helper with each browser (also ones not installed yet, so installing
 #    Chrome, Edge or Brave later still works)
 for TARGET in \

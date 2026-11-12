@@ -82,6 +82,7 @@ jobs:
 
           foreach ($f in @(
             (Join-Path $App 'vidgrab-host.exe'),
+            (Join-Path $App 'AnySave.exe'),
             (Join-Path $App 'com.vidgrab.host.json'),
             (Join-Path $Bin 'yt-dlp.exe'),
             (Join-Path $Bin 'ffmpeg.exe'),
@@ -143,6 +144,9 @@ jobs:
         run: |
           ./scripts/build.sh
           ls -lh dist/
+          test -f dist/AnySave-Desktop-Mac-Windows.zip
+          test -f dist/AnySave-Mac.dmg
+          test -f dist/AnySave-Setup.exe
 
       - name: Unzip & run Install AnySave.command for real
         env:

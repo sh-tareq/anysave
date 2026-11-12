@@ -402,7 +402,7 @@ function pollFiles() {
   if (polling) return;
   polling = setInterval(async () => {
     const jobs = await getJobs();
-    const active = Object.values(jobs).filter((j) => j.downloadId && ["starting", "downloading", "paused"].includes(j.status));
+    const active = Object.values(jobs).filter((j) => j.downloadId && j.engine !== "fast" && ["starting", "downloading", "paused"].includes(j.status));
     if (!active.some((j) => j.status !== "paused")) { clearInterval(polling); polling = null; }
     for (const j of active) {
       const [d] = await chrome.downloads.search({ id: j.downloadId });
@@ -430,7 +430,7 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   if (!delta.state) return;
   const jobs = await getJobs();
   const j = Object.values(jobs).find((x) => x.downloadId === delta.id);
-  if (!j) return;
+  if (!j || j.engine === "fast") return;
   const [d] = await chrome.downloads.search({ id: delta.id });
   if (delta.state.current === "complete") {
     const bytes = d?.totalBytes > 0 ? d.totalBytes : d?.bytesReceived;
@@ -473,7 +473,13 @@ async function pause(id) {
   if (!j) return;
   if (ports.has(id)) {
     pausing.add(id);
-    await updateJob(id, { status: "paused", speed: "", eta: "" });
+    if (j.engine === "fast" && j.downloadId) {
+      try {
+        await chrome.downloads.cancel(j.downloadId);
+        await chrome.downloads.erase({ id: j.downloadId });
+      } catch {}
+    }
+    await updateJob(id, { status: "paused", speed: "", eta: "", downloadId: j.engine === "fast" ? null : j.downloadId });
     ports.get(id).postMessage({ action: "pause" });
   } else if (j.kind === "file" && j.downloadId) {
     await chrome.downloads.pause(j.downloadId);

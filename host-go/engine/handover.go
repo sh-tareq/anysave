@@ -107,7 +107,9 @@ func ServeOneTimeFile(filePath, fileName string, timeout time.Duration, deleteAf
 	})
 
 	go func() {
-		_ = srv.Serve(ln)
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "[handover Serve error]: %v\n", err)
+		}
 	}()
 
 	go func() {

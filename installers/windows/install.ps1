@@ -61,8 +61,9 @@ if (Get-Process -Name 'vidgrab-host', 'yt-dlp', 'ffmpeg', 'deno' -ErrorAction Si
 New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $ExtDest) | Out-Null
 
-# 1. Helper app
+# 1. Helper app + Desktop App executable (AnySave.exe launches the desktop UI & system tray)
 Copy-Item (Join-Path $Src 'helper\vidgrab-host.exe') (Join-Path $App 'vidgrab-host.exe') -Force
+Copy-Item (Join-Path $Src 'helper\vidgrab-host.exe') (Join-Path $App 'AnySave.exe') -Force
 
 # 2. Extension (kept in a permanent place so the download folder can be deleted)
 if (Test-Path $ExtDest) { Remove-Item $ExtDest -Recurse -Force }
@@ -154,6 +155,37 @@ foreach ($b in $browsers.GetEnumerator()) {
   New-Item -Path $key -Force | Out-Null
   Set-ItemProperty -Path $key -Name '(default)' -Value $manifestPath
   Write-Host "Registered with $($b.Key)"
+}
+
+# 7. Register anysave:// protocol + Start Menu & Explorer "Send to" shortcuts (current user)
+try {
+  $anySaveExe = Join-Path $App 'AnySave.exe'
+  $protoKey = 'HKCU:\Software\Classes\anysave'
+  New-Item -Path "$protoKey\shell\open\command" -Force | Out-Null
+  Set-ItemProperty -Path $protoKey -Name '(default)' -Value 'URL:AnySave Protocol'
+  Set-ItemProperty -Path $protoKey -Name 'URL Protocol' -Value ''
+  Set-ItemProperty -Path "$protoKey\shell\open\command" -Name '(default)' -Value "`"$anySaveExe`" `"%1`""
+
+  $wsh = New-Object -ComObject WScript.Shell
+  $startMenuDir = [Environment]::GetFolderPath('Programs')
+  if ($startMenuDir) {
+    $lnk = $wsh.CreateShortcut((Join-Path $startMenuDir 'AnySave.lnk'))
+    $lnk.TargetPath = $anySaveExe
+    $lnk.WorkingDirectory = $App
+    $lnk.Description = 'AnySave Video & File Downloader'
+    $lnk.Save()
+  }
+  $sendToDir = [Environment]::GetFolderPath('SendTo')
+  if ($sendToDir) {
+    $sendLnk = $wsh.CreateShortcut((Join-Path $sendToDir 'AnySave.lnk'))
+    $sendLnk.TargetPath = $anySaveExe
+    $sendLnk.WorkingDirectory = $App
+    $sendLnk.Description = 'Download with AnySave'
+    $sendLnk.Save()
+  }
+  Write-Host 'Created Start Menu and Send-to shortcuts'
+} catch {
+  # Non-fatal on headless Windows Server environments without Explorer shell
 }
 
 Write-Host ''

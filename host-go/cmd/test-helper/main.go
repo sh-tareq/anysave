@@ -108,6 +108,17 @@ func runStreamJob(binPath string, env []string, req map[string]any, cancelAfterF
 			sentCancel = true
 			_ = writeMsg(stdin, map[string]any{"action": "cancel"})
 		}
+		if t == "handover" {
+			// Fetch the live-streamed handover URL concurrently just like Chrome does.
+			if hurl, ok := m["url"].(string); ok && hurl != "" {
+				go func(u string) {
+					if resp, err := http.Get(u); err == nil {
+						_, _ = io.Copy(io.Discard, resp.Body)
+						resp.Body.Close()
+					}
+				}(hurl)
+			}
+		}
 		if t == "done" || t == "error" || t == "paused" || t == "fallback" {
 			break
 		}
@@ -217,6 +228,128 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("[OK] open on missing file safely rejected: %v\n", op["error"])
+
+	// 6b. Live streaming handover (handover=true)
+	hmsgs, err := runStreamJob(*bin, testEnv, map[string]any{
+		"action":   "fastDownload",
+		"job":      "e2e-live-handover-1",
+		"url":      tort.URL + "/normal",
+		"fileName": "streamed-handover.bin",
+		"folder":   "Archives",
+		"handover": true,
+	}, false)
+	if err != nil || len(hmsgs) == 0 {
+		fmt.Fprintf(os.Stderr, "live handover fastDownload failed: err=%v msgs=%v\n", err, hmsgs)
+		os.Exit(1)
+	}
+	sawLiveHandover := false
+	for _, m := range hmsgs {
+		if m["type"] == "handover" && m["live"] == true {
+			sawLiveHandover = true
+		}
+	}
+	lastHandover := hmsgs[len(hmsgs)-1]
+	if !sawLiveHandover || lastHandover["type"] != "done" || lastHandover["handedOver"] != true {
+		fmt.Fprintf(os.Stderr, "expected live handover done with handedOver=true, got sawLive=%v last=%v\n", sawLiveHandover, lastHandover)
+		os.Exit(1)
+	}
+	fmt.Printf("[OK] live streaming handover verified (handedOver=true, sha256=%v)\n", lastHandover["sha256"])
+
+	// 6c. Persistent background daemon (--daemon) E2E check
+	daemonCmd := exec.Command(*bin, "--daemon")
+	daemonCmd.Env = append(os.Environ(), testEnv...)
+	if err := daemonCmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start --daemon: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if daemonCmd.Process != nil {
+			_ = daemonCmd.Process.Kill()
+		}
+	}()
+
+	binReal, _ := filepath.EvalSymlinks(*bin)
+	if binReal == "" {
+		binReal = *bin
+	}
+	daemonJSONPath := filepath.Join(filepath.Dir(binReal), "daemon.json")
+	var dInfo struct {
+		Port  int    `json:"port"`
+		Token string `json:"token"`
+	}
+	for i := 0; i < 30; i++ {
+		if b, err := os.ReadFile(daemonJSONPath); err == nil {
+			if json.Unmarshal(b, &dInfo) == nil && dInfo.Port > 0 {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if dInfo.Port == 0 {
+		fmt.Fprintf(os.Stderr, "daemon.json did not appear at %s\n", daemonJSONPath)
+		os.Exit(1)
+	}
+
+	// Queue a background download via the daemon HTTP API (/api/action addLink)
+	actBody, _ := json.Marshal(map[string]any{
+		"type": "file",
+		"url":  tort.URL + "/normal",
+		"name": "daemon-bg.bin",
+	})
+	actReq, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/api/action", dInfo.Port), bytes.NewReader(actBody))
+	actReq.Header.Set("Content-Type", "application/json")
+	actReq.Header.Set("X-AnySave-Token", dInfo.Token)
+	actResp, err := http.DefaultClient.Do(actReq)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon /api/action failed: %v\n", err)
+		os.Exit(1)
+	}
+	var actRes map[string]any
+	_ = json.NewDecoder(actResp.Body).Decode(&actRes)
+	actResp.Body.Close()
+	bgJobID, _ := actRes["id"].(string)
+	if bgJobID == "" {
+		fmt.Fprintf(os.Stderr, "daemon did not return job id: %v\n", actRes)
+		os.Exit(1)
+	}
+
+	// Poll /api/state until bgJobID finishes
+	var bgDoneFile string
+	for i := 0; i < 50; i++ {
+		stReq, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/state", dInfo.Port), nil)
+		stReq.Header.Set("X-AnySave-Token", dInfo.Token)
+		if stResp, err := http.DefaultClient.Do(stReq); err == nil {
+			var st map[string]any
+			_ = json.NewDecoder(stResp.Body).Decode(&st)
+			stResp.Body.Close()
+			if jobs, ok := st["jobs"].(map[string]any); ok {
+				if j, ok := jobs[bgJobID].(map[string]any); ok && j["status"] == "done" {
+					bgDoneFile, _ = j["file"].(string)
+					break
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if bgDoneFile == "" {
+		fmt.Fprintf(os.Stderr, "daemon background job %s did not reach status=done\n", bgJobID)
+		os.Exit(1)
+	}
+	bgBytes, err := os.ReadFile(bgDoneFile)
+	if err != nil || !bytes.Equal(bgBytes, tort.Payload) {
+		fmt.Fprintf(os.Stderr, "daemon background job file mismatch at %s: err=%v\n", bgDoneFile, err)
+		os.Exit(1)
+	}
+
+	// Shut down daemon cleanly
+	qBody, _ := json.Marshal(map[string]any{"type": "quit"})
+	qReq, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/api/action", dInfo.Port), bytes.NewReader(qBody))
+	qReq.Header.Set("X-AnySave-Token", dInfo.Token)
+	if qResp, err := http.DefaultClient.Do(qReq); err == nil {
+		qResp.Body.Close()
+	}
+	_ = daemonCmd.Wait()
+	fmt.Printf("[OK] persistent daemon (--daemon) verified on port %d (%d bytes downloaded)\n", dInfo.Port, len(bgBytes))
 
 	if *live {
 		// 7. Live YouTube info

@@ -39,6 +39,7 @@ func assertPayloadMatch(t *testing.T, path string, want []byte) {
 func TestEngineTortureSuite(t *testing.T) {
 	srv := torture.NewServer(256 * 1024) // 256 KB
 	defer srv.Close()
+	defer http.DefaultClient.CloseIdleConnections()
 
 	t.Run("normal_multiconn", func(t *testing.T) {
 		dir := t.TempDir()
@@ -158,6 +159,7 @@ func TestEngineTortureSuite(t *testing.T) {
 	t.Run("pause_and_crash_safe_resume", func(t *testing.T) {
 		slowSrv := torture.NewServer(512 * 1024) // 512 KB
 		defer slowSrv.Close()
+		defer http.DefaultClient.CloseIdleConnections()
 
 		dir := t.TempDir()
 		opts := baseTestOpts(slowSrv.URL+"/slow", dir)
@@ -209,6 +211,7 @@ func TestHandoverOneTimeServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, _ = io.ReadAll(badResp.Body)
 	badResp.Body.Close()
 	if badResp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 on wrong token path, got %d", badResp.StatusCode)
@@ -287,4 +290,119 @@ func TestSpeedBenchmarkSingleVsEngine(t *testing.T) {
 		t.Errorf("expected multi-connection engine (%v) to be faster than 1 connection (%v)", dur8, dur1)
 	}
 }
+
+func TestLiveStreamHandover(t *testing.T) {
+	srv := torture.NewServer(1024 * 1024) // 1 MB
+	defer srv.Close()
+
+	dir := t.TempDir()
+	var live *LiveStreamServer
+	streamedBytes := make(chan []byte, 1)
+	streamErr := make(chan error, 1)
+
+	res, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/slow",
+		DestDir:      dir,
+		FileName:     "live-streamed.bin",
+		InitialConns: 4,
+		MaxConns:     8,
+		MinSplitSize: 64 * 1024,
+		OnStart: func(info StartInfo) {
+			var sErr error
+			live, sErr = ServeLiveStream(info, 5*time.Second)
+			if sErr != nil {
+				streamErr <- sErr
+				return
+			}
+			// Simulate Chrome immediately requesting the stream URL from the first second.
+			go func(u string) {
+				resp, gErr := http.Get(u)
+				if gErr != nil {
+					streamErr <- gErr
+					return
+				}
+				defer resp.Body.Close()
+				b, rErr := io.ReadAll(resp.Body)
+				if rErr != nil {
+					streamErr <- rErr
+					return
+				}
+				streamedBytes <- b
+			}(live.URL)
+		},
+		OnVerified: func() bool {
+			if live == nil {
+				return false
+			}
+			ok := <-live.Done
+			live.Close()
+			return ok
+		},
+	})
+	if err != nil {
+		t.Fatalf("live stream download failed: %v", err)
+	}
+
+	select {
+	case sErr := <-streamErr:
+		t.Fatalf("live stream client error: %v", sErr)
+	case got := <-streamedBytes:
+		if !bytes.Equal(got, srv.Payload) {
+			t.Fatalf("live stream payload mismatch: got %d bytes", len(got))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for live stream client")
+	}
+
+	// Because OnVerified returned true, the engine should NOT leave a duplicate file in DestDir.
+	if _, statErr := os.Stat(res.FilePath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no duplicate file at %s when streamed via LiveStreamServer", res.FilePath)
+	}
+}
+
+func TestLiveStreamHandoverAbortsOnCorruptHash(t *testing.T) {
+	srv := torture.NewServer(512 * 1024)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	var live *LiveStreamServer
+	clientDone := make(chan int, 1)
+
+	_, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/corrupt-hash",
+		DestDir:      dir,
+		FileName:     "corrupt-live.bin",
+		InitialConns: 4,
+		MinSplitSize: 64 * 1024,
+		OnStart: func(info StartInfo) {
+			var sErr error
+			live, sErr = ServeLiveStream(info, 5*time.Second)
+			if sErr != nil {
+				return
+			}
+			go func(u string) {
+				resp, gErr := http.Get(u)
+				if gErr != nil {
+					clientDone <- 0
+					return
+				}
+				defer resp.Body.Close()
+				b, _ := io.ReadAll(resp.Body)
+				clientDone <- len(b)
+			}(live.URL)
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Download to fail on corrupt hash")
+	}
+	if live != nil {
+		defer live.Close()
+	}
+
+	gotLen := <-clientDone
+	if gotLen >= len(srv.Payload) {
+		t.Fatalf("expected LiveStreamServer to hold back final byte and abort on corrupt hash, but client received %d / %d bytes", gotLen, len(srv.Payload))
+	}
+}
+
 

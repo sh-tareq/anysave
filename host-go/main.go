@@ -36,7 +36,7 @@ import (
 
 const (
 	h264Sort      = "res,fps,vcodec:h264,acodec:m4a"
-	helperVersion = "1.0.6"
+	helperVersion = "1.1.0"
 	maxLogBytes   = 2 * 1024 * 1024 // rotate vidgrab.log at 2 MB
 )
 
@@ -784,7 +784,9 @@ func actionDiagnostics(msg map[string]any) map[string]any {
 }
 
 func main() {
+	selfName := ""
 	if self, err := os.Executable(); err == nil {
+		selfName = strings.ToLower(filepath.Base(self))
 		if real, err := filepath.EvalSymlinks(self); err == nil {
 			self = real
 		}
@@ -801,6 +803,41 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println(helperVersion)
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--daemon" {
+		_ = runDaemon(false, "")
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--app" {
+		_ = runDaemon(true, "")
+		return
+	}
+	if len(os.Args) > 2 && os.Args[1] == "--add" {
+		_ = sendLinkToDaemon(os.Args[2])
+		return
+	}
+	if len(os.Args) > 1 {
+		arg1 := strings.TrimSpace(os.Args[1])
+		l := strings.ToLower(arg1)
+		if strings.HasPrefix(l, "anysave://") || strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
+			_ = sendLinkToDaemon(arg1)
+			return
+		}
+		// Windows "Send to -> AnySave" on a .url shortcut or .txt file of links.
+		if (strings.HasSuffix(l, ".url") || strings.HasSuffix(l, ".txt")) && isFile(arg1) {
+			if data, err := os.ReadFile(arg1); err == nil {
+				urlRe := regexp.MustCompile(`https?://[^\s"'<>]+`)
+				for _, m := range urlRe.FindAllString(string(data), -1) {
+					_ = sendLinkToDaemon(m)
+				}
+			}
+			return
+		}
+	}
+	// If launched as `AnySave.exe` directly with no arguments, start the desktop app + tray.
+	if len(os.Args) == 1 && strings.HasPrefix(selfName, "anysave") {
+		_ = runDaemon(true, "")
 		return
 	}
 
