@@ -92,6 +92,8 @@ type Options struct {
 	IdleTimeout    time.Duration // a connection that sends nothing for this long is dropped and retried (default 45s)
 	RetryBaseDelay time.Duration
 	MaxSpeedBPS    int64 // optional speed limit in bytes/sec (0 = unlimited)
+	// Proxy picks the proxy for each request (nil = the HTTP_PROXY/HTTPS_PROXY variables).
+	Proxy func(*http.Request) (*url.URL, error)
 	// Trace, when set, receives one line per HTTP request the engine makes (for diagnostics).
 	Trace      func(string)
 	OnStart    func(StartInfo)
@@ -308,8 +310,12 @@ func (d *activeDownload) setTerminalErr(err error) {
 }
 
 func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Result, error) {
+	proxyFn := opts.Proxy
+	if proxyFn == nil {
+		proxyFn = http.ProxyFromEnvironment
+	}
 	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxyFn,
 		// A connection that can't be opened fails in seconds, not after the OS default (over a minute).
 		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		MaxIdleConns:          100,

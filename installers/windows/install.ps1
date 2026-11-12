@@ -157,6 +157,17 @@ foreach ($b in $browsers.GetEnumerator()) {
   Write-Host "Registered with $($b.Key)"
 }
 
+# 6b. The `anysave` command (anysave <link>) for new terminal windows: put the AnySave folder
+#     on this user's PATH (AnySave.exe lives there).
+try {
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if (-not $userPath) { $userPath = '' }
+  if (($userPath -split ';') -notcontains $App) {
+    [Environment]::SetEnvironmentVariable('Path', (($userPath.TrimEnd(';') + ';' + $App).TrimStart(';')), 'User')
+    Write-Host 'Added the anysave command (open a new terminal window to use it)'
+  }
+} catch {}
+
 # 7. Register anysave:// protocol + Start Menu & Explorer "Send to" shortcuts (current user)
 try {
   $anySaveExe = Join-Path $App 'AnySave.exe'

@@ -213,6 +213,10 @@ func defaultDaemonSettings() map[string]any {
 		"notifications":   true,
 		"releaseChannel":  "stable",
 		"maxSpeedKbps":    float64(0),
+		"subLangs":        "",    // subtitles to put inside videos, e.g. "en" or "en,fr"
+		"embedChapters":   true,  // chapter marks inside videos
+		"embedCover":      false, // thumbnail as cover art inside videos and music
+		"proxy":           "",    // "" = system proxy, "direct", or http://host:port / socks5://host:port
 		"afterDoneAction": "none",
 	}
 }
@@ -555,15 +559,29 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 
 	switch action {
 	case "info":
+		req["proxy"] = d.proxySetting()
 		return actionInfo(req)
 	case "playlist":
+		req["proxy"] = d.proxySetting()
 		return actionPlaylist(req)
 	case "probe":
+		req["proxy"] = d.proxySetting()
 		return actionProbe(req)
 	case "pickFile":
 		return actionPickFile(req)
 	case "fileInfo":
 		return actionFileInfo(req)
+	case "hashFile":
+		file := ""
+		d.mu.Lock()
+		if j, ok := d.jobs[str(req, "id")]; ok {
+			file = str(j, "file")
+		}
+		d.mu.Unlock()
+		if file == "" {
+			return map[string]any{"ok": false, "error": "File not found"}
+		}
+		return actionHash(map[string]any{"path": file})
 	case "diagnostics":
 		res := actionDiagnostics(req)
 		d.mu.Lock()
@@ -769,6 +787,14 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 	}
 }
 
+// proxySetting is the user's proxy choice ("" = system proxy).
+func (d *daemonServer) proxySetting() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	p, _ := d.settings["proxy"].(string)
+	return p
+}
+
 func (d *daemonServer) addLink(rawURL, title string) map[string]any {
 	rawURL = strings.TrimSpace(rawURL)
 	u, err := neturl.Parse(rawURL)
@@ -865,6 +891,10 @@ func (d *daemonServer) startVideoJob(req map[string]any) string {
 
 	d.mu.Lock()
 	maxSpeed, _ := d.settings["maxSpeedKbps"].(float64)
+	subLangs, _ := d.settings["subLangs"].(string)
+	chapters, _ := d.settings["embedChapters"].(bool)
+	cover, _ := d.settings["embedCover"].(bool)
+	proxy, _ := d.settings["proxy"].(string)
 	d.mu.Unlock()
 	if reqSpeed, ok := req["maxSpeedKbps"].(float64); ok && reqSpeed >= 0 {
 		maxSpeed = reqSpeed
@@ -879,6 +909,10 @@ func (d *daemonServer) startVideoJob(req map[string]any) string {
 		"audioOnly":    audioOnly,
 		"folder":       folder,
 		"maxSpeedKbps": maxSpeed,
+		"subLangs":     subLangs,
+		"chapters":     chapters,
+		"cover":        cover,
+		"proxy":        proxy,
 	})
 	return id
 }
@@ -932,6 +966,7 @@ func (d *daemonServer) startFastFileJob(rawURL, name, title, id, referrer, sha25
 		"sha256":       sha256,
 		"handover":     false,
 		"maxSpeedKbps": maxSpeed,
+		"proxy":        d.proxySetting(),
 	})
 	return id
 }
@@ -1248,43 +1283,6 @@ func (d *daemonServer) selfUpdate(req map[string]any) map[string]any {
 // sendLinkToDaemon forwards a URL (from `anysave://` or "Send to" / CLI) to the running daemon,
 // starting the daemon in the background if it isn't running yet.
 func sendLinkToDaemon(rawURL string) error {
-	rawURL = strings.TrimSpace(rawURL)
-	if strings.HasPrefix(strings.ToLower(rawURL), "anysave://") {
-		u, err := neturl.Parse(rawURL)
-		if err == nil {
-			if target := u.Query().Get("url"); target != "" {
-				rawURL = target
-			} else {
-				rawURL = strings.TrimPrefix(rawURL, "anysave://")
-				rawURL = strings.TrimPrefix(rawURL, "//")
-			}
-		}
-	}
-	info := checkRunningDaemon()
-	if info == nil {
-		self, _ := os.Executable()
-		cmd := command(self, "--daemon")
-		_ = cmd.Start()
-		for i := 0; i < 20; i++ {
-			time.Sleep(150 * time.Millisecond)
-			if info = checkRunningDaemon(); info != nil {
-				break
-			}
-		}
-	}
-	if info == nil {
-		return fmt.Errorf("could not reach AnySave daemon")
-	}
-	body, _ := json.Marshal(map[string]any{"type": "addLink", "url": rawURL})
-	req, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/api/action", info.Port), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-AnySave-Token", info.Token)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return nil
+	_, err := daemonAction(map[string]any{"type": "addLink", "url": cleanLink(rawURL)})
+	return err
 }
-

@@ -67,6 +67,26 @@ launched against a scratch home, and a release build on the owner's phone (see �
 - Link check (`probe`, desktop and Android) used HEAD only; some servers never answer HEAD. Falls back to a 1-byte GET.
 - Desktop service handed its secret token to anyone who opened `/` without one.
 
+**Phase 4 quick pieces, added and tested the same day (desktop only, not on Android):**
+- Subtitles (tick-boxes for English, Bangla and 13 other languages), chapter marks and cover art inside the
+  video file: helper `extrasArgs` in `main.go`, settings `subLangs` / `embedChapters` / `embedCover`. Tested on a
+  real YouTube video (subtitle tracks, 3 chapters, cover). A subtitle that can't be fetched never fails the video.
+  Do not use `en.*` for languages: YouTube lists dozens of machine-translated tracks (`en-de`…) and answers 429.
+- Checksum: paste a SHA-256 after the link in the manager (engine checks, a mismatch is not kept), a "check"
+  button on finished rows (`hash` helper action), and `anysave --sha256 <hash> <link>`.
+- Proxy (`host-go/proxy.go`, setting `proxy`): blank = system proxy (macOS `scutil --proxy`, Windows registry,
+  or `HTTP(S)_PROXY`), `direct`, or `http://` / `socks5://host:port`. Used by the engine, the link check and yt-dlp.
+  Tested: a download through a local HTTP proxy, in Go tests and in the browser.
+- Import / export of the link list (manager toolbar; JSON export, import of that file or any text file of links).
+- `anysave <link>…` command (`host-go/cli.go`): several links, `--wait`, `--sha256`, `--help`. The Mac installer
+  links `anysave` into a folder on the PATH (or `~/.local/bin` plus one line in `~/.zprofile`); the Windows
+  installer adds the AnySave folder to the user PATH.
+- Mac app: menu-bar item is the logo with a progress ring and a finish tick (`BarIcon`; `ANYSAVE_BAR_DUMP=<folder>`
+  saves the frames for testing); the web view now shows page dialogs, file pickers and Save panels.
+- Not tested for these: a computer that really has a system proxy, HTTPS-through-proxy and SOCKS5 against a real
+  proxy, yt-dlp with `--proxy`, the Windows PATH step and console output on Windows, the Mac installer's PATH step
+  on a real home folder, and the new dialogs / Import / Export inside the Mac app (they are tested in Chrome only).
+
 **Listed in the roadmap as done, but not built at all:** scheduler, named queues, site crawler (depth/filters),
 after-done sleep / shut down / quit (only "show" and "open" exist), finish/fail notifications in the extension
 (the desktop service has them).

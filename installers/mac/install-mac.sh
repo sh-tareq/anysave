@@ -113,6 +113,25 @@ if [ -d "$SRC/AnySave.app" ]; then
   echo "✓ Installed AnySave.app -> $APP_DEST"
 fi
 
+# 5c. The `anysave` command for Terminal (anysave <link>). A link to the helper under the
+#     name "anysave", in a folder that is on the PATH; no administrator password needed.
+BIN_DIR=""
+for d in /usr/local/bin /opt/homebrew/bin "$HOME/.local/bin" "$HOME/bin"; do
+  case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && { BIN_DIR="$d"; break; } ;; esac
+done
+if [ -z "$BIN_DIR" ]; then
+  BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$BIN_DIR"
+  # Not on the PATH yet: add it for new Terminal windows (once).
+  if ! grep -qs 'AnySave command' "$HOME/.zprofile"; then
+    printf '\n# AnySave command (anysave <link>)\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.zprofile"
+  fi
+  CLI_NOTE=" (open a new Terminal window to use it)"
+fi
+if ln -sf "$APP/vidgrab-host" "$BIN_DIR/anysave" 2>/dev/null; then
+  echo "✓ Terminal command: anysave <link>${CLI_NOTE:-}"
+fi
+
 # 6. Register the helper with each browser (also ones not installed yet, so installing
 #    Chrome, Edge or Brave later still works)
 for TARGET in \

@@ -8,9 +8,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -36,7 +39,7 @@ func actionProbe(msg map[string]any) map[string]any {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return map[string]any{"ok": false, "error": "Not a web link"}
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: proxyFor(str(msg, "proxy"))}}
 	// Ask with HEAD first. Some servers don't answer HEAD (they hang up or say 405), so fall
 	// back to a GET for the first byte only, which every file server understands.
 	try := func(ua string) (*http.Response, error) {
@@ -121,6 +124,29 @@ func actionFileInfo(msg map[string]any) map[string]any {
 		return map[string]any{"ok": false, "error": "File not found"}
 	}
 	return map[string]any{"ok": true, "size": st.Size(), "duration": probeDuration(p)}
+}
+
+// actionHash returns the SHA-256 of a finished download, so the user can compare it with the
+// checksum a website publishes. Only regular files are read.
+func actionHash(msg map[string]any) map[string]any {
+	p, err := filepath.Abs(str(msg, "path"))
+	if err != nil {
+		return map[string]any{"ok": false, "error": "File not found"}
+	}
+	st, err := os.Stat(p)
+	if err != nil || !st.Mode().IsRegular() {
+		return map[string]any{"ok": false, "error": "The file isn't there any more. It may have been moved or deleted."}
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return map[string]any{"ok": false, "error": "Couldn't read the file."}
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return map[string]any{"ok": false, "error": "Couldn't read the file."}
+	}
+	return map[string]any{"ok": true, "sha256": hex.EncodeToString(h.Sum(nil)), "size": st.Size()}
 }
 
 var durRe = regexp.MustCompile(`Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)
@@ -401,6 +427,10 @@ func actionFastDownload(msg map[string]any) {
 		return
 	}
 
+	if _, err := parseProxySetting(str(msg, "proxy")); err != nil {
+		fail(strings.ToUpper(err.Error()[:1]) + err.Error()[1:] + ".")
+		return
+	}
 	outDir := downloadDir
 	if folder := str(msg, "folder"); allowedFolders[folder] {
 		outDir = filepath.Join(downloadDir, folder)
@@ -461,6 +491,7 @@ func actionFastDownload(msg map[string]any) {
 		Cookies:        str(msg, "cookies"),
 		Referrer:       str(msg, "referrer"),
 		UserAgent:      str(msg, "userAgent"),
+		Proxy:          proxyFor(str(msg, "proxy")),
 		ExpectedSHA256: str(msg, "sha256"),
 		MaxSpeedBPS:    maxSpeedBPS,
 		Trace:          engineTrace(),

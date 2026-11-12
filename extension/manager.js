@@ -255,6 +255,7 @@ function row(j) {
     li.ondblclick = (e) => { if (!e.target.closest("button")) open(); };
   }
   if (j.status === "done" && j.file) {
+    add("check", "Check against a SHA-256 checksum", () => verifyChecksum(j));
     if (["Videos", "Music"].includes(category(j)))
       add("convert", "Convert", () => { showTab("convert"); choose({ path: j.file, name: j.fileName || j.title }); });
   }
@@ -286,6 +287,87 @@ function row(j) {
   if (FINISHED.includes(j.status)) add("remove", "Remove from list", () => send({ type: "remove", id: j.id }));
   return li;
 }
+
+// Compare a finished file with a checksum the user pastes (from the site they downloaded from).
+async function verifyChecksum(j) {
+  const typed = prompt(`Paste the SHA-256 checksum for\n${j.fileName || j.title}\n\n(leave empty to just see this file's checksum)`, "");
+  if (typed === null) return;
+  const want = typed.replace(/^\s*sha-?256\s*[:=]?\s*/i, "").trim().toLowerCase();
+  if (want && !/^[0-9a-f]{64}$/.test(want)) { alert("That isn't a SHA-256 checksum. It has 64 characters: the digits 0-9 and letters a-f."); return; }
+  const res = await send({ type: "hashFile", id: j.id });
+  if (!res?.ok) { alert(res?.error || "Couldn't read the file."); return; }
+  if (!want) { prompt("SHA-256 of this file:", res.sha256); return; }
+  alert(res.sha256 === want
+    ? "✓ The checksum matches. The file is exactly the one the site published."
+    : `✗ The checksum does NOT match.\n\nThis file:  ${res.sha256}\nExpected:  ${want}\n\nThe file may be damaged or changed. Download it again.`);
+}
+
+// ---------- export / import the list of links ----------
+function saveTextFile(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const done = () => setTimeout(() => URL.revokeObjectURL(url), 30000);
+  // In the extension Chrome saves it (and asks where); in the desktop app a normal link does.
+  if (typeof chrome !== "undefined" && chrome.downloads?.download) {
+    chrome.downloads.download({ url, filename: name, saveAs: true }).then(done, done);
+  } else {
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(a); a.click(); a.remove(); done();
+  }
+}
+function exportItems() {
+  return Object.values(jobs)
+    .filter((j) => /^https?:\/\//i.test(j.url || "") && j.kind !== "convert")
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    .map((j) => ({ url: j.url, title: j.title || "", kind: j.kind, status: j.status,
+      ...(j.audioOnly ? { audioOnly: true } : {}), ...(j.format ? { format: j.format } : {}), ...(j.sort ? { sort: j.sort } : {}),
+      ...(j.expectedSha256 || j.sha256 ? { sha256: j.expectedSha256 || j.sha256 } : {}) }));
+}
+// Reads an exported list, or any text file with links in it.
+function parseImport(text) {
+  try {
+    const data = JSON.parse(text);
+    const items = Array.isArray(data) ? data : data?.items;
+    if (Array.isArray(items)) {
+      return items.map((it) => (typeof it === "string" ? { url: it } : it))
+        .filter((it) => it && /^https?:\/\//i.test(it.url || ""));
+    }
+  } catch {}
+  return linksIn(text).map((url) => ({ url }));
+}
+function listMsg(text, isErr) {
+  const m = $("addMsg");
+  m.hidden = false; m.className = "msg" + (isErr ? " err" : ""); m.textContent = text;
+  setTimeout(() => { m.hidden = true; }, 7000);
+}
+$("exportList")?.addEventListener("click", () => {
+  const items = exportItems();
+  if (!items.length) { listMsg("There are no links to export yet.", true); return; }
+  saveTextFile(`anysave-links-${new Date().toISOString().slice(0, 10)}.json`,
+    JSON.stringify({ app: "AnySave", version: 1, exportedAt: new Date().toISOString(), items }, null, 2));
+  listMsg(`Exported ${items.length} link${items.length === 1 ? "" : "s"}.`);
+});
+$("importList")?.addEventListener("click", () => $("importFile").click());
+$("importFile")?.addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  e.target.value = "";
+  const items = parseImport(text);
+  if (!items.length) { listMsg("No links found in that file.", true); return; }
+  // Links already waiting or downloading aren't added twice.
+  const busy = new Set(Object.values(jobs).filter((j) => !FINISHED.includes(j.status)).map((j) => j.url));
+  let ok = 0, skipped = 0, failed = 0;
+  for (const it of items.slice(0, 500)) {
+    if (busy.has(it.url)) { skipped++; continue; }
+    busy.add(it.url);
+    let res;
+    if (it.kind === "video" && it.format) res = await send({ type: "download", url: it.url, title: it.title, format: it.format, sort: it.sort, audioOnly: !!it.audioOnly });
+    else if (it.kind === "file") res = await send({ type: "file", url: it.url, title: it.title || undefined });
+    else res = await send({ type: "addLink", url: it.url, title: it.title || undefined });
+    if (res?.ok) ok++; else failed++;
+  }
+  listMsg(`Imported ${ok} link${ok === 1 ? "" : "s"}` + (skipped ? `, ${skipped} already in the list` : "") + (failed ? `, ${failed} couldn't be added` : "") + ".", !ok);
+});
 
 document.querySelectorAll("#filters .chip").forEach((c) => c.addEventListener("click", () => {
   document.querySelectorAll("#filters .chip").forEach((x) => x.classList.toggle("active", x === c));
@@ -341,14 +423,27 @@ $("addForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const forceHandler = submitForceHandler;
   submitForceHandler = undefined;
-  const raw = $("addUrl").value.trim();
+  let raw = $("addUrl").value.trim();
+  // A SHA-256 checksum pasted after a link: AnySave checks the finished file against it.
+  const shaMatch = raw.match(/(?:^|[\s,;])(?:sha-?256\s*[:=]?\s*)?([0-9a-f]{64})(?=$|[\s,;])/i);
+  const sha256 = shaMatch ? shaMatch[1].toLowerCase() : "";
+  if (shaMatch) raw = raw.replace(shaMatch[0], " ").trim();
   const links = linksIn(raw);
   const list = links.length ? links : [raw];
+  if (sha256 && list.length !== 1) {
+    const m0 = $("addMsg");
+    m0.hidden = false; m0.className = "msg err";
+    m0.textContent = "A checksum belongs to one file: paste one link with its SHA-256.";
+    return;
+  }
   const dupCount = list.filter((u) => Object.values(jobs).some((j) => j.url === u && j.status === "done")).length;
   const btn = e.submitter; btn.disabled = true; btn.textContent = list.length > 1 ? `Adding ${list.length}…` : "Checking…";
   let ok = 0, lastErr = "";
   for (const url of list) {
-    const res = await send({ type: "addLink", url, forceHandler });
+    // Only AnySave's own engine can check a checksum, so that download doesn't go to Chrome.
+    const res = sha256 && /^https?:\/\//i.test(url)
+      ? await send({ type: "file", url, sha256, forceHandler: "anysave" })
+      : await send({ type: "addLink", url, forceHandler });
     if (res?.ok) ok++; else lastErr = res?.error || "Couldn't add this link";
   }
   btn.disabled = false; btn.textContent = "Download";
@@ -357,7 +452,7 @@ $("addForm").addEventListener("submit", async (e) => {
   m.className = "msg" + (ok ? "" : " err");
   const dupNote = dupCount > 0 ? ` (Note: ${dupCount === 1 ? "this link was" : `${dupCount} links were`} already downloaded earlier — saving a fresh copy.)` : "";
   m.textContent = (list.length === 1
-    ? (ok ? "Added. It's downloading below." : lastErr)
+    ? (ok ? (sha256 ? "Added. The finished file will be checked against your checksum." : "Added. It's downloading below.") : lastErr)
     : `Added ${ok} of ${list.length} links. They're downloading below.` + (ok < list.length ? ` (${lastErr})` : "")) + dupNote;
   if (ok) $("addUrl").value = "";
   setTimeout(() => { m.hidden = true; }, 5000);
@@ -506,6 +601,11 @@ function applySettingsUI(settings = {}) {
   if ($("maxConcurrent")) $("maxConcurrent").value = String(settings.maxConcurrent || 3);
   if ($("afterDoneAction")) $("afterDoneAction").value = settings.afterDoneAction || "none";
   if ($("videoOverlay")) $("videoOverlay").checked = settings.videoOverlay !== false;
+  const langs = new Set(String(settings.subLangs || "").split(/[\s,;]+/).filter(Boolean));
+  document.querySelectorAll("#subLangsBox input").forEach((c) => { c.checked = langs.has(c.value); });
+  if ($("proxy") && document.activeElement !== $("proxy")) $("proxy").value = settings.proxy || "";
+  if ($("embedChapters")) $("embedChapters").checked = settings.embedChapters !== false;
+  if ($("embedCover")) $("embedCover").checked = !!settings.embedCover;
 }
 
 document.querySelectorAll("#handlerChips .chip").forEach((c) => c.addEventListener("click", () => {
@@ -519,6 +619,28 @@ $("maxSpeedKbps")?.addEventListener("change", (e) => send({ type: "setSettings",
 $("maxConcurrent")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { maxConcurrent: Number(e.target.value || 3) } }));
 $("afterDoneAction")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { afterDoneAction: e.target.value } }));
 $("videoOverlay")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { videoOverlay: e.target.checked } }));
+// Subtitle languages: Bangla, English and the other most-used languages.
+const SUB_LANGS = [["en", "English"], ["bn", "বাংলা (Bangla)"], ["hi", "हिन्दी (Hindi)"], ["ur", "اردو (Urdu)"], ["ar", "العربية (Arabic)"],
+  ["es", "Español"], ["fr", "Français"], ["de", "Deutsch"], ["pt", "Português"], ["ru", "Русский"], ["tr", "Türkçe"],
+  ["id", "Indonesia"], ["zh", "中文 (Chinese)"], ["ja", "日本語 (Japanese)"], ["ko", "한국어 (Korean)"]];
+if ($("subLangsBox")) {
+  $("subLangsBox").innerHTML = SUB_LANGS.map(([code, name]) =>
+    `<label><input type="checkbox" value="${code}" /> ${esc(name)}</label>`).join("");
+  $("subLangsBox").addEventListener("change", () => {
+    const picked = [...document.querySelectorAll("#subLangsBox input:checked")].map((c) => c.value);
+    send({ type: "setSettings", patch: { subLangs: picked.join(",") } });
+  });
+}
+$("embedChapters")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { embedChapters: e.target.checked } }));
+$("embedCover")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { embedCover: e.target.checked } }));
+// A proxy address is checked before it is saved, so a typo can't silently break every download.
+$("proxy")?.addEventListener("change", (e) => {
+  const v = e.target.value.trim();
+  const ok = !v || /^(system|direct)$/i.test(v) || /^((https?|socks5h?):\/\/)?([^\s/:@]+(:[^\s/@]*)?@)?[^\s/:@]+:\d{1,5}\/?$/i.test(v);
+  e.target.setCustomValidity(ok ? "" : "Use http://host:port, socks5://host:port, or leave blank");
+  e.target.reportValidity();
+  if (ok) send({ type: "setSettings", patch: { proxy: v } });
+});
 
 // Allow dragging and dropping any link onto the Manager page to download it.
 document.addEventListener("dragover", (e) => {

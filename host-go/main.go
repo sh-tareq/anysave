@@ -14,8 +14,8 @@ package main
 import (
 	"bufio"
 	"crypto/sha1"
-	"encoding/hex"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,6 +207,9 @@ func lastError(stderr string) string {
 func friendlyError(msg string) string {
 	l := strings.ToLower(msg)
 	switch {
+	case strings.Contains(l, "checksum mismatch"):
+		return "The file doesn't match the checksum you gave, so it wasn't kept. " +
+			"It may be damaged or changed. Check the checksum and try again."
 	case strings.Contains(l, "cloudflare") || strings.Contains(l, "anti-bot") || strings.Contains(l, "captcha"):
 		return "This website blocks automated downloads, so AnySave can't download from it. " +
 			"Use the site's own download button if it has one."
@@ -320,6 +323,7 @@ func actionInfo(msg map[string]any) map[string]any {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	ytdlp, args, err := baseArgs(cookieFile)
+	args = append(args, ytdlpProxyArgs(str(msg, "proxy"))...)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
@@ -424,6 +428,7 @@ func actionDownload(msg map[string]any) {
 		return
 	}
 	ytdlp, args, err := baseArgs(cookieFile)
+	args = append(args, ytdlpProxyArgs(str(msg, "proxy"))...)
 	if err != nil {
 		fail(err.Error())
 		return
@@ -472,6 +477,7 @@ func actionDownload(msg map[string]any) {
 		}
 	}
 	hasFfmpeg := findTool("ffmpeg") != ""
+	args = append(args, extrasArgs(msg, hasFfmpeg)...)
 	if audio, _ := msg["audioOnly"].(bool); audio && hasFfmpeg {
 		args = append(args, "-x", "--audio-format", "mp3")
 	} else if hasFfmpeg {
@@ -553,6 +559,11 @@ func actionDownload(msg map[string]any) {
 			file = finalFile
 		}
 		send(map[string]any{"type": "done", "file": file})
+	case finalFile != "" && isFile(finalFile):
+		// The video itself was saved; only an extra (subtitles, cover art) failed.
+		logf("download finished with a non-fatal error: %v", err)
+		os.RemoveAll(partsDir)
+		send(map[string]any{"type": "done", "file": finalFile})
 	default:
 		fail(lastError(stderr.String()))
 	}
@@ -618,6 +629,7 @@ func actionPlaylist(msg map[string]any) map[string]any {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	ytdlp, args, err := baseArgs(cookieFile)
+	args = append(args, ytdlpProxyArgs(str(msg, "proxy"))...)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
@@ -826,13 +838,13 @@ func main() {
 		_ = sendLinkToDaemon(os.Args[2])
 		return
 	}
+	// `anysave <link>...` from a terminal, an anysave:// link from the system, "Send to".
+	if code, handled := runCLI(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 {
 		arg1 := strings.TrimSpace(os.Args[1])
 		l := strings.ToLower(arg1)
-		if strings.HasPrefix(l, "anysave://") || strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
-			_ = sendLinkToDaemon(arg1)
-			return
-		}
 		// Windows "Send to -> AnySave" on a .url shortcut or .txt file of links.
 		if (strings.HasSuffix(l, ".url") || strings.HasSuffix(l, ".txt")) && isFile(arg1) {
 			if data, err := os.ReadFile(arg1); err == nil {
@@ -884,6 +896,8 @@ func main() {
 		send(actionPickFile(msg))
 	case "fileInfo":
 		send(actionFileInfo(msg))
+	case "hash":
+		send(actionHash(msg))
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":
@@ -891,4 +905,47 @@ func main() {
 	default:
 		send(map[string]any{"ok": false, "error": "Unknown action: " + action})
 	}
+}
+
+var plainLangRe = regexp.MustCompile(`^[A-Za-z]{2,3}$`)
+var subLangRe = regexp.MustCompile(`^[A-Za-z0-9.*_-]{1,24}$`)
+
+// extrasArgs turns the optional extras of a video download into yt-dlp arguments:
+//
+//	subLangs  "en,fr"  subtitles in these languages, put inside the video file (needs FFmpeg)
+//	chapters  true     chapter marks inside the file (needs FFmpeg)
+//	cover     true     the video's thumbnail as cover art inside the file (needs FFmpeg)
+//
+// A video without subtitles or chapters simply downloads without them.
+func extrasArgs(msg map[string]any, hasFfmpeg bool) []string {
+	if !hasFfmpeg {
+		return nil
+	}
+	var args []string
+	var langs []string
+	for _, l := range strings.FieldsFunc(str(msg, "subLangs"), func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
+		if subLangRe.MatchString(l) {
+			// "en" also takes en-US and en-GB, "zh" takes zh-Hans and zh-Hant, "pt" takes pt-BR.
+			// Not "en.*": YouTube lists dozens of machine-translated tracks such as "en-de",
+			// and asking for all of them gets the download refused (HTTP 429).
+			if plainLangRe.MatchString(l) {
+				l += "(-[A-Z0-9][A-Za-z0-9]*)?"
+			}
+			langs = append(langs, l)
+		}
+	}
+	audio, _ := msg["audioOnly"].(bool)
+	if len(langs) > 0 && !audio {
+		// Also the automatic captions when the uploader gave none. --ignore-errors turns a
+		// subtitle that can't be fetched into a warning, so it never costs the video itself.
+		args = append(args, "--write-subs", "--write-auto-subs", "--sub-langs", strings.Join(langs, ","),
+			"--embed-subs", "--convert-subs", "srt", "--compat-options", "no-keep-subs", "--ignore-errors")
+	}
+	if on, _ := msg["chapters"].(bool); on {
+		args = append(args, "--embed-chapters")
+	}
+	if on, _ := msg["cover"].(bool); on {
+		args = append(args, "--embed-thumbnail", "--convert-thumbnails", "jpg")
+	}
+	return args
 }

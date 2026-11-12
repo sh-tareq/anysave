@@ -186,7 +186,9 @@ function pumpQueue() {
       const cookies = j.useCookies ? await cookiesFor(j.url) : null;
       // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
       runNative(j.id, { action: "download", job: j.id, url: j.url, format: j.format, sort: j.sort,
-        audioOnly: j.audioOnly, cookies, folder: j.audioOnly ? "Music" : "Videos", maxSpeedKbps });
+        audioOnly: j.audioOnly, cookies, folder: j.audioOnly ? "Music" : "Videos", maxSpeedKbps,
+        subLangs: settings.subLangs || "", chapters: settings.embedChapters !== false, cover: !!settings.embedCover,
+        proxy: settings.proxy || "" });
     }
   }).catch((e) => console.warn("AnySave: queue", e));
   return pumping;
@@ -219,6 +221,10 @@ const DEFAULT_SETTINGS = {
   maxConcurrent: 3,
   afterDoneAction: "none",
   videoOverlay: true,
+  subLangs: "",        // subtitles to put inside videos, e.g. "en" or "en,fr"
+  embedChapters: true, // chapter marks inside videos
+  embedCover: false,   // thumbnail as cover art inside videos and music
+  proxy: "",           // "" = system proxy, "direct", or http://host:port / socks5://host:port
 };
 
 async function getSettings() {
@@ -398,7 +404,7 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
   port.postMessage({
     action: "fastDownload", job: id, url, fileName, folder,
     cookies, referrer: referrer || "", userAgent: navigator.userAgent, sha256: sha256 || "", handover: true,
-    maxSpeedKbps: Number(settings.maxSpeedKbps || 0),
+    maxSpeedKbps: Number(settings.maxSpeedKbps || 0), proxy: settings.proxy || "",
   });
   return id;
 }
@@ -544,7 +550,7 @@ async function addLink(url, title, forceHandler) {
   if (VIDEO_SITES.test(host)) return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a" }) };
   if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title, forceHandler }) };
   // Unknown: ask the helper what the server says it is.
-  const p = await native({ action: "probe", url });
+  const p = await native({ action: "probe", url, proxy: (await getSettings()).proxy || "" });
   // Without the helper, video pages can't be read anyway: let Chrome download the link.
   if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title, forceHandler: p.hostMissing ? "chrome" : forceHandler }) };
   return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title }) };
@@ -640,11 +646,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     switch (msg.type) {
       case "info": {
         const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
-        return native({ action: "info", url: msg.url, cookies });
+        return native({ action: "info", url: msg.url, cookies, proxy: (await getSettings()).proxy || "" });
       }
       case "playlist": {
         const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
-        return native({ action: "playlist", url: msg.url, cookies });
+        return native({ action: "playlist", url: msg.url, cookies, proxy: (await getSettings()).proxy || "" });
       }
       case "download": return { ok: true, id: await startVideo(msg) };
       case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title, forceHandler: msg.forceHandler }) };
@@ -678,6 +684,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         });
         return { ok: true };
       case "fileInfo": return native({ action: "fileInfo", path: msg.path });
+      case "hashFile": {
+        const j = (await getJobs())[msg.id];
+        if (!j?.file) return { ok: false, error: "File not found" };
+        const res = await native({ action: "hash", path: j.file });
+        if (res?.ok && res.sha256) await updateJob(msg.id, { sha256: res.sha256 });
+        return res;
+      }
       case "reveal": {
         const j = msg.id ? (await getJobs())[msg.id] : null;
         if (j?.downloadId) { chrome.downloads.show(j.downloadId); return { ok: true }; }

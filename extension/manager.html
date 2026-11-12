@@ -24,7 +24,7 @@
         <button class="primary" type="submit">Download</button>
       </form>
       <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
-        Tip: right-click any link or video → <b>Download with AnySave</b>.</p>
+        Tip: right-click any link or video → <b>Download with AnySave</b>. To check a file, paste its SHA-256 checksum after the link.</p>
       <div id="addMsg" class="msg" hidden></div>
       <label class="capture"><input type="checkbox" id="captureAll" />
         <span><b>Catch downloads from websites</b><br /><span class="muted small">When you click a site's own download button, AnySave manages it and saves it into Downloads/AnySave. Progress shows on the AnySave toolbar icon; pin it so Chrome's own download bubble can stay hidden.</span></span>
@@ -84,7 +84,19 @@
                 <option value="open">Open last file</option>
               </select>
             </label>
+            <label class="small">Proxy <span class="muted">(blank = this computer's proxy settings)</span>
+              <input id="proxy" type="text" placeholder="http://host:port, socks5://host:port or direct" />
+            </label>
           </div>
+          <div class="small sub-langs">Subtitles inside videos <span class="muted">(tick the languages you want; a video gets the ones it has)</span>
+            <div id="subLangsBox" class="lang-box"></div>
+          </div>
+          <label class="check small"><input type="checkbox" id="embedChapters" checked />
+            <span>Keep chapter marks inside videos</span>
+          </label>
+          <label class="check small"><input type="checkbox" id="embedCover" />
+            <span>Put the thumbnail inside videos and music as cover art</span>
+          </label>
           <label class="check small"><input type="checkbox" id="loginFastSites" />
             <span>Use my Chrome login for fast file downloads on any website <span class="muted">(asks permission once)</span></span>
           </label>
@@ -118,6 +130,9 @@
           <button id="pauseAll" class="link">Pause all</button>
           <button id="resumeAll" class="link">Resume all</button>
           <button id="clearDone" class="link">Clear finished</button>
+          <button id="exportList" class="link" title="Save the list of links to a file">Export list</button>
+          <button id="importList" class="link" title="Add links from an exported list or a text file of links">Import list</button>
+          <input id="importFile" type="file" accept=".json,.txt,.csv,application/json,text/plain" hidden />
         </div>
       </div>
       <ul id="list" class="list"></ul>

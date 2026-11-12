@@ -8,6 +8,77 @@ struct DaemonInfo: Decodable {
     let version: String
 }
 
+// The manager page is a web page. A bare web view ignores its pop-up messages, questions,
+// file pickers and "save this file" links, so they are shown here as normal Mac dialogs.
+extension AppDelegate: WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let a = NSAlert()
+        a.messageText = "AnySave"
+        a.informativeText = message
+        a.addButton(withTitle: "OK")
+        a.runModal()
+        completionHandler()
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert()
+        a.messageText = "AnySave"
+        a.informativeText = message
+        a.addButton(withTitle: "OK")
+        a.addButton(withTitle: "Cancel")
+        completionHandler(a.runModal() == .alertFirstButtonReturn)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let a = NSAlert()
+        a.messageText = "AnySave"
+        a.informativeText = prompt
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 440, height: 24))
+        field.stringValue = defaultText ?? ""
+        field.usesSingleLineMode = true
+        a.accessoryView = field
+        a.addButton(withTitle: "OK")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = field
+        completionHandler(a.runModal() == .alertFirstButtonReturn ? field.stringValue : nil)
+    }
+
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        completionHandler(panel.runModal() == .OK ? panel.urls : nil)
+    }
+
+    // A link the page wants saved (Export list) becomes a download with a Save dialog.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,
+                  completionHandler: @escaping (URL?) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            try? FileManager.default.removeItem(at: url) // the user already agreed to replace it
+            completionHandler(url)
+        } else {
+            completionHandler(nil)
+        }
+    }
+}
+
 // BARICON-BEGIN
 /// Draws the menu-bar icon: the AnySave logo; a progress ring around it while downloading
 /// (with a bright arc chasing round while a download is still starting); a green tick badge
@@ -399,6 +470,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let cfg = WKWebViewConfiguration()
             let wv = WKWebView(frame: rect, configuration: cfg)
             wv.autoresizingMask = [.width, .height]
+            // Lets the page show messages, ask questions, pick a file and save a file
+            // (checksum check, Import list, Export list). See the extension below.
+            wv.uiDelegate = self
+            wv.navigationDelegate = self
             w.contentView = wv
             if let u = URL(string: "http://127.0.0.1:\(info.port)/?token=\(info.token)") {
                 wv.load(URLRequest(url: u))

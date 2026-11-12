@@ -7,7 +7,9 @@ extension + Android app**. The extension works alone; extension + app together u
 Status: **Phases 0–3 are built, with gaps.** They were first tested for real on 13 November 2026 (until then only
 by automated tests); see HANDOFF.md §2a for what was verified and fixed. Not built yet although listed below:
 scheduler, named queues, site crawler, after-done sleep/shut down/quit, extension notifications.
-Phase 4 has started with its quick pieces.
+Phase 4 has started: subtitles / chapters / cover art, checksum check, proxy, import/export and the `anysave <link>`
+command are done on desktop (HANDOFF.md §2a). Still open in phase 4: FTP, synchronization, Defender scan, smart
+file names, offline AI, phone ↔ computer, Firefox, the same features on Android, Bangla UI.
 
 ---
 
