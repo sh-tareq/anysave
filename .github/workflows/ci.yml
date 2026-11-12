@@ -1,0 +1,159 @@
+name: AnySave CI
+
+on:
+  push:
+    branches: [ main, "phase-*" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Linux: Go unit & race tests (engine, torture server, updater) + Android
+  # ---------------------------------------------------------------------------
+  linux-and-android:
+    name: Linux (Go Race Tests + Android Release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: host-go/go.mod
+
+      - name: Go vet (Linux, macOS, Windows targets) & race tests
+        working-directory: host-go
+        run: |
+          go vet ./...
+          GOOS=darwin GOARCH=arm64 go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+          go test -race -v ./...
+
+      - name: Set up JDK 17 for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Build Android Release APK (R8) & Unit Tests
+        working-directory: android
+        run: |
+          ./gradlew testReleaseUnitTest assembleRelease --no-daemon
+          ls -lh app/build/outputs/apk/release/
+
+  # ---------------------------------------------------------------------------
+  # 2. Windows: Real install.ps1 test, registry check, busy check, helper E2E
+  # ---------------------------------------------------------------------------
+  windows-installer-and-helper:
+    name: Windows (Real Installer + Helper E2E)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: host-go/go.mod
+
+      - name: Build Windows helper & run unit tests
+        working-directory: host-go
+        shell: pwsh
+        run: |
+          go vet ./...
+          go test -v ./...
+          New-Item -ItemType Directory -Force -Path ../dist/AnySave-windows/helper | Out-Null
+          go build -trimpath -ldflags "-s -w" -o ../dist/AnySave-windows/helper/vidgrab-host.exe .
+          Copy-Item -Recurse ../extension ../dist/AnySave-windows/extension
+          Copy-Item ../installers/windows/install.ps1 ../dist/AnySave-windows/install.ps1
+          Copy-Item "../installers/windows/Install AnySave.bat" "../dist/AnySave-windows/Install AnySave.bat"
+
+      - name: Run Windows install.ps1 for real & verify installation
+        shell: pwsh
+        env:
+          ANYSAVE_NO_OPEN: "1"
+        run: |
+          & ./dist/AnySave-windows/install.ps1
+          $App = Join-Path $env:LOCALAPPDATA 'AnySave'
+          $Bin = Join-Path $App 'bin'
+          $Ext = Join-Path $env:USERPROFILE 'AnySave\extension'
+
+          foreach ($f in @(
+            (Join-Path $App 'vidgrab-host.exe'),
+            (Join-Path $App 'com.vidgrab.host.json'),
+            (Join-Path $Bin 'yt-dlp.exe'),
+            (Join-Path $Bin 'ffmpeg.exe'),
+            (Join-Path $Bin 'deno.exe'),
+            (Join-Path $Ext 'manifest.json')
+          )) {
+            if (-not (Test-Path $f)) { throw "Missing installed file: $f" }
+          }
+
+          # Verify registry keys for Chrome, Edge, Brave, Chromium
+          foreach ($r in @(
+            'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.vidgrab.host',
+            'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.vidgrab.host',
+            'HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.vidgrab.host',
+            'HKCU:\Software\Chromium\NativeMessagingHosts\com.vidgrab.host'
+          )) {
+            $val = (Get-ItemProperty -Path $r).'(default)'
+            if ($val -ne (Join-Path $App 'com.vidgrab.host.json')) {
+              throw "Registry mismatch at $r : $val"
+            }
+          }
+
+      - name: Run installed Windows helper E2E test (including live download, cancel & busy check)
+        working-directory: host-go
+        shell: pwsh
+        run: |
+          $HostExe = Join-Path $env:LOCALAPPDATA 'AnySave\vidgrab-host.exe'
+          go run ./cmd/test-helper -bin $HostExe -live
+
+          # Test the installer's "busy" guard while a helper process is running
+          $p = Start-Process -FilePath $HostExe -PassThru -WindowStyle Hidden
+          try {
+            $out = & pwsh -NoProfile -File ../dist/AnySave-windows/install.ps1 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0 -or $out -notmatch 'AnySave is busy') {
+              throw "Expected installer to refuse when vidgrab-host.exe is running, got exit=$LASTEXITCODE out=$out"
+            }
+            Write-Host "[OK] Windows installer busy check refused cleanly while vidgrab-host.exe was running"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+
+  # ---------------------------------------------------------------------------
+  # 3. macOS: Build universal zip, run install-mac.sh, helper E2E
+  # ---------------------------------------------------------------------------
+  macos-installer-and-helper:
+    name: macOS (Real Installer + Helper E2E)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: host-go/go.mod
+
+      - name: Build Desktop distribution via scripts/build.sh
+        run: |
+          ./scripts/build.sh
+          ls -lh dist/
+
+      - name: Unzip & run Install AnySave.command for real
+        env:
+          ANYSAVE_NO_OPEN: "1"
+        run: |
+          TMP_DIR="$(mktemp -d)"
+          unzip -q dist/AnySave-Desktop-Mac-Windows.zip -d "$TMP_DIR"
+          bash "$TMP_DIR/AnySave-Desktop/AnySave-mac/Install AnySave.command"
+          APP="$HOME/Library/Application Support/AnySave"
+          test -x "$APP/vidgrab-host"
+          test -x "$APP/bin/yt-dlp_app/yt-dlp_macos"
+          test -x "$APP/bin/ffmpeg"
+          test -x "$APP/bin/deno"
+          test -f "$HOME/AnySave/extension/manifest.json"
+          cd host-go && go run ./cmd/test-helper -bin "$APP/vidgrab-host" -live

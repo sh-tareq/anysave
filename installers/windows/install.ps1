@@ -174,4 +174,6 @@ if ($Upgraded) {
   Write-Host 'Updated: just click the reload button on the extension in chrome://extensions.' -ForegroundColor Green
   Write-Host "(Optional: remove it and 'Load unpacked' from $ExtDest, then delete $env:USERPROFILE\VidGrab.)"
 }
-Start-Process explorer.exe (Split-Path $ExtDest)
+if ($env:ANYSAVE_NO_OPEN -ne '1') {
+  Start-Process explorer.exe (Split-Path $ExtDest)
+}

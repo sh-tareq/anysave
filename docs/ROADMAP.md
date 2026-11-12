@@ -95,11 +95,13 @@ Skip: dial-up hang-up, MMS, skins (we have light/dark), system-wide capture in n
 an extension; common antivirus trigger).
 Never use IDM's name or look in the product.
 
-## 4. Decisions to confirm with the owner before starting
+## 4. Confirmed architecture & product decisions
 
-1. App toolkit: Wails v2 (recommended) vs Compose Multiplatform vs Tauri.
-2. Order: engine (phase 1) before the desktop app (phase 2) (recommended), or the reverse.
-3. Code signing now or at public app launch (recommended: before public launch; unsigned betas are fine).
-4. Default "who handles downloads" = AnySave with fallback (recommended).
-5. Ask for the optional all-sites permission when fast mode for login-protected sites is switched on (recommended).
-6. Free forever vs a later "Pro" tier (affects architecture for sync/cloud features).
+Confirmed with the owner (12 November 2026) — industry-standard defaults locked in:
+
+1. **App toolkit:** **Wails v2** (Go backend + shared HTML/CSS/JS manager UI).
+2. **Build order:** **Engine first (Phase 1), then Desktop App (Phase 2)**.
+3. **Code signing:** **Sign before public desktop app launch in Phase 2** (unsigned builds + Ed25519 signed update manifests until then).
+4. **Default "Who handles downloads":** **AnySave (fast engine) with automatic silent fallback to Chrome** (plus `Alt`-click to bypass AnySave, `Ctrl`-click to force AnySave).
+5. **All-sites cookie permission (`<all_urls>`):** **Optional permission (`optional_host_permissions`)**, requested only when the user turns on fast mode for login-protected sites.
+6. **Pricing & architecture:** **100% Free & Open Source forever** (local-first, zero telemetry, no accounts or license servers).

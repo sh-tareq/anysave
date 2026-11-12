@@ -519,6 +519,10 @@ $("cookies").addEventListener("change", async () => {
   loadInfo();
 });
 
+$("dlHandler")?.addEventListener("change", () => {
+  chrome.runtime.sendMessage({ type: "setSettings", patch: { downloadHandler: $("dlHandler").value } });
+});
+
 $("clear").addEventListener("click", () => chrome.runtime.sendMessage({ type: "clear" }));
 $("openManager").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager" }); window.close(); });
 $("openConvert").addEventListener("click", () => { chrome.runtime.sendMessage({ type: "openManager", tab: "convert" }); window.close(); });
@@ -562,12 +566,21 @@ function renderJobs(jobs) {
     if (j.status === "downloading") line = `${pct.toFixed(0)}% · ${j.speed || ""} · ETA ${j.eta || "?"}`;
     else if (j.status === "done") line = '<span class="ok">✓ Saved</span>';
     else if (j.status === "error") line = `<span class="err">${escapeHtml(j.error || "Failed")}</span>`;
+    else if (j.status === "ask") line = "Download with:";
     else line = escapeHtml({ queued: "Queued", starting: "Starting…", paused: `Paused · ${pct.toFixed(0)}%`, cancelled: "Cancelled" }[j.status] || j.status);
     li.innerHTML = `<div class="name">${escapeHtml(j.title || j.url)}</div>
       ${["downloading", "starting", "merging", "converting", "queued", "paused"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
       <div class="row small muted"><span>${line}</span><span class="act"></span></div>`;
     const act = li.querySelector(".act");
-    if (j.status === "done" && (j.file || j.downloadId)) {
+    if (j.status === "ask") {
+      const fast = Object.assign(document.createElement("button"), { className: "link small", textContent: "AnySave (Fast)" });
+      fast.onclick = () => chrome.runtime.sendMessage({ type: "chooseHandler", id: j.id, handler: "anysave" });
+      const chr = Object.assign(document.createElement("button"), { className: "link small", textContent: "Chrome" });
+      chr.onclick = () => chrome.runtime.sendMessage({ type: "chooseHandler", id: j.id, handler: "chrome" });
+      const cancelBtn = Object.assign(document.createElement("button"), { className: "link small", textContent: "Cancel" });
+      cancelBtn.onclick = () => chrome.runtime.sendMessage({ type: "cancel", id: j.id });
+      act.append(fast, chr, cancelBtn);
+    } else if (j.status === "done" && (j.file || j.downloadId)) {
       const open = Object.assign(document.createElement("button"), { className: "link small", textContent: "Open" });
       open.onclick = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
       const show = Object.assign(document.createElement("button"), { className: "link small", textContent: "Show in folder" });
@@ -589,6 +602,9 @@ function renderJobs(jobs) {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.settings && $("dlHandler")) {
+    $("dlHandler").value = changes.settings.newValue?.downloadHandler || "anysave";
+  }
   if (area === "local" && changes.jobs) {
     renderJobs(changes.jobs.newValue);
     if (adProgress) adProgress(changes.jobs.newValue);
@@ -625,8 +641,10 @@ async function ensureAgreed() {
 
 (async () => {
   await ensureAgreed();
-  $("cookies").checked = !!(await chrome.storage.local.get("useCookies")).useCookies;
-  renderJobs((await chrome.storage.local.get("jobs")).jobs);
+  const stored = await chrome.storage.local.get(["useCookies", "jobs", "settings"]);
+  $("cookies").checked = !!stored.useCookies;
+  if ($("dlHandler")) $("dlHandler").value = stored.settings?.downloadHandler || "anysave";
+  renderJobs(stored.jobs);
   chrome.runtime.sendMessage({ type: "seen" }); // clears the ✓ on the toolbar icon
   loadInfo();
 })();

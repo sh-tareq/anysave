@@ -3,15 +3,25 @@
 package main
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
+
+// userDownloadsDir returns the user's Downloads folder on Unix/macOS.
+func userDownloadsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Downloads")
+}
 
 // Run yt-dlp in its own process group so cancel can stop ffmpeg too.
 func setProcAttrs(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
+
+func attachChildJob(cmd *exec.Cmd) {}
 
 func killTree(cmd *exec.Cmd) {
 	if cmd.Process != nil {

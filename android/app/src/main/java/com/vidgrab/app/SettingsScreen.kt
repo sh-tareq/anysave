@@ -1,7 +1,10 @@
 package com.vidgrab.app
 
 import android.app.StatusBarManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.Context
 import android.graphics.drawable.Icon as AndroidIcon
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -150,6 +153,27 @@ fun SettingsScreen(vm: MainViewModel) {
             }
         }
         CopyrightNotice(Modifier.padding(horizontal = 4.dp))
+        SettingRow(Icons.Outlined.ContentCopy, "Copy diagnostics",
+            "App & yt-dlp versions, device info, recent errors (no personal links)", null) {
+            val failed = Downloads.jobs.value.filter { it.status == JobStatus.ERROR }.take(5)
+                .joinToString("\n") { "  - [${it.kind}] ${it.site ?: ""}: ${it.error ?: "unknown"}" }
+            val text = buildString {
+                appendLine("AnySave Android Diagnostics")
+                appendLine("===========================")
+                appendLine("App:       $appVersion")
+                appendLine("yt-dlp:    ${vm.ytdlpVersion ?: "unknown"}")
+                appendLine("Android:   ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+                appendLine("Device:    ${Build.MANUFACTURER} ${Build.MODEL} (${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"})")
+                appendLine("Logged in: ${if (loggedIn.isEmpty()) "none" else loggedIn.joinToString(", ")}")
+                if (failed.isNotEmpty()) {
+                    appendLine("\nRecent failed jobs:")
+                    appendLine(failed)
+                }
+            }
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("AnySave diagnostics", text))
+            vm.messages.tryEmit("Diagnostics copied to clipboard")
+        }
         SettingRow(Icons.Outlined.Gavel, "Legal & disclaimer",
             "Copyright, your responsibility, privacy, open-source licences", null) { showLegal = true }
     }

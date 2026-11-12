@@ -134,6 +134,7 @@ function row(j) {
   const running = ACTIVE.includes(j.status);
   const paused = j.status === "paused";
   const queued = j.status === "queued";
+  const ask = j.status === "ask";
   let line;
   if (running) {
     const prog = j.kind === "file" && j.totalBytes > 0 ? `${size(j.doneBytes)} of ${size(j.totalBytes)}` : "";
@@ -141,6 +142,7 @@ function row(j) {
       : [`${pct.toFixed(0)}%`, prog, j.speed, j.eta && `ETA ${j.eta}`].filter(Boolean).join(" · ");
   } else if (paused) line = ["Paused", `${pct.toFixed(0)}%`].join(" · ");
   else if (queued) line = "Queued · starts when a download finishes";
+  else if (ask) line = ["Choose who downloads this file", size(j.totalBytes), j.site].filter(Boolean).join(" · ");
   else if (j.status === "done") line = ["Done", j.qualityLabel, size(j.totalBytes), j.site, ago(j.finishedAt || j.createdAt)].filter(Boolean).join(" · ");
   else if (j.status === "error") line = `<span class="err">${esc(j.error || "Failed")}</span>`;
   else line = "Cancelled";
@@ -160,6 +162,14 @@ function row(j) {
     b.innerHTML = svg(icon, 18);
     b.onclick = fn; btns.appendChild(b);
   };
+  if (ask) {
+    const fastBtn = Object.assign(document.createElement("button"), { className: "ask-btn fast", textContent: "AnySave (Fast)" });
+    fastBtn.onclick = () => send({ type: "chooseHandler", id: j.id, handler: "anysave" });
+    const chrBtn = Object.assign(document.createElement("button"), { className: "ask-btn", textContent: "Chrome" });
+    chrBtn.onclick = () => send({ type: "chooseHandler", id: j.id, handler: "chrome" });
+    btns.append(fastBtn, chrBtn);
+    add("close", "Cancel", () => send({ type: "cancel", id: j.id }));
+  }
   if (running && j.kind !== "convert") add("pause", "Pause", () => send({ type: "pause", id: j.id }));
   if (paused) add("play", "Resume", () => send({ type: "resume", id: j.id }));
   if (queued) add("pause", "Pause", () => send({ type: "pause", id: j.id }));
@@ -208,15 +218,21 @@ $("addUrl").addEventListener("input", () => {
   const n = linksIn($("addUrl").value).length;
   $("addForm").querySelector("button[type=submit], button:not([type])").textContent = n > 1 ? `Download ${n} links` : "Download";
 });
+let submitForceHandler = undefined;
+$("addForm").querySelector("button[type=submit], button:not([type])").addEventListener("click", (e) => {
+  submitForceHandler = e.altKey ? "chrome" : (e.ctrlKey || e.metaKey) ? "anysave" : undefined;
+});
 $("addForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const forceHandler = submitForceHandler;
+  submitForceHandler = undefined;
   const raw = $("addUrl").value.trim();
   const links = linksIn(raw);
   const list = links.length ? links : [raw];
   const btn = e.submitter; btn.disabled = true; btn.textContent = list.length > 1 ? `Adding ${list.length}…` : "Checking…";
   let ok = 0, lastErr = "";
   for (const url of list) {
-    const res = await send({ type: "addLink", url });
+    const res = await send({ type: "addLink", url, forceHandler });
     if (res?.ok) ok++; else lastErr = res?.error || "Couldn't add this link";
   }
   btn.disabled = false; btn.textContent = "Download";
@@ -328,6 +344,9 @@ $("convertBtn").onclick = async () => {
 
 // ---------- start ----------
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.settings) {
+    applySettingsUI(changes.settings.newValue);
+  }
   if (area === "local" && changes.jobs) {
     jobs = changes.jobs.newValue || {};
     render();
@@ -343,10 +362,53 @@ function markSeen() {
 }
 document.addEventListener("visibilitychange", markSeen);
 $("captureAll").addEventListener("change", (e) => send({ type: "setCapture", on: e.target.checked }));
+$("copyDiag")?.addEventListener("click", async () => {
+  const btn = $("copyDiag");
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Gathering…";
+  const res = await send({ type: "diagnostics" });
+  try {
+    await navigator.clipboard.writeText(res?.text || "No diagnostics available");
+    btn.textContent = "Copied ✓";
+  } catch {
+    btn.textContent = "Couldn't copy";
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 2200);
+});
+
+function applySettingsUI(settings = {}) {
+  $("captureAll").checked = settings.captureAll !== false;
+  const h = settings.downloadHandler || "anysave";
+  document.querySelectorAll("#handlerChips .chip").forEach((c) => c.classList.toggle("active", c.dataset.h === h));
+  if ($("minSizeMb")) $("minSizeMb").value = String(settings.minSizeMb || 0);
+  if ($("fileTypes") && document.activeElement !== $("fileTypes")) $("fileTypes").value = settings.fileTypes || "";
+  if ($("excludedSites") && document.activeElement !== $("excludedSites")) $("excludedSites").value = settings.excludedSites || "";
+  if ($("loginFastSites")) $("loginFastSites").checked = !!settings.loginFastSites;
+}
+
+document.querySelectorAll("#handlerChips .chip").forEach((c) => c.addEventListener("click", () => {
+  document.querySelectorAll("#handlerChips .chip").forEach((x) => x.classList.toggle("active", x === c));
+  send({ type: "setSettings", patch: { downloadHandler: c.dataset.h } });
+}));
+$("minSizeMb")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { minSizeMb: Number(e.target.value || 0) } }));
+$("fileTypes")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { fileTypes: e.target.value.trim() } }));
+$("excludedSites")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { excludedSites: e.target.value.trim() } }));
+$("loginFastSites")?.addEventListener("change", async (e) => {
+  if (e.target.checked) {
+    try {
+      const granted = await chrome.permissions.request({ origins: ["*://*/*"] });
+      if (!granted) { e.target.checked = false; return; }
+    } catch {
+      e.target.checked = false; return;
+    }
+  }
+  send({ type: "setSettings", patch: { loginFastSites: e.target.checked } });
+});
 
 (async () => {
   const { settings = {} } = await chrome.storage.local.get("settings");
-  $("captureAll").checked = settings.captureAll !== false;
+  applySettingsUI(settings);
   jobs = (await chrome.storage.local.get("jobs")).jobs || {};
   render();
   markSeen();

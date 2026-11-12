@@ -34,12 +34,17 @@ import (
 	"time"
 )
 
-const h264Sort = "res,fps,vcodec:h264,acodec:m4a"
+const (
+	h264Sort      = "res,fps,vcodec:h264,acodec:m4a"
+	helperVersion = "1.0.6"
+	maxLogBytes   = 2 * 1024 * 1024 // rotate vidgrab.log at 2 MB
+)
 
 var (
 	appDir      string // folder holding this executable
 	downloadDir string
 	writeMu     sync.Mutex
+	logMu       sync.Mutex
 	stdin       = bufio.NewReader(os.Stdin)
 )
 
@@ -67,7 +72,13 @@ func send(v any) {
 }
 
 func logf(format string, a ...any) {
-	f, err := os.OpenFile(filepath.Join(appDir, "vidgrab.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	logMu.Lock()
+	defer logMu.Unlock()
+	p := filepath.Join(appDir, "vidgrab.log")
+	if st, err := os.Stat(p); err == nil && st.Size() >= maxLogBytes {
+		_ = os.Rename(p, p+".1")
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -321,6 +332,7 @@ func actionInfo(msg map[string]any) map[string]any {
 	if err := cmd.Start(); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
+	attachChildJob(cmd)
 	// A stuck lookup would leave the popup spinning forever.
 	var timedOut atomic.Bool
 	timer := time.AfterFunc(90*time.Second, func() { timedOut.Store(true); killTree(cmd) })
@@ -467,6 +479,7 @@ func actionDownload(msg map[string]any) {
 		fail(err.Error())
 		return
 	}
+	attachChildJob(cmd)
 
 	// {"action":"cancel"} stops and deletes the unfinished pieces; {"action":"pause"} stops
 	// and keeps them. If Chrome just closes our stdin (browser quit, extension reloaded), that
@@ -610,6 +623,7 @@ func actionPlaylist(msg map[string]any) map[string]any {
 	if err := cmd.Start(); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
+	attachChildJob(cmd)
 	var timedOut atomic.Bool
 	timer := time.AfterFunc(120*time.Second, func() { timedOut.Store(true); killTree(cmd) })
 	err = cmd.Wait()
@@ -688,6 +702,87 @@ func actionReveal(msg map[string]any) map[string]any {
 	return map[string]any{"ok": true}
 }
 
+// ---------- diagnostics ----------
+
+func toolVersion(path string, args ...string) string {
+	if path == "" {
+		return "not found"
+	}
+	c := command(path, args...)
+	var out strings.Builder
+	c.Stdout = &out
+	c.Stderr = &out
+	if err := c.Start(); err != nil {
+		return "found (" + filepath.Base(path) + ")"
+	}
+	attachChildJob(c)
+	timer := time.AfterFunc(4*time.Second, func() { killTree(c) })
+	_ = c.Wait()
+	timer.Stop()
+	line := strings.TrimSpace(strings.Split(strings.ReplaceAll(out.String(), "\r\n", "\n"), "\n")[0])
+	if line == "" {
+		return "found (" + filepath.Base(path) + ")"
+	}
+	return line
+}
+
+func scrubPaths(s string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		s = strings.ReplaceAll(s, home, "~")
+	}
+	return s
+}
+
+func readLogTail(maxLines int) string {
+	p := filepath.Join(appDir, "vidgrab.log")
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		return "(no log entries yet)"
+	}
+	if len(data) > 16384 {
+		data = data[len(data)-16384:]
+	}
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(data), "\r\n", "\n")), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return scrubPaths(strings.Join(lines, "\n"))
+}
+
+func actionDiagnostics(msg map[string]any) map[string]any {
+	yt := findTool("yt-dlp")
+	ff := findTool("ffmpeg")
+	dn := findTool("deno")
+	ytVer := toolVersion(yt, "--version")
+	ffVer := toolVersion(ff, "-version")
+	dnVer := toolVersion(dn, "--version")
+	extVer := str(msg, "extensionVersion")
+	if extVer == "" {
+		extVer = "unknown"
+	}
+	logTail := readLogTail(40)
+	var b strings.Builder
+	fmt.Fprintf(&b, "AnySave Diagnostics\n")
+	fmt.Fprintf(&b, "===================\n")
+	fmt.Fprintf(&b, "Extension: %s\n", extVer)
+	fmt.Fprintf(&b, "Helper:    %s (%s/%s)\n", helperVersion, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&b, "yt-dlp:    %s\n", ytVer)
+	fmt.Fprintf(&b, "ffmpeg:    %s\n", ffVer)
+	fmt.Fprintf(&b, "deno:      %s\n", dnVer)
+	fmt.Fprintf(&b, "Downloads: %s\n", scrubPaths(downloadDir))
+	fmt.Fprintf(&b, "\nRecent log:\n%s\n", logTail)
+	return map[string]any{
+		"ok":            true,
+		"helperVersion": helperVersion,
+		"os":            runtime.GOOS,
+		"arch":          runtime.GOARCH,
+		"ytdlp":         ytVer,
+		"ffmpeg":        ffVer,
+		"deno":          dnVer,
+		"text":          b.String(),
+	}
+}
+
 func main() {
 	if self, err := os.Executable(); err == nil {
 		if real, err := filepath.EvalSymlinks(self); err == nil {
@@ -695,12 +790,17 @@ func main() {
 		}
 		appDir = filepath.Dir(self)
 	}
-	home, _ := os.UserHomeDir()
-	downloadDir = filepath.Join(home, "Downloads", "AnySave")
+	downloadDir = filepath.Join(userDownloadsDir(), "AnySave")
 
 	// `vidgrab-host --check` prints which tools were found (used by installers).
 	if len(os.Args) > 1 && os.Args[1] == "--check" {
-		fmt.Printf("yt-dlp: %s\nffmpeg: %s\ndeno: %s\n", findTool("yt-dlp"), findTool("ffmpeg"), findTool("deno"))
+		fmt.Printf("helper: %s (%s/%s)\nyt-dlp: %s\nffmpeg: %s\ndeno: %s\n",
+			helperVersion, runtime.GOOS, runtime.GOARCH,
+			findTool("yt-dlp"), findTool("ffmpeg"), findTool("deno"))
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Println(helperVersion)
 		return
 	}
 
@@ -712,7 +812,7 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			logf("panic: %v", r)
-			if action == "download" {
+			if action == "download" || action == "fastDownload" || action == "convert" {
 				send(map[string]any{"type": "error", "message": fmt.Sprint(r)})
 			} else {
 				send(map[string]any{"ok": false, "error": fmt.Sprint(r)})
@@ -724,6 +824,8 @@ func main() {
 		send(actionInfo(msg))
 	case "download":
 		actionDownload(msg)
+	case "fastDownload":
+		actionFastDownload(msg)
 	case "reveal":
 		send(actionReveal(msg))
 	case "open":
@@ -738,6 +840,8 @@ func main() {
 		send(actionFileInfo(msg))
 	case "convert":
 		actionConvert(msg)
+	case "diagnostics":
+		send(actionDiagnostics(msg))
 	default:
 		send(map[string]any{"ok": false, "error": "Unknown action: " + action})
 	}

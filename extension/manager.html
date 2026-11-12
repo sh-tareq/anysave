@@ -30,6 +30,44 @@
         <span><b>Catch downloads from websites</b><br /><span class="muted small">When you click a site's own download button, AnySave manages it and saves it into Downloads/AnySave. Progress shows on the AnySave toolbar icon; pin it so Chrome's own download bubble can stay hidden.</span></span>
       </label>
 
+      <div class="engine-bar">
+        <div class="engine-top">
+          <div>
+            <b>Who handles file downloads:</b>
+            <span class="muted small">Multi-connection engine with automatic fallback to Chrome</span>
+          </div>
+          <div class="chips" id="handlerChips">
+            <button type="button" class="chip active" data-h="anysave">AnySave (Fast)</button>
+            <button type="button" class="chip" data-h="chrome">Chrome</button>
+            <button type="button" class="chip" data-h="ask">Ask each time</button>
+          </div>
+        </div>
+        <details class="engine-rules">
+          <summary class="small muted">Download rules &amp; shortcuts (minimum size, file types, sites, login)</summary>
+          <div class="rules-grid">
+            <label class="small">Minimum size for website catch
+              <select id="minSizeMb">
+                <option value="0">All sizes</option>
+                <option value="1">1 MB or larger</option>
+                <option value="5">5 MB or larger</option>
+                <option value="10">10 MB or larger</option>
+                <option value="50">50 MB or larger</option>
+              </select>
+            </label>
+            <label class="small">Only these file types <span class="muted">(blank = all)</span>
+              <input id="fileTypes" type="text" placeholder="e.g. zip, iso, mp4, pdf" />
+            </label>
+            <label class="small">Sites to leave to Chrome
+              <input id="excludedSites" type="text" placeholder="e.g. drive.google.com, dropbox.com" />
+            </label>
+          </div>
+          <label class="check small"><input type="checkbox" id="loginFastSites" />
+            <span>Use my Chrome login for fast file downloads on any website <span class="muted">(asks permission once)</span></span>
+          </label>
+          <p class="hint">Shortcuts: hold <b>Alt</b> while clicking a link or Download button to use Chrome for that one download, or hold <b>Ctrl</b> to force AnySave.</p>
+        </details>
+      </div>
+
       <div class="toolbar">
         <div class="chips" id="filters">
           <button class="chip active" data-f="all">All</button>
@@ -111,7 +149,7 @@
     </section>
   </main>
 
-  <footer><img src="icons/author.png" alt="" />Made by <b>Shahidul H Tareq</b> · <a href="legal.html" target="_blank">Legal</a></footer>
+  <footer><img src="icons/author.png" alt="" />Made by <b>Shahidul H Tareq</b> · <a href="legal.html" target="_blank">Legal</a> · <button id="copyDiag" class="link small" type="button">Copy diagnostics</button></footer>
   <script src="manager.js"></script>
 </body>
 </html>

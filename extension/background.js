@@ -36,7 +36,7 @@ function newId() { return String(Date.now()) + Math.floor(Math.random() * 1000);
 // ---------- helpers ----------
 
 const VIDEO_SITES = /(^|\.)(youtube\.com|youtu\.be|facebook\.com|fb\.watch|instagram\.com|tiktok\.com|vimeo\.com)$/;
-const FILE_EXT = /\.(mp4|mkv|webm|mov|avi|m4v|3gp|flv|wmv|ts|mpe?g|mp3|m4a|aac|wav|flac|ogg|opus|wma|jpe?g|png|gif|webp|heic|bmp|svg|tiff?|pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg|apk|exe|msi|pkg|deb|rpm|appimage)$/i;
+const FILE_EXT = /\.(mp4|mkv|webm|mov|avi|m4v|3gp|flv|wmv|ts|mpe?g|mp3|m4a|aac|wav|flac|ogg|opus|wma|jpe?g|png|gif|webp|heic|bmp|svg|tiff?|pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg|apk|exe|msi|pkg|deb|rpm|appimage|bin)$/i;
 
 function extOf(name) {
   const m = String(name || "").split(/[?#]/)[0].match(/\.([a-z0-9]{1,8})$/i);
@@ -90,19 +90,28 @@ const COOKIE_DOMAINS = {
   "instagram.com": ["instagram.com"], "tiktok.com": ["tiktok.com"], "vimeo.com": ["vimeo.com"],
 };
 async function cookiesFor(url) {
-  const base = new URL(url).hostname.split(".").slice(-2).join(".");
-  const domains = COOKIE_DOMAINS[base] || [];
+  const seen = new Set();
   const lines = ["# Netscape HTTP Cookie File"];
-  for (const domain of domains) {
+  const addCookie = (c) => {
+    const key = `${c.domain}|${c.path}|${c.name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const d = c.hostOnly ? c.domain : (c.domain.startsWith(".") ? c.domain : "." + c.domain);
+    lines.push([(c.httpOnly ? "#HttpOnly_" : "") + d, c.hostOnly ? "FALSE" : "TRUE", c.path,
+      c.secure ? "TRUE" : "FALSE", Math.floor(c.expirationDate || 0), c.name, c.value].join("\t"));
+  };
+  try {
+    const base = new URL(url).hostname.split(".").slice(-2).join(".");
+    for (const domain of COOKIE_DOMAINS[base] || []) {
+      try {
+        for (const c of await chrome.cookies.getAll({ domain })) addCookie(c);
+      } catch {}
+    }
     try {
-      for (const c of await chrome.cookies.getAll({ domain })) {
-        const d = c.hostOnly ? c.domain : (c.domain.startsWith(".") ? c.domain : "." + c.domain);
-        lines.push([(c.httpOnly ? "#HttpOnly_" : "") + d, c.hostOnly ? "FALSE" : "TRUE", c.path,
-          c.secure ? "TRUE" : "FALSE", Math.floor(c.expirationDate || 0), c.name, c.value].join("\t"));
-      }
+      for (const c of await chrome.cookies.getAll({ url })) addCookie(c);
     } catch {}
-  }
-  return lines.join("\n") + "\n";
+  } catch {}
+  return lines.length > 1 ? lines.join("\n") + "\n" : "";
 }
 
 // ---------- helper-backed jobs (video downloads and conversions) ----------
@@ -193,14 +202,60 @@ function specLabel(s) {
     s.removeAudio && "no sound"].filter(Boolean).join(" · ");
 }
 
-// ---------- any file (Chrome's downloader: pause/resume built in) ----------
+// ---------- any file: AnySave fast multi-connection engine or Chrome's downloader ----------
 
-async function startFile({ url, name, title, id }) {
+const DEFAULT_SETTINGS = {
+  captureAll: true,
+  downloadHandler: "anysave", // "anysave" (fast engine + fallback) | "chrome" | "ask"
+  minSizeMb: 0,
+  excludedSites: "",
+  fileTypes: "",
+  loginFastSites: false,
+};
+
+async function getSettings() {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  return { ...DEFAULT_SETTINGS, ...settings };
+}
+
+// Alt-click = Chrome for this download; Ctrl/Cmd-click = force AnySave fast engine.
+let lastClickModifier = null; // { url, altKey, ctrlKey, at }
+function recordClickModifier({ url, altKey, ctrlKey }) {
+  lastClickModifier = { url, altKey: !!altKey, ctrlKey: !!ctrlKey, at: Date.now() };
+}
+function consumeClickModifier(url) {
+  if (!lastClickModifier || Date.now() - lastClickModifier.at > 5000) return null;
+  if (lastClickModifier.url && url && lastClickModifier.url !== url) return null;
+  const mod = lastClickModifier;
+  lastClickModifier = null;
+  return mod.altKey ? "chrome" : mod.ctrlKey ? "anysave" : null;
+}
+
+function isHostExcluded(url, excludedStr) {
+  if (!excludedStr) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    const list = String(excludedStr).toLowerCase().split(/[\s,;]+/).map((s) => s.trim().replace(/^www\./, "")).filter(Boolean);
+    return list.some((d) => host === d || host.endsWith("." + d));
+  } catch { return false; }
+}
+
+function matchesFileTypes(nameOrUrl, typesStr) {
+  if (!typesStr || !String(typesStr).trim()) return true;
+  const e = extOf(nameOrUrl);
+  if (!e) return true;
+  const list = String(typesStr).toLowerCase().split(/[\s,;]+/).map((s) => s.replace(/^\./, "").trim()).filter(Boolean);
+  return !list.length || list.includes(e);
+}
+
+const ownUrls = new Set();
+
+async function startChromeFile({ url, name, title, id, qualityLabel = "Chrome" }) {
   id = id || newId();
   const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
   const folder = categoryOf(fileName, "file");
-  await updateJob(id, { kind: "file", url, title: title || fileName, fileName, site: siteLabel(url),
-    status: "starting", percent: 0, qualityLabel: "File", error: null, downloadId: null, doneBytes: 0, totalBytes: 0 });
+  await updateJob(id, { kind: "file", engine: "chrome", url, title: title || fileName, fileName, site: siteLabel(url),
+    status: "starting", percent: 0, qualityLabel, error: null, downloadId: null, doneBytes: 0, totalBytes: 0 });
   ownUrls.add(url); // so onCreated doesn't adopt it a second time as a "website download"
   try {
     const downloadId = await chrome.downloads.download({
@@ -214,7 +269,133 @@ async function startFile({ url, name, title, id }) {
   setTimeout(() => ownUrls.delete(url), 5000);
   return id;
 }
-const ownUrls = new Set();
+
+async function startFastFile({ url, name, title, id, referrer, sha256 }) {
+  id = id || newId();
+  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const folder = categoryOf(fileName, "file");
+  const settings = await getSettings();
+  const cookies = settings.loginFastSites ? await cookiesFor(url) : "";
+  await updateJob(id, {
+    kind: "file", engine: "fast", url, title: title || fileName, fileName, site: siteLabel(url),
+    status: "starting", percent: 0, qualityLabel: "Fast engine", error: null,
+    downloadId: null, doneBytes: 0, totalBytes: 0, referrer: referrer || "", expectedSha256: sha256 || "",
+  });
+
+  const port = chrome.runtime.connectNative(HOST);
+  ports.set(id, port);
+  let finished = false;
+  let handedOverId = null;
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg.type === "progress") {
+      if (pausing.has(id)) return;
+      const conns = msg.activeConns > 1 ? `Fast · ${msg.activeConns}x` : "Fast engine";
+      updateJob(id, {
+        status: "downloading", percent: msg.percent || 0,
+        doneBytes: msg.doneBytes || 0, totalBytes: msg.totalBytes || 0,
+        speed: msg.speed || "", eta: msg.eta || "?", qualityLabel: conns,
+      });
+    } else if (msg.type === "handover" && msg.url) {
+      // Offer the verified file from 127.0.0.1:<port>/<one-time-token> to Chrome so it appears
+      // in Chrome's native download list (drag/open/show work natively).
+      ownUrls.add(msg.url);
+      try {
+        const dlName = safeFile(msg.fileName || fileName);
+        const dlFolder = categoryOf(dlName, "file");
+        handedOverId = await chrome.downloads.download({
+          url: msg.url, filename: `AnySave/${dlFolder}/${dlName}`, conflictAction: "uniquify",
+        });
+        await updateJob(id, { downloadId: handedOverId, fileName: dlName });
+      } catch {}
+      setTimeout(() => ownUrls.delete(msg.url), 10000);
+    } else if (msg.type === "fallback") {
+      finished = true;
+      ports.delete(id);
+      try { port.disconnect(); } catch {}
+      await startChromeFile({ url, name: fileName, title, id, qualityLabel: "Chrome (auto-fallback)" });
+    } else if (msg.type === "done") {
+      finished = true;
+      const jobs = await getJobs();
+      const cur = jobs[id] || {};
+      let finalFile = msg.file || cur.file;
+      let finalName = msg.fileName || cur.fileName || fileName;
+      const dlId = handedOverId || cur.downloadId;
+      if (dlId) {
+        const [d] = await chrome.downloads.search({ id: dlId });
+        if (d?.filename) {
+          finalFile = d.filename;
+          finalName = d.filename.split(/[\\/]/).pop();
+        }
+      }
+      const label = msg.multiConn && msg.peakConns > 1 ? `Fast (${msg.peakConns}x)` : "Fast engine";
+      await updateJob(id, {
+        status: "done", percent: 100, file: finalFile, fileName: finalName,
+        totalBytes: msg.totalBytes || cur.totalBytes || 0, doneBytes: msg.totalBytes || cur.totalBytes || 0,
+        sha256: msg.sha256 || "", qualityLabel: label, speed: "", eta: "", finishedAt: Date.now(),
+      });
+    } else if (msg.type === "paused") {
+      finished = true;
+      await updateJob(id, { status: "paused", speed: "", eta: "" });
+    } else if (msg.type === "error") {
+      finished = true;
+      await updateJob(id, { status: msg.message === "Cancelled" ? "cancelled" : "error", error: msg.message, speed: "", eta: "" });
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    ports.delete(id);
+    pausing.delete(id);
+    if (!finished) {
+      const err = chrome.runtime.lastError?.message;
+      // Extension works standalone: if the helper isn't installed, fall back to Chrome's downloader automatically.
+      if (helperMissing(err)) {
+        startChromeFile({ url, name: fileName, title, id, qualityLabel: "Chrome" });
+        return;
+      }
+      getJobs().then((jobs) => {
+        if (["paused", "cancelled", "done"].includes(jobs[id]?.status)) return;
+        updateJob(id, { status: err ? "error" : "cancelled", speed: "", eta: "",
+          error: err ? "The AnySave helper stopped unexpectedly. Try again." : null });
+      });
+    }
+  });
+
+  port.postMessage({
+    action: "fastDownload", job: id, url, fileName, folder,
+    cookies, referrer: referrer || "", sha256: sha256 || "", handover: true,
+  });
+  return id;
+}
+
+async function startFile({ url, name, title, id, forceHandler, referrer, sha256 }) {
+  id = id || newId();
+  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const settings = await getSettings();
+  const clickChoice = consumeClickModifier(url);
+  let handler = forceHandler || clickChoice || settings.downloadHandler || "anysave";
+
+  const isHttp = /^https?:\/\//i.test(url) && !/^https?:\/\/127\.0\.0\.1:\d+\/handover\//i.test(url);
+  if (!isHttp) handler = "chrome";
+  else if (!forceHandler && !clickChoice) {
+    if (isHostExcluded(url, settings.excludedSites) || !matchesFileTypes(fileName || url, settings.fileTypes)) {
+      handler = "chrome";
+    }
+  }
+
+  if (handler === "ask") {
+    await updateJob(id, {
+      kind: "file", url, title: title || fileName, fileName, site: siteLabel(url),
+      status: "ask", percent: 0, qualityLabel: "Choose downloader", error: null,
+      referrer: referrer || "", expectedSha256: sha256 || "",
+    });
+    return id;
+  }
+  if (handler === "chrome") {
+    return startChromeFile({ url, name: fileName, title, id });
+  }
+  return startFastFile({ url, name: fileName, title, id, referrer, sha256 });
+}
 
 let polling = null;
 function pollFiles() {
@@ -273,15 +454,15 @@ function humanEta(s) {
 
 // ---------- add any link: video page or file? ----------
 
-async function addLink(url, title) {
+async function addLink(url, title, forceHandler) {
   let host = "";
   try { host = new URL(url).hostname; } catch { return { ok: false, error: "That isn't a web link." }; }
   if (VIDEO_SITES.test(host)) return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a" }) };
-  if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title }) };
+  if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title, forceHandler }) };
   // Unknown: ask the helper what the server says it is.
   const p = await native({ action: "probe", url });
   // Without the helper, video pages can't be read anyway: let Chrome download the link.
-  if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title }) };
+  if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title, forceHandler: p.hostMissing ? "chrome" : forceHandler }) };
   return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title }) };
 }
 
@@ -290,14 +471,23 @@ async function addLink(url, title) {
 async function pause(id) {
   const j = (await getJobs())[id];
   if (!j) return;
-  if (j.kind === "file" && j.downloadId) { await chrome.downloads.pause(j.downloadId); await updateJob(id, { status: "paused", speed: "", eta: "" }); }
-  else if (j.kind === "video" && j.status === "queued") { await updateJob(id, { status: "paused" }); }
-  else if (j.kind === "video" && ports.has(id)) { pausing.add(id); await updateJob(id, { status: "paused", speed: "", eta: "" }); ports.get(id).postMessage({ action: "pause" }); }
+  if (ports.has(id)) {
+    pausing.add(id);
+    await updateJob(id, { status: "paused", speed: "", eta: "" });
+    ports.get(id).postMessage({ action: "pause" });
+  } else if (j.kind === "file" && j.downloadId) {
+    await chrome.downloads.pause(j.downloadId);
+    await updateJob(id, { status: "paused", speed: "", eta: "" });
+  } else if (j.kind === "video" && j.status === "queued") {
+    await updateJob(id, { status: "paused" });
+  }
 }
 async function resume(id) {
   const j = (await getJobs())[id];
   if (!j) return;
-  if (j.kind === "file" && j.downloadId) {
+  if (j.kind === "file" && j.engine === "fast" && !j.downloadId) {
+    await startFastFile({ url: j.url, name: j.fileName, title: j.title, id, referrer: j.referrer, sha256: j.expectedSha256 });
+  } else if (j.kind === "file" && j.downloadId) {
     const [d] = await chrome.downloads.search({ id: j.downloadId });
     if (d?.canResume) { await chrome.downloads.resume(j.downloadId); await updateJob(id, { status: "downloading" }); pollFiles(); }
     else { await updateJob(id, { status: "cancelled" }); await startFile({ url: j.url, name: j.fileName, title: j.title }); }
@@ -321,9 +511,27 @@ async function retry(id) {
   const j = (await getJobs())[id];
   if (!j) return;
   // Retry restarts the same row, so the failed one doesn't stay behind in "Failed".
-  if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id });
+  if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: j.engine === "chrome" ? "chrome" : "anysave", referrer: j.referrer, sha256: j.expectedSha256 });
   if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec, id });
   return startVideo({ ...j, id });
+}
+async function chooseHandler(id, handler) {
+  const j = (await getJobs())[id];
+  if (!j) return;
+  if (handler === "chrome" && j.downloadId) {
+    try { await chrome.downloads.resume(j.downloadId); } catch {}
+    await updateJob(id, { engine: "chrome", status: "downloading", qualityLabel: "From website" });
+    pollFiles();
+    return id;
+  }
+  if (j.downloadId) {
+    try {
+      await chrome.downloads.cancel(j.downloadId);
+      await chrome.downloads.erase({ id: j.downloadId });
+    } catch {}
+    await updateJob(id, { downloadId: null });
+  }
+  return startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: handler === "chrome" ? "chrome" : "anysave", referrer: j.referrer, sha256: j.expectedSha256 });
 }
 
 // ---------- terms gate + messages ----------
@@ -349,9 +557,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return native({ action: "playlist", url: msg.url, cookies });
       }
       case "download": return { ok: true, id: await startVideo(msg) };
-      case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title }) };
+      case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title, forceHandler: msg.forceHandler }) };
       case "file": return { ok: true, id: await startFile(msg) };
-      case "addLink": return addLink(msg.url, msg.title);
+      case "addLink": return addLink(msg.url, msg.title, msg.forceHandler);
+      case "chooseHandler": await chooseHandler(msg.id, msg.handler); return { ok: true };
+      case "clickModifier": recordClickModifier(msg); return { ok: true };
       case "convert": return { ok: true, id: await startConvert(msg) };
       case "pickFile": return native({ action: "pickFile" });
       case "pause": await pause(msg.id); return { ok: true };
@@ -379,9 +589,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "openManager": openManager(msg.tab); return { ok: true };
       case "seen": await markSeen(); return { ok: true };
       case "setCapture": {
-        const { settings = {} } = await chrome.storage.local.get("settings");
+        const settings = await getSettings();
         await chrome.storage.local.set({ settings: { ...settings, captureAll: !!msg.on } });
         return { ok: true };
+      }
+      case "setSettings": {
+        const settings = await getSettings();
+        const next = { ...settings, ...(msg.patch || {}) };
+        await chrome.storage.local.set({ settings: next });
+        syncClickKeyScript();
+        return { ok: true, settings: next };
+      }
+      case "getSettings": {
+        return { ok: true, settings: await getSettings() };
+      }
+      case "diagnostics": {
+        const extVer = chrome.runtime.getManifest().version;
+        const res = await native({ action: "diagnostics", extensionVersion: extVer });
+        const jobs = Object.values(await getJobs());
+        const failed = jobs.filter((j) => j.status === "error").slice(0, 5)
+          .map((j) => `  - [${j.kind}] ${j.site || ""}: ${j.error || "unknown"}`).join("\n");
+        let text = res?.ok && res.text
+          ? res.text
+          : `AnySave Diagnostics\n===================\nExtension: ${extVer}\nHelper:    not reachable (${res?.error || "missing"})\n`;
+        if (failed) text += `\nRecent failed jobs:\n${failed}\n`;
+        return { ok: true, text, helperOk: !!res?.ok };
       }
     }
   })().then(sendResponse, (e) => sendResponse({ ok: false, error: String(e) }));
@@ -475,16 +707,71 @@ function isNewDownload(item) {
 async function adoptDownload(item) {
   if (!isNewDownload(item) || (await isOurs(item)) || !(await captureOn())) return;
   const url = item.finalUrl || item.url || "";
+  const clickChoice = consumeClickModifier(url) || consumeClickModifier(item.url);
+  if (clickChoice === "chrome") return; // Alt-click: leave this one untouched to Chrome
+
+  const settings = await getSettings();
   const name = (item.filename || "").split(/[\\/]/).pop() || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
+
+  if (clickChoice !== "anysave") {
+    if (isHostExcluded(url, settings.excludedSites)) return;
+    if (!matchesFileTypes(name || url, settings.fileTypes)) return;
+    const minBytes = Number(settings.minSizeMb || 0) * 1048576;
+    if (minBytes > 0 && item.totalBytes > 0 && item.totalBytes < minBytes) return;
+  }
+
+  const handler = clickChoice || settings.downloadHandler || "anysave";
+  const canFastAccelerate = /^https?:\/\//i.test(url) &&
+    !/^https?:\/\/127\.0\.0\.1:\d+\/handover\//i.test(url) &&
+    (clickChoice === "anysave" || item.totalBytes >= 1024 * 1024 || FILE_EXT.test(new URL(url).pathname));
+
+  if (handler === "ask" && canFastAccelerate) {
+    try { await chrome.downloads.pause(item.id); } catch {}
+    const id = newId();
+    await updateJob(id, {
+      kind: "file", url, title: name, fileName: name, site: /^https?:/.test(url) ? siteLabel(url) : "Web",
+      downloadId: item.id, status: "ask", percent: 0, referrer: item.referrer || "",
+      totalBytes: item.totalBytes > 0 ? item.totalBytes : 0, qualityLabel: "Choose downloader",
+    });
+    return;
+  }
+
+  if (handler === "anysave" && canFastAccelerate) {
+    try {
+      await chrome.downloads.cancel(item.id);
+      await chrome.downloads.erase({ id: item.id });
+    } catch {}
+    await startFastFile({ url, name, title: name, referrer: item.referrer || "" });
+    return;
+  }
+
   const id = newId();
   await updateJob(id, {
-    kind: "file", url, title: name, fileName: name, site: /^https?:/.test(url) ? siteLabel(url) : "Web",
+    kind: "file", engine: "chrome", url, title: name, fileName: name, site: /^https?:/.test(url) ? siteLabel(url) : "Web",
     downloadId: item.id, status: item.paused ? "paused" : "downloading", percent: 0,
     totalBytes: item.totalBytes > 0 ? item.totalBytes : 0, qualityLabel: "From website",
   });
   pollFiles();
 }
 chrome.downloads.onCreated.addListener(adoptDownload);
+
+async function syncClickKeyScript() {
+  try {
+    const hasAll = await chrome.permissions.contains({ origins: ["*://*/*"] });
+    const matches = hasAll
+      ? ["*://*/*"]
+      : ["*://*.youtube.com/*", "*://*.facebook.com/*", "*://*.instagram.com/*", "*://*.tiktok.com/*", "*://*.vimeo.com/*"];
+    await chrome.scripting.unregisterContentScripts({ ids: ["anysave-click-keys"] }).catch(() => {});
+    await chrome.scripting.registerContentScripts([{
+      id: "anysave-click-keys",
+      js: ["click-keys.js"],
+      matches,
+      runAt: "document_start",
+      allFrames: true,
+    }]);
+  } catch {}
+}
+syncClickKeyScript();
 
 // One-time cleanup (1.0.2): remove old Chrome downloads that 1.0.0–1.0.1 wrongly took over
 // after a restart. A real catch is added within seconds of the download starting.
@@ -628,7 +915,7 @@ chrome.storage.onChanged.addListener((ch, area) => {
 mutateJobs((jobs) => {
   for (const j of Object.values(jobs)) {
     if (!["starting", "downloading"].includes(j.status) || ports.has(j.id)) continue;
-    if (j.kind === "video") Object.assign(j, { status: "paused", speed: "", eta: "" });
+    if (j.kind === "video" || (j.kind === "file" && j.engine === "fast" && !j.downloadId)) Object.assign(j, { status: "paused", speed: "", eta: "" });
     else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
   }
 });

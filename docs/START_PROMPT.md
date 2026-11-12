@@ -1,7 +1,7 @@
 # Prompt to continue AnySave in a new AI session
 
 Paste this into the new session (Claude Code, or another AI coding tool) opened in the project folder
-`/Users/shahidulhaque/App Dev/VidGrab` (or a clone of github.com/sh-tareq/anysave).
+`/Users/shahidulhaque/App Dev/AnySave` (or a clone of github.com/sh-tareq/anysave).
 
 ---
 

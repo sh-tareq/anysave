@@ -103,3 +103,5 @@ li.pv > input[type=checkbox] { margin: 0; flex: none; accent-color: var(--accent
 .act { display:flex; gap:10px; }
 li.drag { cursor: grab; }
 li.drag:active { cursor: grabbing; }
+.handler-row { margin-top: 8px; gap: 8px; }
+.handler-select { width: auto; margin-top: 0; padding: 3px 8px; font-size: 12px; }

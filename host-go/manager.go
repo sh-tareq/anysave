@@ -7,7 +7,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -20,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"vidgrab-host/engine"
 )
 
 // ---------- probe ----------
@@ -316,6 +320,7 @@ func actionConvert(msg map[string]any) {
 		fail(err.Error())
 		return
 	}
+	attachChildJob(cmd)
 	var cancelled atomic.Bool
 	go func() { // Chrome closes stdin on cancel
 		for {
@@ -358,4 +363,160 @@ func actionConvert(msg map[string]any) {
 	default:
 		send(map[string]any{"type": "done", "file": out})
 	}
+}
+
+// ---------- fast multi-connection file download (engine) ----------
+
+var allowedFolders = map[string]bool{
+	"Videos": true, "Music": true, "Pictures": true, "Documents": true,
+	"Archives": true, "Apps": true, "Converted": true, "Other": true,
+}
+
+func actionFastDownload(msg map[string]any) {
+	fail := func(m string) { send(map[string]any{"type": "error", "message": m}) }
+	rawURL := str(msg, "url")
+	if !webLink(rawURL) {
+		fail("That isn't a web link.")
+		return
+	}
+
+	outDir := downloadDir
+	if folder := str(msg, "folder"); allowedFolders[folder] {
+		outDir = filepath.Join(downloadDir, folder)
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		fail(err.Error())
+		return
+	}
+
+	key := jobKey(msg)
+	handover, _ := msg["handover"].(bool)
+	destDir := outDir
+	if handover {
+		// Stage in .anysave-parts/ready-<key> so Chrome can save into outDir via 127.0.0.1 handover without duplicate files.
+		destDir = filepath.Join(outDir, ".anysave-parts", "ready-"+key)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var paused, cancelled atomic.Bool
+	go func() {
+		for {
+			m, err := readMessage()
+			if err != nil {
+				paused.Store(true)
+				break
+			}
+			if a := str(m, "action"); a == "pause" {
+				paused.Store(true)
+				break
+			} else if a == "cancel" {
+				cancelled.Store(true)
+				break
+			}
+		}
+		cancel()
+	}()
+
+	res, err := engine.Download(ctx, engine.Options{
+		URL:            rawURL,
+		DestDir:        destDir,
+		FileName:       str(msg, "fileName"),
+		StateKey:       key,
+		Cookies:        str(msg, "cookies"),
+		Referrer:       str(msg, "referrer"),
+		ExpectedSHA256: str(msg, "sha256"),
+		OnProgress: func(p engine.Progress) {
+			if paused.Load() || cancelled.Load() {
+				return
+			}
+			eta := "?"
+			if p.ETASeconds >= 0 {
+				eta = humanETA(strconv.Itoa(p.ETASeconds))
+			}
+			send(map[string]any{
+				"type":        "progress",
+				"percent":     float64(int(p.Percent*10)) / 10,
+				"doneBytes":   p.DoneBytes,
+				"totalBytes":  p.TotalBytes,
+				"speed":       humanSpeed(p.SpeedBPS),
+				"eta":         eta,
+				"activeConns": p.ActiveConns,
+			})
+		},
+	})
+
+	if err != nil {
+		if paused.Load() {
+			send(map[string]any{"type": "paused"})
+			return
+		}
+		if cancelled.Load() {
+			_ = os.RemoveAll(filepath.Join(destDir, ".anysave-parts", key))
+			if handover {
+				_ = os.RemoveAll(destDir)
+			}
+			fail("Cancelled")
+			return
+		}
+		var fb *engine.ErrFallbackRecommended
+		if errors.As(err, &fb) {
+			logf("fastDownload fallback for %s: %v", rawURL, err)
+			send(map[string]any{"type": "fallback", "reason": fb.Error()})
+			return
+		}
+		logf("fastDownload error for %s: %v", rawURL, err)
+		fail(friendlyError(err.Error()))
+		return
+	}
+
+	if handover {
+		h, herr := engine.ServeOneTimeFile(res.FilePath, res.FileName, 20*time.Second, true)
+		if herr == nil {
+			send(map[string]any{
+				"type":       "handover",
+				"url":        h.URL,
+				"fileName":   res.FileName,
+				"totalBytes": res.TotalBytes,
+				"sha256":     res.SHA256,
+				"multiConn":  res.MultiConn,
+				"peakConns":  res.PeakConns,
+			})
+			served := <-h.Done
+			h.Close()
+			if served {
+				_ = os.RemoveAll(destDir)
+				send(map[string]any{
+					"type":       "done",
+					"file":       filepath.Join(outDir, res.FileName),
+					"fileName":   res.FileName,
+					"totalBytes": res.TotalBytes,
+					"sha256":     res.SHA256,
+					"multiConn":  res.MultiConn,
+					"peakConns":  res.PeakConns,
+					"handedOver": true,
+				})
+				return
+			}
+		}
+		// Fallback if handover wasn't fetched by Chrome: move the staged file into outDir directly.
+		finalPath := uniquePath(outDir, strings.TrimSuffix(res.FileName, filepath.Ext(res.FileName)), strings.TrimPrefix(filepath.Ext(res.FileName), "."))
+		if filepath.Ext(res.FileName) == "" {
+			finalPath = filepath.Join(outDir, res.FileName)
+		}
+		_ = os.Rename(res.FilePath, finalPath)
+		_ = os.RemoveAll(destDir)
+		res.FilePath = finalPath
+	}
+
+	send(map[string]any{
+		"type":       "done",
+		"file":       res.FilePath,
+		"fileName":   filepath.Base(res.FilePath),
+		"totalBytes": res.TotalBytes,
+		"sha256":     res.SHA256,
+		"multiConn":  res.MultiConn,
+		"peakConns":  res.PeakConns,
+	})
 }

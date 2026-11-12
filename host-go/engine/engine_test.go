@@ -1,0 +1,290 @@
+package engine
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"vidgrab-host/torture"
+)
+
+func baseTestOpts(url, dir string) Options {
+	return Options{
+		URL:            url,
+		DestDir:        dir,
+		InitialConns:   4,
+		MaxConns:       8,
+		MinSplitSize:   16 * 1024, // 16 KB so 256 KB test files split across many segments
+		MaxRetries:     4,
+		RetryBaseDelay: 15 * time.Millisecond,
+	}
+}
+
+func assertPayloadMatch(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read downloaded file %s: %v", path, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("downloaded file content mismatch: got %d bytes, want %d bytes", len(got), len(want))
+	}
+}
+
+func TestEngineTortureSuite(t *testing.T) {
+	srv := torture.NewServer(256 * 1024) // 256 KB
+	defer srv.Close()
+
+	t.Run("normal_multiconn", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/normal", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("normal download failed: %v", err)
+		}
+		if !res.MultiConn || res.PeakConns < 2 {
+			t.Errorf("expected multi-connection download, got MultiConn=%v PeakConns=%d", res.MultiConn, res.PeakConns)
+		}
+		if res.SHA256 != srv.SHA256 {
+			t.Errorf("SHA256 mismatch: got %s, want %s", res.SHA256, srv.SHA256)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("no_range_fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/no-range", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("no-range download failed: %v", err)
+		}
+		if res.MultiConn {
+			t.Errorf("expected single-stream fallback when Range is unsupported")
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("drop_midway_recovery", func(t *testing.T) {
+		srv.DropCount.Store(3)
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/drop-midway", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("drop-midway download failed: %v", err)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("changing_etag_restarts_cleanly", func(t *testing.T) {
+		srv.MutateAfter.Store(1)
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/changing-etag", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("changing-etag download failed: %v", err)
+		}
+		if res.SHA256 != srv.SHA256V2 {
+			t.Fatalf("expected SHA256V2 %s after ETag mutation, got %s", srv.SHA256V2, res.SHA256)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.PayloadV2)
+	})
+
+	t.Run("bad_length_short_rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/bad-length-short", dir)
+		opts.MaxRetries = 2
+		res, err := Download(context.Background(), opts)
+		if err == nil {
+			t.Fatalf("expected error on truncated Content-Length response, got result %+v", res)
+		}
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if !e.IsDir() {
+				t.Fatalf("corrupt file %s was left in destination dir", e.Name())
+			}
+		}
+	})
+
+	t.Run("no_length_chunked", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/no-length", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("no-length download failed: %v", err)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("redirect_chain", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/redirect", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("redirect download failed: %v", err)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("single_conn_only_403_downgrade", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/single-conn-only", dir)
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("single-conn-only download failed: %v", err)
+		}
+		assertPayloadMatch(t, res.FilePath, srv.Payload)
+	})
+
+	t.Run("corrupt_hash_rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := baseTestOpts(srv.URL+"/corrupt-hash", dir)
+		res, err := Download(context.Background(), opts)
+		if err == nil {
+			t.Fatalf("expected checksum mismatch error on /corrupt-hash, got %+v", res)
+		}
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if !e.IsDir() {
+				t.Fatalf("corrupt file %s was left in destination dir", e.Name())
+			}
+		}
+	})
+
+	t.Run("pause_and_crash_safe_resume", func(t *testing.T) {
+		slowSrv := torture.NewServer(512 * 1024) // 512 KB
+		defer slowSrv.Close()
+
+		dir := t.TempDir()
+		opts := baseTestOpts(slowSrv.URL+"/slow", dir)
+		opts.StateKey = "resume-job-1"
+		opts.InitialConns = 2
+		opts.MaxConns = 2
+
+		ctx1, cancel1 := context.WithTimeout(context.Background(), 35*time.Millisecond)
+		defer cancel1()
+		_, err := Download(ctx1, opts)
+		if err == nil {
+			t.Fatal("expected first download to be cancelled mid-flight by timeout")
+		}
+
+		// Verify state.json was persisted on pause/cancel.
+		stateFile := filepath.Join(dir, ".anysave-parts", "resume-job-1", "state.json")
+		if _, err := os.Stat(stateFile); err != nil {
+			t.Fatalf("expected resume state file at %s: %v", stateFile, err)
+		}
+
+		// Now resume to completion.
+		res, err := Download(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("resumed download failed: %v", err)
+		}
+		if !res.Resumed {
+			t.Errorf("expected res.Resumed == true")
+		}
+		assertPayloadMatch(t, res.FilePath, slowSrv.Payload)
+	})
+}
+
+func TestHandoverOneTimeServer(t *testing.T) {
+	dir := t.TempDir()
+	fpath := filepath.Join(dir, "sample.bin")
+	payload := []byte("verified handover payload bytes 1234567890")
+	if err := os.WriteFile(fpath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := ServeOneTimeFile(fpath, "sample.bin", 5*time.Second, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	// Wrong token path -> 404
+	badResp, err := http.Get(h.URL + "-wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	badResp.Body.Close()
+	if badResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 on wrong token path, got %d", badResp.StatusCode)
+	}
+
+	// First valid GET -> 200 OK with exact bytes
+	resp, err := http.Get(h.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(got, payload) {
+		t.Fatalf("handover GET failed: status=%d len=%d", resp.StatusCode, len(got))
+	}
+
+	ok := <-h.Done
+	if !ok {
+		t.Fatal("expected h.Done to report true")
+	}
+
+	// Second GET on same token -> 410 Gone or connection refused (server closed)
+	resp2, err := http.Get(h.URL)
+	if err == nil {
+		resp2.Body.Close()
+		if resp2.StatusCode == http.StatusOK {
+			t.Fatal("expected one-time token to reject second download")
+		}
+	}
+}
+
+func TestSpeedBenchmarkSingleVsEngine(t *testing.T) {
+	// 2 MB payload on throttled /slow server (~3.2 MB/s per connection)
+	srv := torture.NewServer(2 * 1024 * 1024)
+	defer srv.Close()
+
+	// 1. Single connection
+	dir1 := t.TempDir()
+	t0 := time.Now()
+	res1, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/slow",
+		DestDir:      dir1,
+		InitialConns: 1,
+		MaxConns:     1,
+		MinSplitSize: 2 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dur1 := time.Since(t0)
+
+	// 2. Multi-connection (8 connections)
+	dir8 := t.TempDir()
+	t1 := time.Now()
+	res8, err := Download(context.Background(), Options{
+		URL:          srv.URL + "/slow",
+		DestDir:      dir8,
+		InitialConns: 8,
+		MaxConns:     16,
+		MinSplitSize: 64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dur8 := time.Since(t1)
+
+	mb := float64(len(srv.Payload)) / (1024 * 1024)
+	speed1 := mb / dur1.Seconds()
+	speed8 := mb / dur8.Seconds()
+	t.Logf("Speed test (2 MB throttled server): 1-conn = %v (%.2f MB/s) vs Engine (%d conns) = %v (%.2f MB/s, %.1fx faster)",
+		dur1.Round(time.Millisecond), speed1, res8.PeakConns, dur8.Round(time.Millisecond), speed8, speed8/speed1)
+
+	assertPayloadMatch(t, res1.FilePath, srv.Payload)
+	assertPayloadMatch(t, res8.FilePath, srv.Payload)
+	if dur8 >= dur1 {
+		t.Errorf("expected multi-connection engine (%v) to be faster than 1 connection (%v)", dur8, dur1)
+	}
+}
+

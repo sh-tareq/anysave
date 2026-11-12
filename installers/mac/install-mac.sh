@@ -138,4 +138,6 @@ if [ -n "$UPGRADED" ]; then
   echo "Updated: just click the reload button on the extension in chrome://extensions."
   echo "(Optional: remove it and 'Load unpacked' from $EXT_DEST, then delete ~/VidGrab.)"
 fi
-open -R "$EXT_DEST" || true
+if [ "${ANYSAVE_NO_OPEN:-0}" != "1" ]; then
+  open -R "$EXT_DEST" || true
+fi
