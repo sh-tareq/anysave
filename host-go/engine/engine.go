@@ -900,7 +900,9 @@ func (d *activeDownload) spawn(ctx context.Context, seg *Segment, body io.ReadCl
 		probe.Store(true)
 		d.opening.Add(1)
 	}
+	d.mu.Lock() // the progress loop copies segments under the lock
 	seg.probe = probe
+	d.mu.Unlock()
 	go func() {
 		defer func() {
 			d.probeAnswered(ctx, probe, false)
