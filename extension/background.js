@@ -14,7 +14,15 @@ function updateJob(id, patch) {
   // Serialise writes so fast progress updates don't overwrite each other.
   writeChain = writeChain.then(async () => {
     const jobs = await getJobs();
+    const before = jobs[id]?.status;
     jobs[id] = { ...(jobs[id] || { id, createdAt: Date.now() }), ...patch };
+    const now = jobs[id].status;
+    if (now === "starting" && before !== "starting") cancelPower(); // a download started: call off a pending sleep / shut down
+    if (before && before !== now) {
+      if (now === "done" || now === "error") queueNotification({ ...jobs[id] });
+      // Every kind of download ends here, so "when all downloads finish" works for all of them.
+      if (now === "done") setTimeout(() => checkAfterDoneAction(id), 400);
+    }
     const ids = Object.keys(jobs).sort((a, b) => (jobs[b].createdAt || 0) - (jobs[a].createdAt || 0));
     for (const old of ids.slice(400)) delete jobs[old]; // keep the newest 400
     await chrome.storage.local.set({ jobs });
@@ -128,11 +136,11 @@ function runNative(id, payload, onDone) {
     } else if (msg.type === "done") {
       finished = true;
       updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "", finishedAt: Date.now(),
-        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined }).then(() => checkAfterDoneAction(id));
+        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined });
       onDone && onDone(msg);
     } else if (msg.type === "paused") {
       finished = true;
-      updateJob(id, { status: "paused", speed: "", eta: "" });
+      markPaused(id);
     } else if (msg.type === "error") {
       finished = true;
       updateJob(id, { status: msg.message === "Cancelled" ? "cancelled" : "error", error: msg.message, speed: "", eta: "" });
@@ -145,7 +153,7 @@ function runNative(id, payload, onDone) {
     if (!finished) {
       const err = chrome.runtime.lastError?.message;
       getJobs().then((jobs) => {
-        if (["paused", "cancelled"].includes(jobs[id]?.status)) return;
+        if (["paused", "cancelled", "scheduled"].includes(jobs[id]?.status)) return;
         updateJob(id, { status: err ? "error" : "cancelled", speed: "", eta: "",
           error: err ? (helperMissing(err) ? "AnySave helper not found. Run the AnySave installer again, then restart Chrome." : "The AnySave helper stopped unexpectedly. Try again.") : null });
       });
@@ -154,14 +162,21 @@ function runNative(id, payload, onDone) {
   port.postMessage(payload);
 }
 const pausing = new Set(); // job ids whose Pause was sent but not yet confirmed
+// The helper confirmed a pause. Paused by the schedule (not by the user) means "waiting for the
+// next time window", which shows as Scheduled and starts again by itself.
+async function markPaused(id) {
+  const held = (await getJobs())[id]?.heldBySchedule;
+  return updateJob(id, { status: held ? "scheduled" : "paused", speed: "", eta: "" });
+}
 
 // Video downloads wait in line: a few run at once, the rest show "Queued" and start as others
 // finish (so picking a whole playlist doesn't start hundreds of downloads together).
 const MAX_VIDEOS_AT_ONCE = 3;
 
-async function startVideo({ url, format, sort, audioOnly, title, useCookies, id }) {
+async function startVideo({ url, format, sort, audioOnly, title, useCookies, id, queue }) {
   id = id || newId();
   await updateJob(id, {
+    ...(queue !== undefined ? { queue: String(queue || "").trim() } : {}),
     kind: "video", url, title: title || `${siteLabel(url)} video`, site: siteLabel(url),
     format, sort, audioOnly: !!audioOnly, useCookies: !!useCookies,
     status: "queued", queuedAt: Date.now(), percent: 0, error: null, speed: "", eta: "",
@@ -178,10 +193,18 @@ function pumpQueue() {
     const maxSpeedKbps = Number(settings.maxSpeedKbps || 0);
     const jobs = Object.values(await getJobs());
     let free = maxConc - jobs.filter((j) => j.kind === "video" && ports.has(j.id)).length;
-    const waiting = jobs.filter((j) => j.kind === "video" && j.status === "queued")
+    const waiting = jobs.filter((j) => j.kind === "video" && (j.status === "queued" || j.status === "scheduled"))
       .sort((a, b) => (a.queuedAt || a.createdAt || 0) - (b.queuedAt || b.createdAt || 0));
     for (const j of waiting) {
-      if (free-- <= 0) break;
+      if (scheduleBlocks(settings, j)) { // has to wait for its time window
+        if (j.status !== "scheduled") await updateJob(j.id, { status: "scheduled" });
+        continue;
+      }
+      if (free <= 0) {
+        if (j.status === "scheduled") await updateJob(j.id, { status: "queued" });
+        continue;
+      }
+      free--;
       await updateJob(j.id, { status: "starting" });
       const cookies = j.useCookies ? await cookiesFor(j.url) : null;
       // `job` lets the helper keep this download's unfinished pieces apart, so Resume continues them.
@@ -221,9 +244,15 @@ const DEFAULT_SETTINGS = {
   maxConcurrent: 3,
   afterDoneAction: "none",
   videoOverlay: true,
+  notifications: true, // tell the user when a download finishes or fails
   subLangs: "",        // subtitles to put inside videos, e.g. "en" or "en,fr"
   embedChapters: true, // chapter marks inside videos
   embedCover: false,   // thumbnail as cover art inside videos and music
+  scheduleOn: false,   // only download inside the time window below
+  scheduleStart: "01:00",
+  scheduleStop: "07:00",
+  scheduleQueue: "",   // "" = the window applies to every download, or the name of one queue
+  queues: "",          // names of the user's extra queues, comma separated
   proxy: "",           // "" = system proxy, "direct", or http://host:port / socks5://host:port
 };
 
@@ -373,10 +402,9 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
         sha256: msg.sha256 || "", qualityLabel: label, speed: "", eta: "", finishedAt: Date.now(),
         segments: undefined,
       });
-      checkAfterDoneAction(id);
     } else if (msg.type === "paused") {
       finished = true;
-      await updateJob(id, { status: "paused", speed: "", eta: "" });
+      await markPaused(id);
     } else if (msg.type === "error") {
       finished = true;
       await updateJob(id, { status: msg.message === "Cancelled" ? "cancelled" : "error", error: msg.message, speed: "", eta: "" });
@@ -394,7 +422,7 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
         return;
       }
       getJobs().then((jobs) => {
-        if (["paused", "cancelled", "done"].includes(jobs[id]?.status)) return;
+        if (["paused", "cancelled", "done", "scheduled"].includes(jobs[id]?.status)) return;
         updateJob(id, { status: err ? "error" : "cancelled", speed: "", eta: "",
           error: err ? "The AnySave helper stopped unexpectedly. Try again." : null });
       });
@@ -409,13 +437,80 @@ async function startFastFile({ url, name, title, id, referrer, sha256 }) {
   return id;
 }
 
+// ---------- notifications ----------
+// One notification per finished or failed download; several at once are summed up in one.
+const BUSY = ["starting", "downloading", "queued", "scheduled"];
+let notifyBatch = [];
+let notifyTimer = null;
+function queueNotification(job) {
+  notifyBatch.push(job);
+  if (!notifyTimer) notifyTimer = setTimeout(flushNotifications, 1500);
+}
+function jobName(j) { return j.fileName || j.title || j.url || "Download"; }
+async function flushNotifications() {
+  notifyTimer = null;
+  const batch = notifyBatch;
+  notifyBatch = [];
+  if ((await getSettings()).notifications === false) return;
+  const iconUrl = chrome.runtime.getURL("icons/icon128.png");
+  const show = (id, title, message) => chrome.notifications.create(id, { type: "basic", iconUrl, title, message });
+  const names = (list) => list.slice(0, 3).map(jobName).join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "");
+  const done = batch.filter((j) => j.status === "done");
+  const failed = batch.filter((j) => j.status === "error");
+  if (done.length === 1) show(`job:${done[0].id}`, "Download finished", jobName(done[0]));
+  else if (done.length > 1) show(`done:${Date.now()}`, `${done.length} downloads finished`, names(done));
+  if (failed.length === 1) show(`job:${failed[0].id}`, "Download failed", `${jobName(failed[0])}: ${failed[0].error || "unknown error"}`);
+  else if (failed.length > 1) show(`failed:${Date.now()}`, `${failed.length} downloads failed`, names(failed));
+}
+chrome.notifications.onClicked.addListener(async (nid) => {
+  chrome.notifications.clear(nid);
+  if (nid === POWER_ID) return;
+  const j = nid.startsWith("job:") ? (await getJobs())[nid.slice(4)] : null;
+  if (j?.status === "done" && j.downloadId) chrome.downloads.show(j.downloadId);
+  else if (j?.status === "done" && j.file) native({ action: "reveal", file: j.file });
+  else openManager("downloads");
+});
+
+// ---------- sleep / shut down when everything has finished ----------
+// A one-minute warning with a Cancel button first; starting a download also calls it off.
+const POWER_ID = "anysave-power";
+async function schedulePower(act) {
+  await chrome.storage.session.set({ pendingPower: { act, at: Date.now() } });
+  chrome.notifications.create(POWER_ID, {
+    type: "basic", iconUrl: chrome.runtime.getURL("icons/icon128.png"), priority: 2, requireInteraction: true,
+    title: "All downloads finished",
+    message: `This computer will ${act === "sleep" ? "go to sleep" : "shut down"} in 60 seconds.`,
+    buttons: [{ title: "Cancel" }],
+  });
+  chrome.alarms.create(POWER_ID, { delayInMinutes: 1 });
+}
+async function cancelPower() {
+  const { pendingPower } = await chrome.storage.session.get("pendingPower");
+  if (!pendingPower) return;
+  await chrome.storage.session.remove("pendingPower");
+  chrome.alarms.clear(POWER_ID);
+  chrome.notifications.clear(POWER_ID);
+}
+// Runs when the minute is over: only if nothing changed in the meantime.
+async function runPendingPower() {
+  const { pendingPower } = await chrome.storage.session.get("pendingPower");
+  if (!pendingPower) return { ok: false, why: "cancelled" };
+  await chrome.storage.session.remove("pendingPower");
+  chrome.notifications.clear(POWER_ID);
+  const busy = Object.values(await getJobs()).some((j) => BUSY.includes(j.status));
+  if (busy || (await getSettings()).afterDoneAction !== pendingPower.act) return { ok: false, why: "changed" };
+  return native({ action: "power", do: pendingPower.act });
+}
+chrome.notifications.onButtonClicked.addListener((nid) => { if (nid === POWER_ID) cancelPower(); });
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === POWER_ID) runPendingPower(); });
+
 async function checkAfterDoneAction(completedId) {
   try {
     const settings = await getSettings();
     const act = settings.afterDoneAction || "none";
     if (act === "none") return;
     const jobs = await getJobs();
-    const busy = Object.values(jobs).some((j) => ["starting", "downloading", "queued"].includes(j.status));
+    const busy = Object.values(jobs).some((j) => BUSY.includes(j.status));
     if (busy) return;
     const j = jobs[completedId];
     if (!j || j.status !== "done") return;
@@ -428,11 +523,13 @@ async function checkAfterDoneAction(completedId) {
       } else if (j.file) {
         await native({ action: "open", file: j.file });
       }
+    } else if (act === "sleep" || act === "shutdown") {
+      await schedulePower(act);
     }
   } catch {}
 }
 
-async function startFile({ url, name, title, id, forceHandler, referrer, sha256 }) {
+async function startFile({ url, name, title, id, forceHandler, referrer, sha256, queue }) {
   id = id || newId();
   const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
   const settings = await getSettings();
@@ -446,6 +543,19 @@ async function startFile({ url, name, title, id, forceHandler, referrer, sha256 
       handler = "chrome";
     }
   }
+
+  // Queue and schedule: a download that has to wait for its time window is kept as "Scheduled".
+  const existing = (await getJobs())[id];
+  const q = queue !== undefined ? String(queue || "").trim() : (existing?.queue || "");
+  if (scheduleBlocks(settings, { queue: q, ignoreSchedule: existing?.ignoreSchedule })) {
+    await updateJob(id, {
+      kind: "file", url, title: title || fileName, fileName, site: siteLabel(url), queue: q,
+      status: "scheduled", percent: 0, qualityLabel: "Scheduled", error: null, speed: "", eta: "",
+      referrer: referrer || "", expectedSha256: sha256 || "", wantHandler: handler,
+    });
+    return id;
+  }
+  if (q || existing) await updateJob(id, { queue: q });
 
   if (handler === "ask") {
     await updateJob(id, {
@@ -503,7 +613,7 @@ function pollFiles() {
       } else if (d.state === "interrupted") {
         await updateJob(j.id, { status: d.error === "USER_CANCELED" ? "cancelled" : "error", error: d.error, speed: "", eta: "" });
       } else if (d.paused) {
-        if (j.status !== "paused") await updateJob(j.id, { status: "paused", speed: "", eta: "" });
+        if (j.status !== "paused" && j.status !== "scheduled") await updateJob(j.id, { status: "paused", speed: "", eta: "" });
       } else {
         const prev = j.doneBytes || 0;
         const bps = Math.max(0, (d.bytesReceived - prev) / 0.7);
@@ -544,16 +654,16 @@ function humanEta(s) {
 
 // ---------- add any link: video page or file? ----------
 
-async function addLink(url, title, forceHandler) {
+async function addLink(url, title, forceHandler, queue) {
   let host = "";
   try { host = new URL(url).hostname; } catch { return { ok: false, error: "That isn't a web link." }; }
-  if (VIDEO_SITES.test(host)) return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a" }) };
-  if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title, forceHandler }) };
+  if (VIDEO_SITES.test(host)) return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", queue }) };
+  if (FILE_EXT.test(new URL(url).pathname)) return { ok: true, id: await startFile({ url, title, forceHandler, queue }) };
   // Unknown: ask the helper what the server says it is.
   const p = await native({ action: "probe", url, proxy: (await getSettings()).proxy || "" });
   // Without the helper, video pages can't be read anyway: let Chrome download the link.
-  if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title, forceHandler: p.hostMissing ? "chrome" : forceHandler }) };
-  return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title }) };
+  if ((p.ok && p.isFile) || p.hostMissing) return { ok: true, id: await startFile({ url, name: p.name, title, forceHandler: p.hostMissing ? "chrome" : forceHandler, queue }) };
+  return { ok: true, id: await startVideo({ url, format: "bv*+ba/b", sort: "res,fps,vcodec:h264,acodec:m4a", title, queue }) };
 }
 
 // ---------- pause / resume / cancel ----------
@@ -561,6 +671,10 @@ async function addLink(url, title, forceHandler) {
 async function pause(id) {
   const j = (await getJobs())[id];
   if (!j) return;
+  if (j.status === "scheduled" && !ports.has(id)) { // waiting for its time window: just don't start it
+    await updateJob(id, { status: "paused", heldBySchedule: false });
+    return;
+  }
   if (ports.has(id)) {
     pausing.add(id);
     if (j.engine === "fast" && j.downloadId) {
@@ -589,8 +703,58 @@ async function resume(id) {
     else { await updateJob(id, { status: "cancelled" }); await startFile({ url: j.url, name: j.fileName, title: j.title }); }
   } else if (j.kind === "video") {
     await startVideo({ ...j, id }); // yt-dlp continues the .part file
+  } else if (j.kind === "file") {
+    // Never started (it was waiting for its time window): start it now.
+    await startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: j.wantHandler, referrer: j.referrer, sha256: j.expectedSha256 });
   }
 }
+
+// ---------- scheduler and queues ----------
+// "Only download between 01:00 and 07:00", for every download or for one named queue. A download
+// that has to wait shows as Scheduled; when the window opens everything scheduled starts, and
+// when it closes running downloads are paused until the next window. "Start now" on a row lets
+// that one download run anyway.
+function clockMinutes(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  return +m[1] * 60 + +m[2];
+}
+function inWindow(now, start, stop) {
+  const s = clockMinutes(start), e = clockMinutes(stop);
+  if (s == null || e == null || s === e) return true; // unreadable or empty window: never blocks
+  const t = now.getHours() * 60 + now.getMinutes();
+  return s < e ? (t >= s && t < e) : (t >= s || t < e); // the window may cross midnight
+}
+function scheduleClock() { return self.__anysaveTestNow ? new Date(self.__anysaveTestNow) : new Date(); }
+function scheduleBlocks(settings, job) {
+  if (!settings.scheduleOn || job?.ignoreSchedule) return false;
+  if (settings.scheduleQueue && settings.scheduleQueue !== (job?.queue || "")) return false;
+  return !inWindow(scheduleClock(), settings.scheduleStart, settings.scheduleStop);
+}
+let ticking = Promise.resolve();
+function scheduleTick() {
+  ticking = ticking.then(async () => {
+    const settings = await getSettings();
+    for (const j of Object.values(await getJobs())) {
+      if (j.kind !== "file" && j.kind !== "video") continue;
+      const blocked = scheduleBlocks(settings, j);
+      if (j.status === "scheduled" && !blocked) {
+        await updateJob(j.id, { heldBySchedule: false });
+        if (j.kind === "video") await updateJob(j.id, { status: "queued" }); // the queue pump starts it
+        else await resume(j.id);
+      } else if (["starting", "downloading"].includes(j.status) && blocked) {
+        await updateJob(j.id, { heldBySchedule: true });
+        await pause(j.id);
+        await updateJob(j.id, { status: "scheduled", speed: "", eta: "" });
+      }
+    }
+    await pumpQueue();
+  }).catch((e) => console.warn("AnySave: schedule", e));
+  return ticking;
+}
+const SCHEDULE_ALARM = "anysave-schedule";
+chrome.alarms.create(SCHEDULE_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === SCHEDULE_ALARM) scheduleTick(); });
 async function cancel(id) {
   const j = (await getJobs())[id];
   if (!j) return;
@@ -653,15 +817,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return native({ action: "playlist", url: msg.url, cookies, proxy: (await getSettings()).proxy || "" });
       }
       case "download": return { ok: true, id: await startVideo(msg) };
-      case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title, forceHandler: msg.forceHandler }) };
+      case "directDownload": return { ok: true, id: await startFile({ url: msg.src, name: safeFile(msg.title) + ".mp4", title: msg.title, forceHandler: msg.forceHandler, queue: msg.queue }) };
       case "file": return { ok: true, id: await startFile(msg) };
-      case "addLink": return addLink(msg.url, msg.title, msg.forceHandler);
+      case "addLink": return addLink(msg.url, msg.title, msg.forceHandler, msg.queue);
       case "chooseHandler": await chooseHandler(msg.id, msg.handler); return { ok: true };
       case "clickModifier": recordClickModifier(msg); return { ok: true };
       case "convert": return { ok: true, id: await startConvert(msg) };
       case "pickFile": return native({ action: "pickFile" });
       case "pause": await pause(msg.id); return { ok: true };
-      case "resume": await resume(msg.id); return { ok: true };
+      case "resume":
+      case "startNow":
+        // Asked for by hand: this one runs even outside the time window.
+        await updateJob(msg.id, { ignoreSchedule: true, heldBySchedule: false });
+        if (((await getJobs())[msg.id] || {}).status === "scheduled") await scheduleTick();
+        else await resume(msg.id);
+        return { ok: true };
+      case "moveQueue":
+        await updateJob(msg.id, { queue: String(msg.queue || "").trim(), ignoreSchedule: false });
+        await scheduleTick();
+        return { ok: true };
       case "cancel": await cancel(msg.id); return { ok: true };
       case "retry": await retry(msg.id); return { ok: true };
       case "refreshUrl": {
@@ -711,6 +885,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "setSettings": {
         const next = await updateSettings(msg.patch || {});
         syncClickKeyScript();
+        if (Object.keys(msg.patch || {}).some((k) => k.startsWith("schedule"))) scheduleTick();
         return { ok: true, settings: next };
       }
       case "getSettings": {
@@ -868,7 +1043,7 @@ async function adoptDownload(item) {
       await chrome.downloads.cancel(item.id);
       await chrome.downloads.erase({ id: item.id });
     } catch {}
-    await startFastFile({ url, name, title: name, referrer: item.referrer || "" });
+    await startFile({ url, name, title: name, referrer: item.referrer || "", forceHandler: "anysave" }); // through the schedule check
     return;
   }
 
@@ -1061,8 +1236,9 @@ mutateJobs((jobs) => {
     else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
   }
 });
-// Start queued videos again (the queue lives in storage, so it survives restarts).
-pumpQueue();
+// Start queued videos again (the queue lives in storage, so it survives restarts), and apply
+// the schedule (the time window may have opened or closed while Chrome was shut).
+scheduleTick();
 // Resume polling file downloads after the service worker restarts.
 pollFiles();
 updateActionIcon();

@@ -13,7 +13,9 @@
     "downloads",
     "contextMenus",
     "downloads.ui",
-    "downloads.open"
+    "downloads.open",
+    "notifications",
+    "alarms"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

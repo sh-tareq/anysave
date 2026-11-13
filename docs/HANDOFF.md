@@ -94,9 +94,22 @@ The extension key/ID did not change. Consequences: the Android app is a **new ap
 any older copy and does not carry over its data; older copies cannot update to it), and desktop users must run the
 new installer once so the browser finds the helper under its new name. These are now the IDs that must never change.
 
-**Listed in the roadmap as done, but not built at all:** scheduler, named queues, site crawler (depth/filters),
-after-done sleep / shut down / quit (only "show" and "open" exist), finish/fail notifications in the extension
-(the desktop service has them).
+**Built later the same day (they were listed as done in the roadmap but did not exist):**
+- Scheduler and named queues (extension: "scheduler and queues" section of `background.js`; desktop:
+  `host-go/schedule.go`). Settings `scheduleOn`, `scheduleStart`, `scheduleStop`, `scheduleQueue` ("" = all
+  downloads), `queues` (comma-separated names). Jobs carry `queue`; a job that must wait has status `scheduled`;
+  `heldBySchedule` marks one paused by the schedule; `ignoreSchedule` is set by "Start now" or a manual resume.
+  Messages `startNow`, `moveQueue`. The extension checks every minute (`chrome.alarms`), the desktop service every 15 s.
+- When all downloads finish: sleep, shut down, quit (`host-go/afterdone.go`, helper action `power`). A 60-second
+  warning first; a new download, a changed setting or Cancel calls it off. **`ANYSAVE_DRY_POWER=1` makes the helper
+  only log the action: always set it in tests.** Real sleep and shut down were never executed.
+- Finish/fail notifications in the extension (`chrome.notifications`; several at once are summed up).
+- The extension now needs the `notifications` and `alarms` permissions.
+
+**Still not built:** site crawler (depth/filters).
+
+**CI:** the GitHub workflow (Windows, macOS, Ubuntu) has passed on every push of 13 November, so the Windows
+installer and helper do install and run on real Windows there. Nobody has used the Windows app by hand.
 
 **Still not tested:** anything on real Windows; how the Mac app window, menu-bar item, drop box, global shortcut,
 clipboard watch and notifications look and behave (the test session could not take screenshots of the Mac);

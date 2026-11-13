@@ -40,6 +40,8 @@ type daemonInfo struct {
 }
 
 type daemonServer struct {
+	powerToken  int  // changes whenever a download starts or settings change (cancels a pending sleep/shut down)
+	quitting    bool // true just before the service stops, so the app can close as well
 	mu          sync.Mutex
 	port        int
 	token       string
@@ -183,10 +185,11 @@ func runDaemon(openWindow bool, initialURL string) error {
 	}()
 
 	go d.watchClipboardLoop()
+	go d.scheduleLoop()
 
 	if initialURL != "" {
 		go func() {
-			_ = d.addLink(initialURL, "")
+			_ = d.addLink(initialURL, "", "")
 		}()
 	}
 
@@ -215,7 +218,12 @@ func defaultDaemonSettings() map[string]any {
 		"subLangs":        "",    // subtitles to put inside videos, e.g. "en" or "en,fr"
 		"embedChapters":   true,  // chapter marks inside videos
 		"embedCover":      false, // thumbnail as cover art inside videos and music
-		"proxy":           "",    // "" = system proxy, "direct", or http://host:port / socks5://host:port
+		"scheduleOn":      false, // only download inside the time window
+		"scheduleStart":   "01:00",
+		"scheduleStop":    "07:00",
+		"scheduleQueue":   "", // "" = every download, or the name of one queue
+		"queues":          "", // names of the user's extra queues, comma separated
+		"proxy":           "", // "" = system proxy, "direct", or http://host:port / socks5://host:port
 		"afterDoneAction": "none",
 	}
 }
@@ -323,6 +331,14 @@ func (d *daemonServer) updateJob(id string, patch map[string]any) map[string]any
 		}
 		go notifyOS("AnySave — Download Complete", name)
 	}
+	if prevStatus != "done" && newStatus == "done" {
+		go d.afterAllDone(id)
+	}
+	if newStatus == "starting" && prevStatus != "starting" {
+		d.mu.Lock()
+		d.powerToken++ // a download started: call off a pending sleep / shut down
+		d.mu.Unlock()
+	}
 	return cur
 }
 
@@ -359,6 +375,7 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 			"ytdlp":    ytVer,
 			"jobs":     d.jobs,
 			"settings": d.settings,
+			"quitting": d.quitting,
 		})
 		d.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -631,7 +648,7 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		return actionReveal(map[string]any{"file": file})
 
 	case "addLink":
-		return d.addLink(str(req, "url"), str(req, "title"))
+		return d.addLink(str(req, "url"), str(req, "title"), str(req, "queue"))
 
 	case "download":
 		id := d.startVideoJob(req)
@@ -644,7 +661,7 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		return map[string]any{"ok": true, "id": id}
 
 	case "file":
-		id := d.startFastFileJob(str(req, "url"), str(req, "name"), str(req, "title"), str(req, "id"), str(req, "referrer"), str(req, "sha256"))
+		id := d.startFastFileJob(str(req, "url"), str(req, "name"), str(req, "title"), d.jobInQueue(str(req, "id"), str(req, "queue")), str(req, "referrer"), str(req, "sha256"))
 		return map[string]any{"ok": true, "id": id}
 
 	case "chooseHandler":
@@ -665,8 +682,15 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		d.pauseJob(str(req, "id"))
 		return map[string]any{"ok": true}
 
-	case "resume":
+	case "resume", "startNow":
+		// The user asked for this one by hand: it runs even outside the time window.
+		d.updateJob(str(req, "id"), map[string]any{"ignoreSchedule": true, "heldBySchedule": false})
 		d.resumeJob(str(req, "id"))
+		return map[string]any{"ok": true}
+
+	case "moveQueue":
+		d.updateJob(str(req, "id"), map[string]any{"queue": strings.TrimSpace(str(req, "queue")), "ignoreSchedule": false})
+		d.scheduleTick()
 		return map[string]any{"ok": true}
 
 	case "cancel":
@@ -732,6 +756,15 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 			d.settings[k] = v
 		}
 		dropOn, hasDrop := patch["dropBox"].(bool)
+		for k := range patch {
+			if strings.HasPrefix(k, "schedule") {
+				defer d.scheduleTick() // the window or its switch changed: apply it at once
+				break
+			}
+		}
+		if _, changed := patch["afterDoneAction"]; changed {
+			d.powerToken++ // calls off a pending sleep / shut down
+		}
 		d.saveSettingsLocked()
 		d.broadcastLocked(true)
 		d.mu.Unlock()
@@ -753,7 +786,7 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		d.mu.Lock()
 		d.lastClip = clip
 		d.mu.Unlock()
-		return d.addLink(clip, "")
+		return d.addLink(clip, "", "")
 
 	case "openMainWindow":
 		go openAppWindow(fmt.Sprintf("http://127.0.0.1:%d/?token=%s", d.port, d.token), false)
@@ -794,40 +827,38 @@ func (d *daemonServer) proxySetting() string {
 	return p
 }
 
-func (d *daemonServer) addLink(rawURL, title string) map[string]any {
+func (d *daemonServer) addLink(rawURL, title, queue string) map[string]any {
 	rawURL = strings.TrimSpace(rawURL)
 	u, err := neturl.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return map[string]any{"ok": false, "error": "That isn't a web link."}
 	}
-	host := strings.ToLower(u.Hostname())
-	if daemonVideoSitesRe.MatchString(host) {
+	video := func() map[string]any {
 		id := d.startVideoJob(map[string]any{
 			"url":    rawURL,
 			"title":  title,
 			"format": "bv*+ba/b",
 			"sort":   h264Sort,
+			"queue":  queue,
 		})
 		return map[string]any{"ok": true, "id": id}
 	}
+	host := strings.ToLower(u.Hostname())
+	if daemonVideoSitesRe.MatchString(host) {
+		return video()
+	}
 	if daemonFileExtRe.MatchString(u.Path) {
-		id := d.startFastFileJob(rawURL, "", title, "", "", "")
+		id := d.startFastFileJob(rawURL, "", title, d.jobInQueue("", queue), "", "")
 		return map[string]any{"ok": true, "id": id}
 	}
-	p := actionProbe(map[string]any{"url": rawURL})
+	p := actionProbe(map[string]any{"url": rawURL, "proxy": d.proxySetting()})
 	if ok, _ := p["ok"].(bool); ok {
 		if isF, _ := p["isFile"].(bool); isF {
-			id := d.startFastFileJob(rawURL, str(p, "name"), title, "", "", "")
+			id := d.startFastFileJob(rawURL, str(p, "name"), title, d.jobInQueue("", queue), "", "")
 			return map[string]any{"ok": true, "id": id}
 		}
 	}
-	id := d.startVideoJob(map[string]any{
-		"url":    rawURL,
-		"title":  title,
-		"format": "bv*+ba/b",
-		"sort":   h264Sort,
-	})
-	return map[string]any{"ok": true, "id": id}
+	return video()
 }
 
 func (d *daemonServer) startVideoJob(req map[string]any) string {
@@ -877,6 +908,12 @@ func (d *daemonServer) startVideoJob(req map[string]any) string {
 		"eta":          "",
 		"error":        nil,
 	})
+	if q := strings.TrimSpace(str(req, "queue")); q != "" {
+		d.updateJob(id, map[string]any{"queue": q})
+	}
+	if d.holdForSchedule(id) {
+		return id
+	}
 
 	// If title was just the URL, fetch the real video title in the background.
 	if title == rawURL {
@@ -950,6 +987,9 @@ func (d *daemonServer) startFastFileJob(rawURL, name, title, id, referrer, sha25
 		"expectedSha256": sha256,
 		"error":          nil,
 	})
+	if d.holdForSchedule(id) {
+		return id
+	}
 
 	d.mu.Lock()
 	maxSpeed, _ := d.settings["maxSpeedKbps"].(float64)
@@ -1111,7 +1151,15 @@ func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 			return
 
 		case "paused":
-			d.updateJob(id, map[string]any{"status": "paused", "speed": "", "eta": ""})
+			// Paused by the schedule (not by the user): it waits for the next time window.
+			d.mu.Lock()
+			held, _ := d.jobs[id]["heldBySchedule"].(bool)
+			d.mu.Unlock()
+			status := "paused"
+			if held {
+				status = "scheduled"
+			}
+			d.updateJob(id, map[string]any{"status": status, "speed": "", "eta": ""})
 			return
 
 		case "error", "fallback":
@@ -1143,8 +1191,15 @@ func (d *daemonServer) sendWorkerControl(id, action string) bool {
 }
 
 func (d *daemonServer) pauseJob(id string) {
+	d.mu.Lock()
+	st := str(d.jobs[id], "status")
+	d.mu.Unlock()
+	if st == "scheduled" || st == "queued" { // not running yet: just stop it from starting
+		d.updateJob(id, map[string]any{"status": "paused", "heldBySchedule": false})
+		return
+	}
 	if d.sendWorkerControl(id, "pause") {
-		d.updateJob(id, map[string]any{"status": "paused", "speed": "", "eta": ""})
+		d.updateJob(id, map[string]any{"status": "paused", "speed": "", "eta": "", "heldBySchedule": false})
 	}
 }
 
@@ -1226,7 +1281,7 @@ func (d *daemonServer) watchClipboardLoop() {
 			}
 			if daemonVideoSitesRe.MatchString(u.Hostname()) || daemonFileExtRe.MatchString(u.Path) {
 				logf("clipboard watch auto-adding: %s", clip)
-				d.addLink(clip, "")
+				d.addLink(clip, "", "")
 			}
 		}
 	}

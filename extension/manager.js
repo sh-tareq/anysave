@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
 let jobs = {};
 let filter = "all";
+let currentSettings = {}; // the latest settings (queues, schedule)
 
 // ---------- tabs ----------
 function showTab(name) {
@@ -168,6 +169,9 @@ function render() {
     switch (filter) {
       case "all": return j.status !== "cancelled";
       case "failed": return j.status === "error" || j.status === "cancelled";
+      default: if (filter.startsWith("q:")) return (j.queue || "") === filter.slice(2) && j.status !== "cancelled";
+    }
+    switch (filter) {
       case "files": return j.status === "done" && !["Videos", "Music", "Converted"].includes(c);
       default: return j.status === "done" && c === filter;
     }
@@ -186,7 +190,8 @@ function row(j) {
   const pct = Math.max(0, Math.min(100, j.percent || 0));
   const running = ACTIVE.includes(j.status);
   const paused = j.status === "paused";
-  const queued = j.status === "queued";
+  const scheduled = j.status === "scheduled";
+  const queued = j.status === "queued" || scheduled;
   const ask = j.status === "ask";
   let line;
   if (running) {
@@ -194,6 +199,7 @@ function row(j) {
     line = j.status === "starting" ? "Starting…"
       : [`${pct.toFixed(0)}%`, prog, j.speed, j.eta && `ETA ${j.eta}`].filter(Boolean).join(" · ");
   } else if (paused) line = ["Paused", `${pct.toFixed(0)}%`].join(" · ");
+  else if (scheduled) line = `Scheduled · starts at ${currentSettings.scheduleStart || "the set time"}`;
   else if (queued) line = "Queued · starts when a download finishes";
   else if (ask) line = ["Choose who downloads this file", size(j.totalBytes), j.site].filter(Boolean).join(" · ");
   else if (j.status === "done") line = ["Done", j.qualityLabel, size(j.totalBytes), j.site, ago(j.finishedAt || j.createdAt)].filter(Boolean).join(" · ");
@@ -220,7 +226,7 @@ function row(j) {
     <div class="info">
       <div class="name" title="${esc(j.fileName || j.title || j.url)}">${esc(displayName(j))}</div>
       ${progBarHtml}
-      <div class="meta">${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : j.status === "done" ? esc(line).replace(/^Done/, '<span class="ok">Done</span>') : esc(line)}</div>
+      <div class="meta">${j.queue ? `<span class="tag queue" title="Queue">${esc(j.queue)}</span>` : ""}${j.status === "done" && extOf(j.fileName || j.file) ? `<span class="tag">${esc(extOf(j.fileName || j.file).toUpperCase().slice(0, 4))}</span>` : ""}${j.status === "error" ? line : j.status === "done" ? esc(line).replace(/^Done/, '<span class="ok">Done</span>') : esc(line)}</div>
       <div class="refresh-slot"></div>
     </div>
     <div class="btns"></div>`;
@@ -241,7 +247,16 @@ function row(j) {
   }
   if (running && j.kind !== "convert") add("pause", "Pause", () => send({ type: "pause", id: j.id }));
   if (paused) add("play", "Resume", () => send({ type: "resume", id: j.id }));
+  if (scheduled) add("play", "Start now", () => send({ type: "startNow", id: j.id }));
   if (queued) add("pause", "Pause", () => send({ type: "pause", id: j.id }));
+  // Waiting downloads can be moved to another queue.
+  if ((queued || paused) && queueNames().length) {
+    const sel = document.createElement("select");
+    sel.className = "row-queue"; sel.title = "Move to queue";
+    sel.innerHTML = ["", ...queueNames()].map((q) => `<option value="${esc(q)}"${(j.queue || "") === q ? " selected" : ""}>${esc(q || "Main queue")}</option>`).join("");
+    sel.onchange = () => send({ type: "moveQueue", id: j.id, queue: sel.value });
+    btns.appendChild(sel);
+  }
   if (running || paused || queued) add("close", "Cancel", () => send({ type: "cancel", id: j.id }));
   if (j.status === "done" && (j.file || j.downloadId)) {
     const open = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
@@ -373,8 +388,10 @@ document.querySelectorAll("#filters .chip").forEach((c) => c.addEventListener("c
   document.querySelectorAll("#filters .chip").forEach((x) => x.classList.toggle("active", x === c));
   filter = c.dataset.f; render();
 }));
-$("pauseAll").onclick = () => Object.values(jobs).filter((j) => ACTIVE.includes(j.status) && j.kind !== "convert").forEach((j) => send({ type: "pause", id: j.id }));
-$("resumeAll").onclick = () => Object.values(jobs).filter((j) => j.status === "paused").forEach((j) => send({ type: "resume", id: j.id }));
+// With a queue chip selected, Pause all / Resume all act on that queue only.
+const inShownQueue = (j) => !filter.startsWith("q:") || (j.queue || "") === filter.slice(2);
+$("pauseAll").onclick = () => Object.values(jobs).filter((j) => inShownQueue(j) && [...ACTIVE, "queued", "scheduled"].includes(j.status) && j.kind !== "convert").forEach((j) => send({ type: "pause", id: j.id }));
+$("resumeAll").onclick = () => Object.values(jobs).filter((j) => inShownQueue(j) && j.status === "paused").forEach((j) => send({ type: "resume", id: j.id }));
 $("clearDone").onclick = () => send({ type: "clear" });
 
 // Expand numeric range patterns like https://example.com/file[01-10].zip into 10 URLs.
@@ -442,8 +459,8 @@ $("addForm").addEventListener("submit", async (e) => {
   for (const url of list) {
     // Only AnySave's own engine can check a checksum, so that download doesn't go to Chrome.
     const res = sha256 && /^https?:\/\//i.test(url)
-      ? await send({ type: "file", url, sha256, forceHandler: "anysave" })
-      : await send({ type: "addLink", url, forceHandler });
+      ? await send({ type: "file", url, sha256, forceHandler: "anysave", queue: addQueue() })
+      : await send({ type: "addLink", url, forceHandler, queue: addQueue() });
     if (res?.ok) ok++; else lastErr = res?.error || "Couldn't add this link";
   }
   btn.disabled = false; btn.textContent = "Download";
@@ -604,7 +621,14 @@ function applySettingsUI(settings = {}) {
   const langs = new Set(String(settings.subLangs || "").split(/[\s,;]+/).filter(Boolean));
   document.querySelectorAll("#subLangsBox input").forEach((c) => { c.checked = langs.has(c.value); });
   if ($("proxy") && document.activeElement !== $("proxy")) $("proxy").value = settings.proxy || "";
+  currentSettings = settings;
+  if ($("scheduleOn")) $("scheduleOn").checked = !!settings.scheduleOn;
+  if ($("scheduleStart") && document.activeElement !== $("scheduleStart")) $("scheduleStart").value = settings.scheduleStart || "01:00";
+  if ($("scheduleStop") && document.activeElement !== $("scheduleStop")) $("scheduleStop").value = settings.scheduleStop || "07:00";
+  if ($("queues") && document.activeElement !== $("queues")) $("queues").value = settings.queues || "";
+  syncQueueUI();
   if ($("embedChapters")) $("embedChapters").checked = settings.embedChapters !== false;
+  if ($("notifications")) $("notifications").checked = settings.notifications !== false;
   if ($("embedCover")) $("embedCover").checked = !!settings.embedCover;
 }
 
@@ -631,6 +655,50 @@ if ($("subLangsBox")) {
     send({ type: "setSettings", patch: { subLangs: picked.join(",") } });
   });
 }
+// ---------- queues and schedule ----------
+function queueNames() {
+  return [...new Set(String(currentSettings.queues || "").split(",").map((q) => q.trim().slice(0, 24)).filter(Boolean))];
+}
+function addQueue() { return $("addQueue") && !$("addQueue").hidden ? $("addQueue").value : ""; }
+function syncQueueUI() {
+  const names = queueNames();
+  const options = (first) => [["", first], ...names.map((q) => [q, q])];
+  const fill = (sel, opts, keep) => {
+    if (!sel) return;
+    const want = keep ?? sel.value;
+    sel.innerHTML = opts.map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+    sel.value = opts.some(([v]) => v === want) ? want : "";
+  };
+  fill($("addQueue"), options("Main queue"));
+  if ($("addQueue")) $("addQueue").hidden = !names.length;
+  fill($("scheduleQueue"), [["", "all downloads"], ...names.map((q) => [q, `the "${q}" queue only`])], currentSettings.scheduleQueue || "");
+  const chips = $("queueChips");
+  if (chips) {
+    chips.innerHTML = names.map((q) => `<button class="chip${filter === "q:" + q ? " active" : ""}" data-f="q:${esc(q)}">${esc(q)}</button>`).join("");
+    chips.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => {
+      document.querySelectorAll("#filters .chip").forEach((x) => x.classList.toggle("active", x === c));
+      filter = c.dataset.f;
+      render();
+    }));
+    if (filter.startsWith("q:") && !names.includes(filter.slice(2))) { filter = "all"; }
+  }
+}
+$("scheduleOn")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { scheduleOn: e.target.checked } }));
+$("scheduleStart")?.addEventListener("change", (e) => { if (e.target.value) send({ type: "setSettings", patch: { scheduleStart: e.target.value } }); });
+$("scheduleStop")?.addEventListener("change", (e) => { if (e.target.value) send({ type: "setSettings", patch: { scheduleStop: e.target.value } }); });
+$("scheduleQueue")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { scheduleQueue: e.target.value } }));
+$("queues")?.addEventListener("change", (e) => {
+  const clean = [...new Set(e.target.value.split(",").map((q) => q.trim().slice(0, 24)).filter(Boolean))].join(", ");
+  const patch = { queues: clean };
+  // A schedule for a queue that no longer exists would silently do nothing: make it "all downloads".
+  if (currentSettings.scheduleQueue && !clean.split(", ").includes(currentSettings.scheduleQueue)) patch.scheduleQueue = "";
+  send({ type: "setSettings", patch });
+});
+
+// Some settings only make sense in the browser extension, others only in the desktop app.
+const IN_EXTENSION = !!(window.chrome && chrome.runtime && chrome.runtime.id);
+document.querySelectorAll(IN_EXTENSION ? ".desktop-only" : ".extension-only").forEach((el) => el.remove());
+$("notifications")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { notifications: e.target.checked } }));
 $("embedChapters")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { embedChapters: e.target.checked } }));
 $("embedCover")?.addEventListener("change", (e) => send({ type: "setSettings", patch: { embedCover: e.target.checked } }));
 // A proxy address is checked before it is saved, so a typo can't silently break every download.

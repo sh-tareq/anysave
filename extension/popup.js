@@ -654,7 +654,7 @@ function renderJobs(jobs) {
     else if (j.status === "done") line = '<span class="ok">✓ Saved</span>';
     else if (j.status === "error") line = `<span class="err">${escapeHtml(j.error || "Failed")}</span>`;
     else if (j.status === "ask") line = "Download with:";
-    else line = escapeHtml({ queued: "Queued", starting: "Starting…", paused: `Paused · ${pct.toFixed(0)}%`, cancelled: "Cancelled" }[j.status] || j.status);
+    else line = escapeHtml({ queued: "Queued", scheduled: "Scheduled", starting: "Starting…", paused: `Paused · ${pct.toFixed(0)}%`, cancelled: "Cancelled" }[j.status] || j.status);
     li.innerHTML = `<div class="name">${escapeHtml(j.title || j.url)}</div>
       ${["downloading", "starting", "merging", "converting", "queued", "paused"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
       <div class="row small muted"><span>${line}</span><span class="act"></span></div>`;

@@ -369,6 +369,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let jobs = obj["jobs"] as? [String: [String: Any]] else { return }
+            // "When all downloads finish: quit AnySave" - the service is stopping, close the app too.
+            if (obj["quitting"] as? Bool) == true {
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+                return
+            }
             var active = 0
             var starting = 0
             var doneCount = 0

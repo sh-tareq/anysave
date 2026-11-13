@@ -104,3 +104,15 @@ footer a { color: var(--muted); }
 .sub-langs { margin: 10px 0 4px; }
 .lang-box { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
 .lang-box label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+
+/* Scheduler and queues */
+.schedule-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 12px 0 8px; }
+.schedule-box .muted { flex-basis: 100%; }
+.schedule-box input[type="time"], .schedule-box select, .queues-box input, #addQueue, .row-queue {
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); font: inherit; }
+.schedule-box input[type="time"], .schedule-box select { width: auto; }
+.queues-box { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; max-width: 420px; }
+#addQueue { width: auto; max-width: 150px; }
+#queueChips { display: contents; }
+.row-queue { width: auto; max-width: 120px; padding: 3px 6px; font-size: 12px; }
+.tag.queue { background: rgba(128, 128, 128, 0.22); color: inherit; }

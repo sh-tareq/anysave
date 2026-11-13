@@ -898,6 +898,8 @@ func main() {
 		send(actionFileInfo(msg))
 	case "hash":
 		send(actionHash(msg))
+	case "power":
+		send(actionPower(msg))
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":

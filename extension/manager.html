@@ -21,6 +21,7 @@
     <section id="downloads" class="panel">
       <form id="addForm" class="add">
         <input id="addUrl" type="text" inputmode="url" autocomplete="off" placeholder="Paste one or more links, or a batch pattern like https://…/file[01-10].zip" required />
+        <select id="addQueue" title="Which queue the new download goes into" hidden></select>
         <button class="primary" type="submit">Download</button>
       </form>
       <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
@@ -82,15 +83,34 @@
                 <option value="none">Do nothing</option>
                 <option value="reveal">Show last file in folder</option>
                 <option value="open">Open last file</option>
+                <option value="sleep">Put the computer to sleep</option>
+                <option value="shutdown">Shut down the computer</option>
+                <option value="quit" class="desktop-only">Quit AnySave</option>
               </select>
             </label>
             <label class="small">Proxy <span class="muted">(blank = this computer's proxy settings)</span>
               <input id="proxy" type="text" placeholder="http://host:port, socks5://host:port or direct" />
             </label>
           </div>
+          <div class="small schedule-box">
+            <label class="check"><input type="checkbox" id="scheduleOn" />
+              <span>Only download between</span></label>
+            <input id="scheduleStart" type="time" value="01:00" aria-label="Start time" />
+            <span>and</span>
+            <input id="scheduleStop" type="time" value="07:00" aria-label="Stop time" />
+            <span>for</span>
+            <select id="scheduleQueue" aria-label="Which downloads the schedule applies to"></select>
+            <div class="muted">Outside these hours downloads wait as <b>Scheduled</b> and start by themselves; running ones pause when the time is over. <b>Start now</b> on a row skips the wait for that one.</div>
+          </div>
+          <label class="small queues-box">Extra queues <span class="muted">(names separated by commas; e.g. Night, Work)</span>
+            <input id="queues" type="text" placeholder="e.g. Night, Work" />
+          </label>
           <div class="small sub-langs">Subtitles inside videos <span class="muted">(tick the languages you want; a video gets the ones it has)</span>
             <div id="subLangsBox" class="lang-box"></div>
           </div>
+          <label class="check small extension-only"><input type="checkbox" id="notifications" checked />
+            <span>Show a notification when a download finishes or fails</span>
+          </label>
           <label class="check small"><input type="checkbox" id="embedChapters" checked />
             <span>Keep chapter marks inside videos</span>
           </label>
@@ -125,6 +145,7 @@
           <button class="chip" data-f="files">Files</button>
           <button class="chip" data-f="Converted">Converted</button>
           <button class="chip" data-f="failed">Failed</button>
+          <span id="queueChips"></span>
         </div>
         <div class="actions">
           <button id="pauseAll" class="link">Pause all</button>
