@@ -31,6 +31,16 @@ AnySave for Mac - download videos, files and convert media
    - For Instagram, and Facebook posts that need a login, tick
      "Use my Chrome login".
 
+   - Transcribe: in the download manager, the Transcribe button on a finished
+     video turns its speech into text and subtitles (pick the language).
+
+Why the warnings?  AnySave is free and not signed with a paid Apple developer
+certificate, so macOS warns the first time. Right-click > Open (or "Open Anyway"
+in Privacy & Security) is the normal way to open such apps; nothing is wrong.
+
+To remove AnySave:  right-click "Uninstall AnySave.command" and choose Open.
+It asks first, and keeps your downloads.
+
 Something stopped working?  Run "Install AnySave.command" again. That gets
 the newest version of the downloader, which fixes most problems.
 

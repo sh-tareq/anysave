@@ -298,7 +298,8 @@ errors, and a version check between extension and helper (helper action `version
 new actions fail with "Run the AnySave installer again" when the helper is older).
 
 Still open:
-- Desktop: no code signing (macOS/Windows warn "unknown developer"; owner's decision, costs money); the Mac file
+- Desktop: no code signing, by the owner's decision (14 Nov 2026: no Apple, Microsoft or Google developer accounts
+  for now); the install instructions explain the first-open warnings on Mac, Windows and Android; the Mac file
   picker fix is unconfirmed by a person; no automatic update of the helper itself.
 - Extension: no `_locales`/i18n (Bangla UI); manager tabs/chips/progress bars lack ARIA roles; no `:focus-visible`.
 - Android: `targetSdk` 34 (only matters for Google Play); no predictive back; no themed icon; no localization;

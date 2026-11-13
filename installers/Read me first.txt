@@ -7,6 +7,18 @@ Open the folder for your computer:
   Windows  ->  AnySave-windows  (start with "How to install.txt")
 
 Android phones: install AnySave.apk instead (sent separately).
+  - Open the file; if Android asks, allow installing apps from that source
+    (Files or Chrome) and tap Install.
+  - If Google Play Protect warns about an unknown developer, tap
+    "More details" > "Install anyway". AnySave isn't on Google Play
+    (Play doesn't allow YouTube downloaders), so this warning is expected.
+  - Updating from an AnySave before version 1.2: install the new one, then
+    uninstall the old one. The new app starts empty (settings and history
+    don't carry over).
+
+Mac and Windows show a warning the first time because AnySave isn't signed
+with a paid developer certificate. The "How to install" files explain how
+to open it anyway.
 
 IMPORTANT - COPYRIGHT
 Only download videos and files you own or have permission to save.
