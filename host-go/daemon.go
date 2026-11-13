@@ -252,7 +252,7 @@ func (d *daemonServer) loadPersistedState() {
 					job["status"] = "paused"
 					job["speed"] = ""
 					job["eta"] = ""
-					if k := str(job, "kind"); k == "transcribe" || k == "convert" {
+					if k := str(job, "kind"); k == "transcribe" || k == "convert" || k == "subs" {
 						// These can't continue where they stopped: offer Retry instead.
 						job["status"] = "error"
 						job["error"] = "Stopped when AnySave closed. Retry to start again."
@@ -693,6 +693,10 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		id := d.startTranscribeJob(req)
 		return map[string]any{"ok": true, "id": id}
 
+	case "subs":
+		id := d.startSubsJob(req)
+		return map[string]any{"ok": true, "id": id}
+
 	case "pause":
 		d.pauseJob(str(req, "id"))
 		return map[string]any{"ok": true}
@@ -1091,6 +1095,29 @@ func (d *daemonServer) startTranscribeJob(req map[string]any) string {
 	return id
 }
 
+// startSubsJob puts a transcript's subtitles into its video (as a track, or drawn on the picture).
+func (d *daemonServer) startSubsJob(req map[string]any) string {
+	id := str(req, "id")
+	if id == "" {
+		id = newDaemonJobID()
+	}
+	mode := str(req, "mode")
+	label := "Subtitles inside (switchable)"
+	if mode == "burn" {
+		label = "Captions drawn on the video"
+	} else {
+		mode = "embed"
+	}
+	d.updateJob(id, map[string]any{
+		"kind": "subs", "url": str(req, "video"), "srt": str(req, "srt"), "lang": str(req, "lang"), "mode": mode,
+		"title": str(req, "name"), "site": "Local file", "qualityLabel": label, "status": "starting", "percent": 0.0,
+		"speed": "", "eta": "", "error": nil, "file": nil,
+	})
+	go d.startDaemonWorker(id, map[string]any{"action": "subs", "video": str(req, "video"), "srt": str(req, "srt"),
+		"lang": str(req, "lang"), "mode": mode})
+	return id
+}
+
 func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 	cmd := command(d.selfBin)
 	stdinPipe, err := cmd.StdinPipe()
@@ -1290,6 +1317,9 @@ func (d *daemonServer) retryJob(id string) {
 		})
 	case "transcribe":
 		d.startTranscribeJob(map[string]any{"id": id, "path": str(j, "url"), "name": str(j, "title"), "lang": str(j, "lang")})
+	case "subs":
+		d.startSubsJob(map[string]any{"id": id, "video": str(j, "url"), "srt": str(j, "srt"), "lang": str(j, "lang"),
+			"mode": str(j, "mode"), "name": str(j, "title")})
 	default:
 		d.startVideoJob(j)
 	}

@@ -102,6 +102,11 @@ desktop app): pick the spoken language, get `<name>.<lang>.srt` and `<name>.<lan
   produces garbage for Bangla even when told the language; Whisper spends about one token per byte on Bangla and stops
   at ~220 tokens per 30-second window, dropping ~80% of the speech, so non-English audio is cut at pauses into pieces
   of at most 7 s; `-sns` (suppress non-speech) made English text repeat itself, so it is not used.
+- Subtitles into the video (`host-go/subs.go`, helper action `subs`), two buttons on a finished transcript:
+  "embed" adds a switchable subtitle track without re-encoding (`<name> (subtitles).mp4`, language-tagged);
+  "burn" draws the captions onto the picture (`<name> (captions).mp4`, libx264), smaller text for portrait videos.
+  Bangla is shaped correctly (libass + HarfBuzz in the installed FFmpeg; Kohinoor Bangla on Mac, Nirmala UI on
+  Windows). Files are worked on as copies with plain names, so names with ' : etc. are fine.
 - Not tested: Windows (CPU only there, so the 547 MB model will be slow), Intel Macs (CPU), very long videos,
   music-heavy audio, the model download through a proxy, Transcribe inside the Mac app window.
 

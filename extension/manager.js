@@ -23,6 +23,7 @@ function extOf(n) { const m = String(n || "").split(/[?#]/)[0].match(/\.([a-z0-9
 function category(j) {
   if (j.kind === "convert") return "Converted";
   if (j.kind === "transcribe") return "Documents";
+  if (j.kind === "subs") return "Videos";
   const e = extOf(j.fileName || j.file || j.title);
   if (j.audioOnly || /^(mp3|m4a|aac|wav|flac|ogg|opus|wma)$/.test(e)) return "Music";
   if (j.kind === "video" || /^(mp4|mkv|webm|mov|avi|m4v|flv|wmv|ts|mpe?g|3gp)$/.test(e)) return "Videos";
@@ -49,6 +50,8 @@ const P = {
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
   text: "M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z",
+  cc: "M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z",
+  burn: "M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM5 13h9v2H5zm0-3h14v2H5z",
   retry: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
   link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z",
   check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
@@ -278,6 +281,14 @@ function row(j) {
   }
   if (j.status === "done" && j.file) {
     if (j.kind !== "transcribe") add("check", "Check against a SHA-256 checksum", () => verifyChecksum(j));
+    if (j.kind === "transcribe" && /\.srt$/i.test(j.file) && j.url) {
+      const name = String(j.url).split(/[\\/]/).pop();
+      const subs = (mode) => send({ type: "subs", video: j.url, srt: j.file, lang: j.lang, mode, name }).then((r) => {
+        if (!r?.ok) alert(r?.error || "Couldn't start.");
+      });
+      add("cc", "Put the subtitles inside the video (viewers can switch them on or off; takes seconds)", () => subs("embed"));
+      add("burn", "Draw the captions onto the video (always visible, like social media videos)", () => subs("burn"));
+    }
     if (["Videos", "Music"].includes(category(j))) {
       add("text", "Transcribe: turn the speech into text and subtitles", () => {
         openTranscribeJobId = openTranscribeJobId === j.id ? null : j.id;

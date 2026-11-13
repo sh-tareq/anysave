@@ -230,6 +230,17 @@ async function startTranscribe({ path, name, lang, id }) {
   return id;
 }
 
+// After "Transcribe": the subtitles into the video, as a track ("embed") or drawn on the picture ("burn").
+async function startSubs({ video, srt, lang, mode, name, id }) {
+  id = id || newId();
+  mode = mode === "burn" ? "burn" : "embed";
+  await updateJob(id, { kind: "subs", url: video, srt, lang, mode, title: name, site: "Local file", status: "starting",
+    percent: 0, error: null, speed: "", eta: "", file: null,
+    qualityLabel: mode === "burn" ? "Captions drawn on the video" : "Subtitles inside (switchable)" });
+  runNative(id, { action: "subs", video, srt, lang, mode });
+  return id;
+}
+
 async function startConvert({ path, name, spec, id }) {
   id = id || newId();
   await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0, error: null,
@@ -788,6 +799,7 @@ async function retry(id) {
   if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: j.engine === "chrome" ? "chrome" : "anysave", referrer: j.referrer, sha256: j.expectedSha256 });
   if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec, id });
   if (j.kind === "transcribe") return startTranscribe({ path: j.url, name: j.title, lang: j.lang, id });
+  if (j.kind === "subs") return startSubs({ video: j.url, srt: j.srt, lang: j.lang, mode: j.mode, name: j.title, id });
   return startVideo({ ...j, id });
 }
 async function chooseHandler(id, handler) {
@@ -815,7 +827,7 @@ async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
   return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
-const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe"]);
+const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe", "subs"]);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -839,6 +851,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "clickModifier": recordClickModifier(msg); return { ok: true };
       case "convert": return { ok: true, id: await startConvert(msg) };
       case "transcribe": return { ok: true, id: await startTranscribe(msg) };
+      case "subs": return { ok: true, id: await startSubs(msg) };
       case "pickFile": return native({ action: "pickFile" });
       case "pause": await pause(msg.id); return { ok: true };
       case "resume":
@@ -1253,7 +1266,7 @@ mutateJobs((jobs) => {
     if (!["starting", "downloading"].includes(j.status) || ports.has(j.id)) continue;
     if (j.kind === "video" || (j.kind === "file" && j.engine === "fast" && !j.downloadId)) Object.assign(j, { status: "paused", speed: "", eta: "" });
     else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
-    else if (j.kind === "transcribe") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to transcribe again.", speed: "", eta: "" });
+    else if (j.kind === "transcribe" || j.kind === "subs") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to start again.", speed: "", eta: "" });
   }
 });
 // Start queued videos again (the queue lives in storage, so it survives restarts), and apply

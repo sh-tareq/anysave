@@ -891,7 +891,7 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			logf("panic: %v", r)
-			if action == "download" || action == "fastDownload" || action == "convert" || action == "transcribe" {
+			if action == "download" || action == "fastDownload" || action == "convert" || action == "transcribe" || action == "subs" {
 				send(map[string]any{"type": "error", "message": fmt.Sprint(r)})
 			} else {
 				send(map[string]any{"ok": false, "error": fmt.Sprint(r)})
@@ -925,6 +925,8 @@ func main() {
 		send(actionCrawl(msg))
 	case "transcribe":
 		actionTranscribe(msg)
+	case "subs":
+		actionSubs(msg)
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":
