@@ -40,8 +40,13 @@ func openWithDefaultApp(path string) error {
 
 // pickFile shows the macOS "choose a file" dialog. Returns "" if the user cancels.
 func pickFile() (string, error) {
+	// The helper runs in the background (Chrome starts it), so macOS would open the picker
+	// behind Chrome. Bringing the script's own process to the front first makes it appear on top.
 	script := `try
-	POSIX path of (choose file with prompt "Choose a video or audio file to convert" of type {"public.movie", "public.audio"})
+	tell current application
+		activate
+		return POSIX path of (choose file with prompt "Choose a video or audio file to convert" of type {"public.movie", "public.audio"})
+	end tell
 on error number -128
 	return ""
 end try`

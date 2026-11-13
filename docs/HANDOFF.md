@@ -255,8 +255,8 @@ Key protocol facts:
 Desktop: Windows Downloads path is hard-coded (use the Known Folder API); log file never rotates and lives next to
 the helper; no uninstaller; no version handshake between extension and helper; no auto-update of yt-dlp/helper;
 no code signing; raw ffmpeg errors shown on convert failure; Windows child processes may survive if Chrome kills
-the host (use a Job Object); Mac `osascript` file picker may open behind Chrome.
+the host (use a Job Object); Mac `osascript` file picker may open behind Chrome (fix added 13 Nov: the script activates itself first; not yet confirmed by a person, because testing it pops a dialog on the owner's screen).
 Extension: no `_locales`/i18n; manager tabs/chips/progress bars lack ARIA roles; no `:focus-visible` styles;
 no notifications on finish/fail.
-Android: `targetSdk` 34 (Play needs 35); no predictive back; "Save location" row does nothing; no themed icon;
+Android: `targetSdk` 34 (Play needs 35); no predictive back; "Save location" row (now opens Downloads/AnySave, falling back to the system Downloads screen); no themed icon;
 no localization; dark-mode launch flash (window theme is light).

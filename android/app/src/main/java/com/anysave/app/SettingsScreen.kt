@@ -234,7 +234,9 @@ fun SettingsScreen(vm: MainViewModel) {
 
         Section("Storage")
         SettingRow(Icons.Outlined.Folder, "Save location",
-            if (sortFolders) "Downloads/AnySave/<type>" else "Downloads/AnySave", null) {}
+            if (sortFolders) "Downloads/AnySave/<type>" else "Downloads/AnySave", "Tap to open the folder") {
+            openSaveFolder(ctx)
+        }
         SettingRow(Icons.Outlined.DeleteSweep, "Clear download list", "Files are kept", null) {
             Downloads.clearFinished(); vm.messages.tryEmit("List cleared")
         }
@@ -329,6 +331,24 @@ fun SettingsScreen(vm: MainViewModel) {
         },
         confirmButton = { TextButton(onClick = { pickQuality = false }) { Text("Close") } },
     )
+}
+
+/**
+ * Opens Downloads/AnySave in the phone's file manager. Not every file manager accepts a folder
+ * link, so it falls back to the system Downloads screen.
+ */
+private fun openSaveFolder(ctx: Context) {
+    val folder = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FAnySave")
+    val tries = listOf(
+        android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(folder, android.provider.DocumentsContract.Document.MIME_TYPE_DIR),
+        android.content.Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS),
+    )
+    for (intent in tries) {
+        val ok = runCatching { ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+        if (ok) return
+    }
+    android.widget.Toast.makeText(ctx, "Open the Downloads app and look in the AnySave folder", android.widget.Toast.LENGTH_LONG).show()
 }
 
 /** Subtitle languages offered: English, Bangla and the other most-used ones. */
