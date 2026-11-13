@@ -405,8 +405,8 @@ func actionConvert(msg map[string]any) {
 		fail("Cancelled")
 	case err != nil:
 		os.Remove(out)
-		lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
-		fail("Couldn't convert: " + strings.TrimSpace(lines[len(lines)-1]))
+		logf("convert failed: %s", stderr.String())
+		fail(convertError(stderr.String(), spec.Format))
 	default:
 		send(map[string]any{"type": "done", "file": out})
 	}
@@ -639,4 +639,27 @@ func engineTrace() func(string) {
 		return nil
 	}
 	return func(line string) { logf("engine: %s", line) }
+}
+
+// convertError turns FFmpeg's error output into a plain sentence (the details go to the log).
+func convertError(stderr, format string) string {
+	l := strings.ToLower(stderr)
+	isAudioOut := format == "mp3" || format == "m4a" || format == "wav" || format == "opus"
+	switch {
+	case strings.Contains(l, "no space left"):
+		return "Couldn't convert: the disk is full. Free some space and try again."
+	case strings.Contains(l, "permission denied"):
+		return "Couldn't convert: AnySave isn't allowed to write to the Converted folder."
+	case strings.Contains(l, "invalid data found") || strings.Contains(l, "moov atom not found") ||
+		strings.Contains(l, "end of file") && strings.Contains(l, "error opening input"):
+		return "Couldn't convert: this file is damaged or incomplete (perhaps the download didn't finish)."
+	case !isAudioOut && (strings.Contains(l, "does not contain any stream") || strings.Contains(l, "matches no streams") ||
+		strings.Contains(l, "error opening output files") || strings.Contains(l, "no video stream")):
+		return "Couldn't convert: this file has no picture, only sound. Choose an audio format such as MP3."
+	case strings.Contains(l, "does not contain any stream") || strings.Contains(l, "matches no streams"):
+		return "Couldn't convert: this file has no sound to save."
+	case strings.Contains(l, "unknown encoder") || strings.Contains(l, "encoder not found"):
+		return "Couldn't convert: this FFmpeg can't make " + strings.ToUpper(format) + " files. Run the AnySave installer again."
+	}
+	return "Couldn't convert this file. It may be damaged or in a format that can't be read."
 }

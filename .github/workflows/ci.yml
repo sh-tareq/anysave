@@ -69,6 +69,7 @@ jobs:
           Copy-Item -Recurse ../extension ../dist/AnySave-windows/extension
           Copy-Item ../installers/windows/install.ps1 ../dist/AnySave-windows/install.ps1
           Copy-Item "../installers/windows/Install AnySave.bat" "../dist/AnySave-windows/Install AnySave.bat"
+          Copy-Item ../installers/windows/uninstall.ps1 ../dist/AnySave-windows/uninstall.ps1
 
       - name: Run Windows install.ps1 for real & verify installation
         shell: pwsh
@@ -87,6 +88,7 @@ jobs:
             (Join-Path $Bin 'yt-dlp.exe'),
             (Join-Path $Bin 'ffmpeg.exe'),
             (Join-Path $Bin 'deno.exe'),
+            (Join-Path $Bin 'whisper\whisper-cli.exe'),
             (Join-Path $Ext 'manifest.json')
           )) {
             if (-not (Test-Path $f)) { throw "Missing installed file: $f" }
@@ -110,7 +112,10 @@ jobs:
         shell: pwsh
         run: |
           $HostExe = Join-Path $env:LOCALAPPDATA 'AnySave\anysave-host.exe'
-          go run ./cmd/test-helper -bin $HostExe -live
+          # Includes a real transcription with the installed speech engine (downloads the 252 MB model once).
+          $Wav = Join-Path $env:RUNNER_TEMP 'jfk.wav'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.9.5/samples/jfk.wav' -OutFile $Wav
+          go run ./cmd/test-helper -bin $HostExe -live -transcribe $Wav -expect 'ask not what your country'
 
           # Test the installer's "busy" guard while a helper process is running
           $p = Start-Process -FilePath $HostExe -PassThru -WindowStyle Hidden
@@ -124,6 +129,27 @@ jobs:
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }
+
+      - name: Run Windows uninstall.ps1 for real & verify everything is gone
+        shell: pwsh
+        run: |
+          $Dl = Join-Path $env:USERPROFILE 'Downloads\AnySave\keep-me.txt'
+          New-Item -ItemType Directory -Force -Path (Split-Path $Dl) | Out-Null
+          Set-Content -Path $Dl -Value 'user file'
+          & ./dist/AnySave-windows/uninstall.ps1 -Yes
+          $App = Join-Path $env:LOCALAPPDATA 'AnySave'
+          foreach ($p in @($App, (Join-Path $env:USERPROFILE 'AnySave\extension'),
+              'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anysave.host',
+              'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.anysave.host',
+              'HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.anysave.host',
+              'HKCU:\Software\Chromium\NativeMessagingHosts\com.anysave.host',
+              'HKCU:\Software\Classes\anysave')) {
+            if (Test-Path $p) { throw "Still there after uninstall: $p" }
+          }
+          if ((([Environment]::GetEnvironmentVariable('Path', 'User')) -split ';') -contains $App) { throw 'AnySave still in PATH' }
+          if (-not (Test-Path $Dl)) { throw 'The uninstaller removed a downloaded file' }
+          Write-Host '[OK] uninstall removed everything AnySave added and kept the downloads'
+          $global:LASTEXITCODE = 0
 
   # ---------------------------------------------------------------------------
   # 3. macOS: Build universal zip, run install-mac.sh, helper E2E
@@ -161,4 +187,14 @@ jobs:
           test -x "$APP/bin/ffmpeg"
           test -x "$APP/bin/deno"
           test -f "$HOME/AnySave/extension/manifest.json"
-          cd host-go && go run ./cmd/test-helper -bin "$APP/anysave-host" -live
+          test -x "$APP/bin/whisper-cli"
+          curl -sSL -o "$RUNNER_TEMP/jfk.wav" https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.9.5/samples/jfk.wav
+          (cd host-go && go run ./cmd/test-helper -bin "$APP/anysave-host" -live -transcribe "$RUNNER_TEMP/jfk.wav" -expect "ask not what your country")
+          # Uninstall for real, then check it's all gone and the downloads are kept.
+          mkdir -p "$HOME/Downloads/AnySave" && echo keep > "$HOME/Downloads/AnySave/keep-me.txt"
+          bash "$TMP_DIR/AnySave-Desktop/AnySave-mac/Uninstall AnySave.command" --yes
+          test ! -e "$APP"
+          test ! -e "$HOME/AnySave/extension"
+          test ! -e "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anysave.host.json"
+          test -f "$HOME/Downloads/AnySave/keep-me.txt"
+          echo "[OK] uninstall removed everything AnySave added and kept the downloads"

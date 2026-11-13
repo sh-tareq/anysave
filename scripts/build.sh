@@ -55,6 +55,8 @@ cp "$BUILD/whisper-cli" "$MAC/helper/"
 cp -R "$APP_BUNDLE" "$MAC/AnySave.app"
 cp -R "$ROOT/extension" "$MAC/extension"
 cp "$ROOT/installers/mac/install-mac.sh" "$MAC/Install AnySave.command"
+cp "$ROOT/installers/mac/uninstall-mac.sh" "$MAC/Uninstall AnySave.command"
+chmod +x "$MAC/Uninstall AnySave.command"
 cp "$ROOT/installers/mac/How to install.txt" "$MAC/"
 chmod +x "$MAC/Install AnySave.command"
 
@@ -63,7 +65,7 @@ WIN="$PKG/AnySave-windows"
 mkdir -p "$WIN/helper"
 cp "$BUILD/anysave-host.exe" "$WIN/helper/"
 cp -R "$ROOT/extension" "$WIN/extension"
-for f in "Install AnySave.bat" "install.ps1" "How to install.txt"; do
+for f in "Install AnySave.bat" "install.ps1" "Uninstall AnySave.bat" "uninstall.ps1" "How to install.txt"; do
   perl -pe 's/\r?\n/\r\n/' "$ROOT/installers/windows/$f" > "$WIN/$f"
 done
 

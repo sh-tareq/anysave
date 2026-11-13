@@ -31,10 +31,10 @@ with all of Internet Download Manager's (IDM) features plus AnySave's own. See R
 
 | Part | Version | Where |
 |---|---|---|
-| Desktop extension | 1.1.0 | `extension/manifest.json` → `"version"` |
-| Android app | 1.0.4 (versionCode 12) | `android/app/build.gradle.kts` (`FastFileEngine.kt` multi-connection engine). Not released yet: the last published APK is 1.0.3. Bump before the next release. |
-| Helper & Desktop App | 1.1.0 | `host-go/diagnostics.go` → `HelperVersion`. The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `anysave-host --daemon`). |
-| Latest GitHub release | **v1.0.5** (v1.1.0 ready to publish) | github.com/sh-tareq/anysave/releases |
+| Desktop extension | 1.2.0 | `extension/manifest.json` → `"version"` |
+| Android app | 1.2.0 (versionCode 13), package `com.anysave.app` | `android/app/build.gradle.kts`. Not released; the last published APK is 1.0.3 under the old package. `dist-assets/r8-mapping-1.2.0.txt` already exists from an earlier, never-published build: replace it with the real 1.2.0 mapping when the release is built. |
+| Helper & Desktop App | 1.2.0 | `host-go/main.go` → `helperVersion` (also `installers/mac/app/Info.plist`, and `DefaultUserAgent` in `host-go/engine/engine.go`). The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `anysave-host --daemon`). |
+| Latest GitHub release | **v1.0.5**. 1.2.0 is not published: the owner wants to check everything first. | github.com/sh-tareq/anysave/releases |
 
 The owner's Mac and his Android phone (Xiaomi Mi 8, Android 10, adb serial `cb5fdfb5`) run these builds.
 
@@ -289,13 +289,19 @@ Key protocol facts:
 - The owner's Bangla Facebook post about AnySave (ransomware story with cracked IDM) and his page intro/About texts
   were written in the previous session.
 
-## 8. Open items from the earlier audit (not done yet)
+## 8. Open items (checked against the code on 14 November 2026)
 
-Desktop: Windows Downloads path is hard-coded (use the Known Folder API); log file never rotates and lives next to
-the helper; no uninstaller; no version handshake between extension and helper; no auto-update of yt-dlp/helper;
-no code signing; raw ffmpeg errors shown on convert failure; Windows child processes may survive if Chrome kills
-the host (use a Job Object); Mac `osascript` file picker may open behind Chrome (fix added 13 Nov: the script activates itself first; not yet confirmed by a person, because testing it pops a dialog on the owner's screen).
-Extension: no `_locales`/i18n; manager tabs/chips/progress bars lack ARIA roles; no `:focus-visible` styles;
-no notifications on finish/fail.
-Android: `targetSdk` 34 (Play needs 35); no predictive back; "Save location" row (now opens Downloads/AnySave, falling back to the system Downloads screen); no themed icon;
-no localization; dark-mode launch flash (window theme is light).
+Done since the original audit: log rotation (2 MB), Windows Downloads via the Known Folder API, Windows child
+processes in a Job Object, extension notifications, a yt-dlp update button (desktop app), Android "Save location",
+uninstallers (`Uninstall AnySave.command`, `Uninstall AnySave.bat` + `uninstall.ps1`), plain-language converter
+errors, and a version check between extension and helper (helper action `version`; the manager shows a notice and
+new actions fail with "Run the AnySave installer again" when the helper is older).
+
+Still open:
+- Desktop: no code signing (macOS/Windows warn "unknown developer"; owner's decision, costs money); the Mac file
+  picker fix is unconfirmed by a person; no automatic update of the helper itself.
+- Extension: no `_locales`/i18n (Bangla UI); manager tabs/chips/progress bars lack ARIA roles; no `:focus-visible`.
+- Android: `targetSdk` 34 (only matters for Google Play); no predictive back; no themed icon; no localization;
+  dark-mode launch flash; no transcription.
+- Not tested by a person: everything on Windows (CI installs, transcribes a sample and uninstalls there), the Mac
+  app window/menu-bar icon, real sleep/shut down, the uninstallers on a real computer.

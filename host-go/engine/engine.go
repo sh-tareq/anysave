@@ -32,7 +32,7 @@ const (
 	MaxAllowedConns     = 32
 	DefaultMinSplitSize = 256 * 1024 // 256 KB minimum before splitting a segment
 	// DefaultUserAgent says honestly who we are. Servers answer it like any download tool.
-	DefaultUserAgent = "AnySave/1.1 (+https://github.com/sh-tareq/anysave)"
+	DefaultUserAgent = "AnySave/1.2 (+https://github.com/sh-tareq/anysave)"
 	// BrowserUserAgent is only tried when a server refuses the honest one with 403.
 	BrowserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )

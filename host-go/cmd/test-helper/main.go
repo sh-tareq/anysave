@@ -1,15 +1,16 @@
 // End-to-end test for the AnySave helper (macOS, Windows, Linux).
 //
 // Usage:
-//   go run ./cmd/test-helper -bin /path/to/anysave-host [-live]
+//
+//	go run ./cmd/test-helper -bin /path/to/anysave-host [-live]
 //
 // Tests:
-//   1. `--check` and `--version`
-//   2. `diagnostics` action
-//   3. `probe` action (against a local HTTP test server)
-//   4. `fastDownload` multi-connection engine download (against the torture server)
-//   5. `open` and `reveal` on a missing file (safe error response)
-//   6. With -live=true: real YouTube `info`, `playlist`, short video `download`, and `cancel`
+//  1. `--check` and `--version`
+//  2. `diagnostics` action
+//  3. `probe` action (against a local HTTP test server)
+//  4. `fastDownload` multi-connection engine download (against the torture server)
+//  5. `open` and `reveal` on a missing file (safe error response)
+//  6. With -live=true: real YouTube `info`, `playlist`, short video `download`, and `cancel`
 package main
 
 import (
@@ -131,6 +132,8 @@ func runStreamJob(binPath string, env []string, req map[string]any, cancelAfterF
 func main() {
 	bin := flag.String("bin", "", "Path to anysave-host binary")
 	live := flag.Bool("live", false, "Run live YouTube info/playlist/download/cancel checks too")
+	transcribe := flag.String("transcribe", "", "Also transcribe this audio file (English) with the installed speech engine")
+	expect := flag.String("expect", "", "Text the transcript of -transcribe must contain")
 	flag.Parse()
 
 	if *bin == "" {
@@ -415,6 +418,44 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("[OK] live cancel cleaned up partial files and returned Cancelled\n")
+	}
+
+	// version (used by the extension to spot an outdated helper)
+	ver, err := callSingleEnv(*bin, testEnv, map[string]any{"action": "version"})
+	if err != nil || ver["ok"] != true || ver["version"] == "" {
+		fmt.Fprintf(os.Stderr, "version action failed: err=%v res=%v\n", err, ver)
+		os.Exit(1)
+	}
+	fmt.Printf("[OK] version action: %v\n", ver["version"])
+
+	if *transcribe != "" {
+		// The first run downloads the speech model (252 MB) into the user's app data folder.
+		started := time.Now()
+		tmsgs, err := runStreamJob(*bin, testEnv, map[string]any{"action": "transcribe", "path": *transcribe, "lang": "en"}, false)
+		if err != nil || len(tmsgs) == 0 {
+			fmt.Fprintf(os.Stderr, "transcribe failed to run: %v\n", err)
+			os.Exit(1)
+		}
+		last := tmsgs[len(tmsgs)-1]
+		if last["type"] != "done" {
+			fmt.Fprintf(os.Stderr, "transcribe did not finish: %v\n", last)
+			os.Exit(1)
+		}
+		srt, _ := last["srt"].(string)
+		b, err := os.ReadFile(srt)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "transcribe: no subtitle file at %s: %v\n", srt, err)
+			os.Exit(1)
+		}
+		if *expect != "" && !strings.Contains(strings.ToLower(string(b)), strings.ToLower(*expect)) {
+			fmt.Fprintf(os.Stderr, "transcript doesn't contain %q:\n%s\n", *expect, b)
+			os.Exit(1)
+		}
+		text := strings.Join(strings.Fields(string(b)), " ")
+		if len(text) > 160 {
+			text = text[:160]
+		}
+		fmt.Printf("[OK] transcribe (%s, model download included): %s\n", time.Since(started).Round(time.Second), text)
 	}
 
 	fmt.Println("All helper E2E checks passed!")

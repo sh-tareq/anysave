@@ -36,7 +36,7 @@ import (
 
 const (
 	h264Sort      = "res,fps,vcodec:h264,acodec:m4a"
-	helperVersion = "1.1.0"
+	helperVersion = "1.2.0"
 	maxLogBytes   = 2 * 1024 * 1024 // rotate anysave.log at 2 MB
 )
 
@@ -933,8 +933,10 @@ func main() {
 		actionConvert(msg)
 	case "diagnostics":
 		send(actionDiagnostics(msg))
+	case "version":
+		send(map[string]any{"ok": true, "version": helperVersion})
 	default:
-		send(map[string]any{"ok": false, "error": "Unknown action: " + action})
+		send(map[string]any{"ok": false, "error": "Unknown action: " + action, "unknownAction": true})
 	}
 }
 

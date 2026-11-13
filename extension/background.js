@@ -77,10 +77,42 @@ function native(msg) {
   return new Promise((resolve) => {
     chrome.runtime.sendNativeMessage(HOST, msg, (res) => {
       if (chrome.runtime.lastError) resolve(nativeError(chrome.runtime.lastError.message));
-      else resolve(res || { ok: false, error: "No answer from helper" });
+      else resolve(helperTooOld(res) || res || { ok: false, error: "No answer from helper" });
     });
   });
 }
+
+// ---------- extension <-> helper version check ----------
+// The extension and the helper are updated separately (the extension by reloading it, the helper by
+// running the installer). A newer extension asking an older helper for something new gets
+// "Unknown action": say plainly what to do instead.
+const HELPER_OUTDATED = "Your AnySave helper is older than the extension. Run the AnySave installer again to update it, then try again.";
+function helperTooOld(res) {
+  if (res && res.ok === false && (res.unknownAction || /^Unknown action/.test(res.error || ""))) {
+    chrome.storage.local.set({ helperStatus: { outdated: true, at: Date.now() } });
+    return { ok: false, error: HELPER_OUTDATED, helperOutdated: true };
+  }
+  return null;
+}
+function versionLess(a, b) {
+  const pa = String(a || "0").split(".").map(Number), pb = String(b || "0").split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
+  return false;
+}
+// Asked once when the service worker starts; the manager shows a notice when the helper is older.
+async function checkHelperVersion() {
+  const ext = chrome.runtime.getManifest().version;
+  const res = await new Promise((resolve) => chrome.runtime.sendNativeMessage(HOST, { action: "version" }, (r) => {
+    resolve(chrome.runtime.lastError ? { missing: helperMissing(chrome.runtime.lastError.message) } : r);
+  }));
+  let status;
+  if (res?.missing) status = { missing: true };
+  else if (res?.ok && res.version) status = { version: res.version, outdated: versionLess(res.version, ext) };
+  else status = { outdated: true }; // a helper from before the version check answers "Unknown action"
+  await chrome.storage.local.set({ helperStatus: { ...status, extension: ext, at: Date.now() } });
+  return status;
+}
+checkHelperVersion().catch(() => {});
 
 // Chrome's message when the helper isn't installed/registered, vs. when it crashed.
 function helperMissing(msg) { return /not found|forbidden/i.test(msg || ""); }
@@ -130,6 +162,11 @@ function runNative(id, payload, onDone) {
   ports.set(id, port);
   let finished = false;
   port.onMessage.addListener((msg) => {
+    if (msg.ok === false && !msg.type) { // e.g. an older helper that doesn't know this action
+      finished = true;
+      updateJob(id, { status: "error", error: (helperTooOld(msg) || msg).error || "The AnySave helper refused this.", speed: "", eta: "" });
+      return;
+    }
     if (msg.type === "progress") {
       if (pausing.has(id)) return; // progress still in flight after Pause was pressed
       updateJob(id, { status: "downloading", percent: msg.percent, speed: msg.speed, eta: msg.eta });

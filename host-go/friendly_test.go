@@ -162,3 +162,17 @@ func TestDaemonAuthStateAndPersistence(t *testing.T) {
 	}
 }
 
+func TestConvertError(t *testing.T) {
+	cases := []struct{ stderr, format, want string }{
+		{"Error opening input files: Invalid data found when processing input", "mp4", "damaged or incomplete"},
+		{"[gif] Error opening output files: Invalid argument", "gif", "no picture, only sound"},
+		{"Output file does not contain any stream", "mp3", "no sound to save"},
+		{"av_interleaved_write_frame(): No space left on device", "mp4", "disk is full"},
+		{"something nobody has seen before", "webm", "may be damaged or in a format"},
+	}
+	for _, c := range cases {
+		if got := convertError(c.stderr, c.format); !strings.Contains(got, c.want) {
+			t.Errorf("%q -> %q, want it to mention %q", c.stderr, got, c.want)
+		}
+	}
+}

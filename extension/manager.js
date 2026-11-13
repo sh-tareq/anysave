@@ -707,6 +707,22 @@ if ($("subLangsBox")) {
     send({ type: "setSettings", patch: { subLangs: picked.join(",") } });
   });
 }
+// ---------- helper out of date / missing ----------
+async function showHelperNotice() {
+  const el = $("helperNotice");
+  if (!el || !(window.chrome && chrome.runtime && chrome.runtime.id)) return; // the desktop app ships its own helper
+  const { helperStatus: s } = await chrome.storage.local.get("helperStatus");
+  if (s?.missing) {
+    el.textContent = "The AnySave helper isn't installed, so videos and the fast engine can't work. Run the AnySave installer.";
+  } else if (s?.outdated) {
+    el.textContent = "Your AnySave helper is older than the extension" + (s.version ? ` (${s.version} vs ${s.extension})` : "") +
+      ". Run the AnySave installer again to update it, so the newest features work.";
+  }
+  el.hidden = !(s?.missing || s?.outdated);
+}
+showHelperNotice();
+chrome.storage?.onChanged?.addListener((ch, area) => { if (area === "local" && ch.helperStatus) showHelperNotice(); });
+
 // ---------- transcripts: list and search ----------
 const LANG_LABEL = { en: "English", bn: "Bangla", hi: "Hindi", ur: "Urdu", ar: "Arabic", es: "Spanish", fr: "French",
   de: "German", pt: "Portuguese", ru: "Russian", tr: "Turkish", id: "Indonesian", zh: "Chinese", ja: "Japanese", ko: "Korean", auto: "" };
