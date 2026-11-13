@@ -113,6 +113,16 @@ desktop app): pick the spoken language, get `<name>.<lang>.srt` and `<name>.<lan
   and zero-width joiners are ignored; a phrase split over two subtitle lines is found. Open text / open video use
   `openPath`, which the helper only allows inside Downloads/AnySave. Spelling mistakes in Bangla transcripts mean a
   correctly spelled search word can miss: there is no fuzzy matching yet.
+- Bangla model (14 Nov): Mozilla.ai's `whisper-large-v3-turbo-bn` (Apache-2.0), converted with
+  `host-go/cmd/convert-whisper` (pure Go, no PyTorch; header from the general turbo model) and compressed to q5_0
+  with whisper.cpp's quantize tool. Side by side on the BBC clip: correct spelling and Bangla names instead of
+  phonetic spelling, ~23% more speech, 60 s instead of 73 s for 3 minutes. **Not hosted yet:** `banglaModelURL`
+  in `transcribe.go` is "-", so Bangla keeps using the general model unless the file is already in the models
+  folder. To ship it: upload `dist/models/ggml-large-v3-turbo-bn-q5_0.bin` (with `dist/models/README.md` as the
+  notice) as a GitHub release (suggested tag `models-bn-1`, `--latest=false`) and put its download URL in
+  `banglaModelURL`. SHA-256 `f54478ad…29ac`, 574,041,195 bytes.
+- Repetition loops ("কোনো কোনো কোনো…"): `collapseRepeats` keeps one copy of a word or phrase (up to 8 words)
+  repeated 3+ times in a row; `-mc 0` was tried and made the text much shorter, so previous-text context stays on.
 - Not tested: Windows (CPU only there, so the 547 MB model will be slow), Intel Macs (CPU), very long videos,
   music-heavy audio, the model download through a proxy, Transcribe inside the Mac app window.
 

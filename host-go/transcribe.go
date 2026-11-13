@@ -37,17 +37,24 @@ import (
 )
 
 type speechModel struct {
-	Name   string // file name on Hugging Face (ggerganov/whisper.cpp)
+	Name   string // file name (on Hugging Face ggerganov/whisper.cpp unless URL is set)
 	SHA256 string
 	Size   int64
 	Label  string
+	URL    string // where to download it, when not from ggerganov/whisper.cpp
 }
 
 var (
-	modelStandard = speechModel{"ggml-small-q8_0.bin", "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f", 264464607, "standard speech model (252 MB)"}
-	modelBest     = speechModel{"ggml-large-v3-turbo-q5_0.bin", "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574041195, "speech model (547 MB)"}
-	modelURLBase  = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
-	langCodeRe    = regexp.MustCompile(`^(auto|[a-z]{2,3})$`)
+	modelStandard = speechModel{"ggml-small-q8_0.bin", "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f", 264464607, "standard speech model (252 MB)", ""}
+	modelBest     = speechModel{"ggml-large-v3-turbo-q5_0.bin", "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574041195, "speech model (547 MB)", ""}
+	// Bangla: Mozilla.ai's large-v3-turbo fine-tuned on Common Voice Bangla (Apache-2.0,
+	// mozilla-ai/whisper-large-v3-turbo-bn), converted to ggml and compressed to q5_0 for AnySave.
+	// In a side-by-side test on a BBC Bangla report it spelled words and names correctly where the
+	// general model wrote them phonetically, and caught ~23% more of the speech.
+	modelBangla = speechModel{"ggml-large-v3-turbo-bn-q5_0.bin", "f54478ad383b01304cfc4d6bde52f9f1af01e2885c7d3939383e041b593829ac", 574041195,
+		"Bangla speech model (547 MB)", banglaModelURL}
+	modelURLBase = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+	langCodeRe   = regexp.MustCompile(`^(auto|[a-z]{2,3})$`)
 )
 
 const (
@@ -80,11 +87,20 @@ func chooseModel(lang, quality string) speechModel {
 	case "best":
 		return modelBest
 	}
-	if lang == "en" {
+	switch lang {
+	case "en":
 		return modelStandard
+	case "bn":
+		// Until the converted model is hosted, use it only if it is already on this computer.
+		if banglaModelURL != "-" || isFile(filepath.Join(modelsDir(), modelBangla.Name)) {
+			return modelBangla
+		}
 	}
 	return modelBest
 }
+
+// banglaModelURL is where the converted Bangla model is downloaded from ("-" = not hosted yet).
+const banglaModelURL = "-"
 
 // ensureModel returns the model's path, downloading and checking it the first time.
 func ensureModel(ctx context.Context, m speechModel, client *http.Client, progress func(done, total int64)) (string, error) {
@@ -96,7 +112,14 @@ func ensureModel(ctx context.Context, m speechModel, client *http.Client, progre
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelURLBase+m.Name, nil)
+	url := m.URL
+	if url == "" {
+		url = modelURLBase + m.Name
+	}
+	if url == "-" {
+		return "", fmt.Errorf("the %s isn't available for download yet", m.Label)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -235,6 +258,7 @@ func writeSRT(subs []subtitle) string {
 // whisper's non-speech markers.
 func cleanText(s string) string {
 	s = strings.ToValidUTF8(s, "")
+	s = collapseRepeats(s)
 	s = strings.ReplaceAll(s, "঵", "") // a stray Bengali code point the model sometimes emits
 	return strings.TrimSpace(s)
 }
@@ -495,4 +519,47 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	cmd := exec.CommandContext(ctx, name, args...)
 	setProcAttrs(cmd)
 	return cmd
+}
+
+// collapseRepeats removes the loops whisper sometimes gets stuck in ("কোনো কোনো কোনো কোনো…"):
+// a word or a phrase of up to 8 words repeated 3 or more times in a row is kept once.
+func collapseRepeats(s string) string {
+	w := strings.Fields(s)
+	if len(w) < 3 {
+		return s
+	}
+	key := func(x string) string { return strings.Trim(x, ".,;:!?।'\"") }
+	var out []string
+	for i := 0; i < len(w); {
+		done := false
+		for n := 8; n >= 1 && !done; n-- {
+			if i+3*n > len(w) {
+				continue
+			}
+			reps := 1
+			for i+(reps+1)*n <= len(w) {
+				same := true
+				for k := 0; k < n; k++ {
+					if key(w[i+k]) != key(w[i+reps*n+k]) {
+						same = false
+						break
+					}
+				}
+				if !same {
+					break
+				}
+				reps++
+			}
+			if reps >= 3 {
+				out = append(out, w[i:i+n]...)
+				i += reps * n
+				done = true
+			}
+		}
+		if !done {
+			out = append(out, w[i])
+			i++
+		}
+	}
+	return strings.Join(out, " ")
 }

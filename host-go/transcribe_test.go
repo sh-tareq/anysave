@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -42,10 +43,30 @@ func TestSRTRoundTrip(t *testing.T) {
 }
 
 func TestChooseModel(t *testing.T) {
-	if chooseModel("en", "") != modelStandard || chooseModel("bn", "") != modelBest || chooseModel("auto", "") != modelBest {
+	wantBn := modelBest // the Bangla model is used once it is hosted (or already downloaded)
+	if banglaModelURL != "-" || isFile(filepath.Join(modelsDir(), modelBangla.Name)) {
+		wantBn = modelBangla
+	}
+	if chooseModel("en", "") != modelStandard || chooseModel("bn", "") != wantBn || chooseModel("hi", "") != modelBest || chooseModel("auto", "") != modelBest {
 		t.Errorf("wrong default model choice")
 	}
 	if chooseModel("bn", "standard") != modelStandard {
 		t.Errorf("quality override ignored")
+	}
+}
+
+func TestCollapseRepeats(t *testing.T) {
+	cases := map[string]string{
+		"সুপ্রিম কোর্ট স্তার স্তার স্তার স্তার স্তার":                                                        "সুপ্রিম কোর্ট স্তার",
+		"দেশই এটাকে কোনো কোনো কোনো কোনো কোন":                                                                 "দেশই এটাকে কোনো কোন",
+		"then you get a lot done, then you get a lot done, then you get a lot done, then you get a lot done": "then you get a lot done,",
+		"yes yes, that is right": "yes yes, that is right", // two is normal speech
+		"go go go":               "go",
+		"a b c a b c a b c d":    "a b c d",
+	}
+	for in, want := range cases {
+		if got := collapseRepeats(in); got != want {
+			t.Errorf("%q\n got  %q\n want %q", in, got, want)
+		}
 	}
 }
