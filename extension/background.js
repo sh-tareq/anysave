@@ -136,7 +136,7 @@ function runNative(id, payload, onDone) {
     } else if (msg.type === "done") {
       finished = true;
       updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "", finishedAt: Date.now(),
-        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined });
+        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined, ...(msg.txt ? { txt: msg.txt } : {}) });
       onDone && onDone(msg);
     } else if (msg.type === "paused") {
       finished = true;
@@ -217,6 +217,19 @@ function pumpQueue() {
   return pumping;
 }
 
+// Speech to text (whisper.cpp in the helper): saves <name>.<lang>.srt and .txt next to the file.
+const LANG_NAMES = { auto: "Auto-detected", en: "English", bn: "Bangla", hi: "Hindi", ur: "Urdu", ar: "Arabic", es: "Spanish",
+  fr: "French", de: "German", pt: "Portuguese", ru: "Russian", tr: "Turkish", id: "Indonesian", zh: "Chinese", ja: "Japanese", ko: "Korean" };
+async function startTranscribe({ path, name, lang, id }) {
+  id = id || newId();
+  lang = /^(auto|[a-z]{2,3})$/.test(lang || "") ? lang : "en";
+  await updateSettings({ transcribeLang: lang });
+  await updateJob(id, { kind: "transcribe", url: path, title: name, lang, site: "Local file", status: "starting", percent: 0,
+    error: null, speed: "", eta: "", qualityLabel: `${LANG_NAMES[lang] || lang} text`, file: null, txt: null });
+  runNative(id, { action: "transcribe", path, lang, proxy: (await getSettings()).proxy || "" });
+  return id;
+}
+
 async function startConvert({ path, name, spec, id }) {
   id = id || newId();
   await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0, error: null,
@@ -253,6 +266,7 @@ const DEFAULT_SETTINGS = {
   scheduleStop: "07:00",
   scheduleQueue: "",   // "" = the window applies to every download, or the name of one queue
   queues: "",          // names of the user's extra queues, comma separated
+  transcribeLang: "en", // the spoken language last chosen for "Transcribe"
   proxy: "",           // "" = system proxy, "direct", or http://host:port / socks5://host:port
 };
 
@@ -773,6 +787,7 @@ async function retry(id) {
   // Retry restarts the same row, so the failed one doesn't stay behind in "Failed".
   if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: j.engine === "chrome" ? "chrome" : "anysave", referrer: j.referrer, sha256: j.expectedSha256 });
   if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec, id });
+  if (j.kind === "transcribe") return startTranscribe({ path: j.url, name: j.title, lang: j.lang, id });
   return startVideo({ ...j, id });
 }
 async function chooseHandler(id, handler) {
@@ -800,7 +815,7 @@ async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
   return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
-const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl"]);
+const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe"]);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -823,6 +838,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "chooseHandler": await chooseHandler(msg.id, msg.handler); return { ok: true };
       case "clickModifier": recordClickModifier(msg); return { ok: true };
       case "convert": return { ok: true, id: await startConvert(msg) };
+      case "transcribe": return { ok: true, id: await startTranscribe(msg) };
       case "pickFile": return native({ action: "pickFile" });
       case "pause": await pause(msg.id); return { ok: true };
       case "resume":
@@ -877,7 +893,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case "open": {
         const j = (await getJobs())[msg.id];
         if (!j?.file) return { ok: false, error: "File not found" };
-        return native({ action: "open", file: j.file });
+        return native({ action: "open", file: j.txt || j.file }); // a transcript opens as text
       }
       case "openManager": openManager(msg.tab); return { ok: true };
       case "seen": await markSeen(); return { ok: true };
@@ -1237,6 +1253,7 @@ mutateJobs((jobs) => {
     if (!["starting", "downloading"].includes(j.status) || ports.has(j.id)) continue;
     if (j.kind === "video" || (j.kind === "file" && j.engine === "fast" && !j.downloadId)) Object.assign(j, { status: "paused", speed: "", eta: "" });
     else if (j.kind === "convert") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to convert again.", speed: "", eta: "" });
+    else if (j.kind === "transcribe") Object.assign(j, { status: "error", error: "Stopped when Chrome closed. Retry to transcribe again.", speed: "", eta: "" });
   }
 });
 // Start queued videos again (the queue lives in storage, so it survives restarts), and apply

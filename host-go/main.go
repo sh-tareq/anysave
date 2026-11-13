@@ -108,6 +108,11 @@ func isFile(p string) bool {
 func findTool(name string) string {
 	bin := filepath.Join(appDir, "bin")
 	candidates := []string{filepath.Join(bin, exe(name))}
+	if name == "whisper-cli" {
+		// Windows: the official build needs its DLLs beside it, so it has its own folder.
+		// Mac app bundle: whisper-cli sits next to the helper.
+		candidates = append(candidates, filepath.Join(bin, "whisper", exe(name)), filepath.Join(appDir, exe(name)))
+	}
 	if name == "yt-dlp" && runtime.GOOS == "darwin" {
 		// Unpacked macOS build (see install script for why not the single-file one)
 		candidates = append(candidates, filepath.Join(bin, "yt-dlp_app", "yt-dlp_macos"), filepath.Join(bin, "yt-dlp_macos"))
@@ -833,9 +838,9 @@ func main() {
 
 	// `anysave-host --check` prints which tools were found (used by installers).
 	if len(os.Args) > 1 && os.Args[1] == "--check" {
-		fmt.Printf("helper: %s (%s/%s)\nyt-dlp: %s\nffmpeg: %s\ndeno: %s\n",
+		fmt.Printf("helper: %s (%s/%s)\nyt-dlp: %s\nffmpeg: %s\ndeno: %s\nwhisper: %s\n",
 			helperVersion, runtime.GOOS, runtime.GOARCH,
-			findTool("yt-dlp"), findTool("ffmpeg"), findTool("deno"))
+			findTool("yt-dlp"), findTool("ffmpeg"), findTool("deno"), findTool("whisper-cli"))
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
@@ -886,7 +891,7 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			logf("panic: %v", r)
-			if action == "download" || action == "fastDownload" || action == "convert" {
+			if action == "download" || action == "fastDownload" || action == "convert" || action == "transcribe" {
 				send(map[string]any{"type": "error", "message": fmt.Sprint(r)})
 			} else {
 				send(map[string]any{"ok": false, "error": fmt.Sprint(r)})
@@ -918,6 +923,8 @@ func main() {
 		send(actionPower(msg))
 	case "crawl":
 		send(actionCrawl(msg))
+	case "transcribe":
+		actionTranscribe(msg)
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":

@@ -26,6 +26,14 @@ mkdir -p "$BIN" "$(dirname "$EXT_DEST")"
 rm -f "$APP/anysave-host"
 cp "$SRC/helper/anysave-host" "$APP/anysave-host"
 chmod +x "$APP/anysave-host"
+# Speech engine for "Transcribe" (built from source with the package; the speech model itself is
+# downloaded the first time it is used).
+mkdir -p "$BIN"
+if [ -f "$SRC/helper/whisper-cli" ]; then
+  rm -f "$BIN/whisper-cli"
+  cp "$SRC/helper/whisper-cli" "$BIN/whisper-cli"
+  chmod +x "$BIN/whisper-cli"
+fi
 
 # 2. Extension (kept in a permanent place so the download folder can be deleted)
 rm -rf "$EXT_DEST"

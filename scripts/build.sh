@@ -27,6 +27,10 @@ GOOS=windows GOARCH=amd64 "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$BUILD/i
 lipo -create -output "$BUILD/anysave-host" "$BUILD/anysave-host-arm64" "$BUILD/anysave-host-amd64"
 codesign --force --sign - "$BUILD/anysave-host"   # ad-hoc signature, required on Apple Silicon
 
+# ---- Speech engine (whisper.cpp) for "Transcribe", built from source ----
+echo "Building the speech engine (whisper.cpp)…"
+bash "$ROOT/scripts/build-whisper.sh" "$BUILD/whisper-cli"
+
 # ---- Native macOS AnySave.app bundle ----
 echo "Building native macOS AnySave.app…"
 APP_BUNDLE="$BUILD/AnySave.app"
@@ -35,6 +39,7 @@ swiftc -O -target arm64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o
 swiftc -O -target x86_64-apple-macos13.0 "$ROOT/installers/mac/app/main.swift" -o "$BUILD/AnySave-app-amd64"
 lipo -create -output "$APP_BUNDLE/Contents/MacOS/AnySave" "$BUILD/AnySave-app-arm64" "$BUILD/AnySave-app-amd64"
 cp "$BUILD/anysave-host" "$APP_BUNDLE/Contents/MacOS/anysave-host"
+cp "$BUILD/whisper-cli" "$APP_BUNDLE/Contents/MacOS/whisper-cli"
 cp "$ROOT/installers/mac/app/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ROOT/installers/mac/app/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"   # named in Info.plist
 cp -R "$ROOT/extension" "$APP_BUNDLE/Contents/Resources/extension"
@@ -46,6 +51,7 @@ PKG="$BUILD/AnySave-Desktop"
 MAC="$PKG/AnySave-mac"
 mkdir -p "$MAC/helper"
 cp "$BUILD/anysave-host" "$MAC/helper/"
+cp "$BUILD/whisper-cli" "$MAC/helper/"
 cp -R "$APP_BUNDLE" "$MAC/AnySave.app"
 cp -R "$ROOT/extension" "$MAC/extension"
 cp "$ROOT/installers/mac/install-mac.sh" "$MAC/Install AnySave.command"

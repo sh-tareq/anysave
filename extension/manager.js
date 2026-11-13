@@ -22,6 +22,7 @@ function esc(s) {
 function extOf(n) { const m = String(n || "").split(/[?#]/)[0].match(/\.([a-z0-9]{1,8})$/i); return m ? m[1].toLowerCase() : ""; }
 function category(j) {
   if (j.kind === "convert") return "Converted";
+  if (j.kind === "transcribe") return "Documents";
   const e = extOf(j.fileName || j.file || j.title);
   if (j.audioOnly || /^(mp3|m4a|aac|wav|flac|ogg|opus|wma)$/.test(e)) return "Music";
   if (j.kind === "video" || /^(mp4|mkv|webm|mov|avi|m4v|flv|wmv|ts|mpe?g|3gp)$/.test(e)) return "Videos";
@@ -47,6 +48,7 @@ const P = {
   open: "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+  text: "M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z",
   retry: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
   link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z",
   check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
@@ -107,6 +109,11 @@ function startDrag(e, j) {
 
 // ---------- downloads list ----------
 let openRefreshJobId = null;
+let openTranscribeJobId = null;
+// Spoken languages offered for "Transcribe" (Bangla needs the language picked: auto-detect fails on it).
+const TX_LANGS = [["en", "English"], ["bn", "বাংলা (Bangla)"], ["hi", "हिन्दी (Hindi)"], ["ur", "اردو (Urdu)"], ["ar", "العربية (Arabic)"],
+  ["es", "Español"], ["fr", "Français"], ["de", "Deutsch"], ["pt", "Português"], ["ru", "Русский"], ["tr", "Türkçe"],
+  ["id", "Indonesia"], ["zh", "中文 (Chinese)"], ["ja", "日本語 (Japanese)"], ["ko", "한국어 (Korean)"], ["auto", "Auto-detect"]];
 const speedSamples = [];
 
 function parseSpeedBps(s) {
@@ -158,7 +165,7 @@ function updateSpeedStats(all) {
 
 function render() {
   if (dragging) { redrawAfterDrag = render; return; }
-  if (openRefreshJobId && document.activeElement?.closest(".refresh-box")) return;
+  if ((openRefreshJobId || openTranscribeJobId) && document.activeElement?.closest(".refresh-box")) return;
   const all = Object.values(jobs).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id));
   const activeCount = all.filter((j) => ACTIVE.includes(j.status)).length;
   $("activeBadge").hidden = !activeCount;
@@ -270,9 +277,41 @@ function row(j) {
     li.ondblclick = (e) => { if (!e.target.closest("button")) open(); };
   }
   if (j.status === "done" && j.file) {
-    add("check", "Check against a SHA-256 checksum", () => verifyChecksum(j));
-    if (["Videos", "Music"].includes(category(j)))
+    if (j.kind !== "transcribe") add("check", "Check against a SHA-256 checksum", () => verifyChecksum(j));
+    if (["Videos", "Music"].includes(category(j))) {
+      add("text", "Transcribe: turn the speech into text and subtitles", () => {
+        openTranscribeJobId = openTranscribeJobId === j.id ? null : j.id;
+        render();
+      });
       add("convert", "Convert", () => { showTab("convert"); choose({ path: j.file, name: j.fileName || j.title }); });
+    }
+  }
+  if (openTranscribeJobId === j.id && j.status === "done") {
+    const slot = li.querySelector(".refresh-slot");
+    const last = currentSettings.transcribeLang || "en";
+    slot.innerHTML = `<div class="refresh-box transcribe-box">
+      <label class="small">Spoken language
+        <select class="tx-lang">${TX_LANGS.map(([c, n]) => `<option value="${c}"${c === last ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      </label>
+      <button type="button" class="tx-go">Transcribe</button>
+      <div class="muted small tx-note"></div>
+    </div>`;
+    const sel = slot.querySelector(".tx-lang");
+    const note = () => {
+      slot.querySelector(".tx-note").textContent = sel.value === "en"
+        ? "Fast. The first time, a 252 MB speech model is downloaded once."
+        : sel.value === "auto"
+          ? "Auto-detect often mistakes Bangla for another language: pick the language if you know it. The first time, a 547 MB speech model is downloaded once."
+          : "The first time, a 547 MB speech model is downloaded once. Everything runs on this computer; nothing is uploaded.";
+    };
+    note();
+    sel.onchange = note;
+    slot.querySelector(".tx-go").onclick = async () => {
+      openTranscribeJobId = null;
+      const res = await send({ type: "transcribe", path: j.file, name: j.fileName || j.title, lang: sel.value });
+      if (!res?.ok) alert(res?.error || "Couldn't start the transcription.");
+      render();
+    };
   }
   if (paused || j.status === "error") {
     add("link", "Refresh expired link", () => {

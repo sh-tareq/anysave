@@ -87,6 +87,24 @@ launched against a scratch home, and a release build on the owner's phone (see Â
   proxy, yt-dlp with `--proxy`, the Windows PATH step and console output on Windows, the Mac installer's PATH step
   on a real home folder, and the new dialogs / Import / Export inside the Mac app (they are tested in Chrome only).
 
+**Offline transcription (14 November 2026)** â€” "Transcribe" on a finished video or music row (manager page,
+desktop app): pick the spoken language, get `<name>.<lang>.srt` and `<name>.<lang>.txt` next to the file.
+- Engine: whisper.cpp v1.9.5. Mac: `scripts/build-whisper.sh` compiles `whisper-cli` straight with clang (no CMake),
+  universal, Metal on Apple Silicon, pinned to commit `d1be6fde`; `build.sh` calls it and ships it in the package and
+  the app bundle. Windows: the installer downloads the official `whisper-bin-x64.zip` from build `b5454` (same commit),
+  SHA-256 pinned, into `bin\whisper\`. Helper action `transcribe` (`host-go/transcribe.go`).
+- Models download on first use into the per-user app data folder (`~/Library/Application Support/AnySave/models`,
+  `%LOCALAPPDATA%\AnySave\models`), SHA-256 checked: English uses `ggml-small-q8_0` (252 MB), every other language
+  `ggml-large-v3-turbo-q5_0` (547 MB).
+- Measured on the owner's M4 Pro: English 2 minutes in ~4 s, nearly word-perfect. Bangla 3 minutes in ~73 s,
+  understandable but with many spelling mistakes (phonetic spellings, names in Latin letters).
+- Things learned the hard way: auto-detect calls Bangla "Gujarati" (so the user picks the language); the small model
+  produces garbage for Bangla even when told the language; Whisper spends about one token per byte on Bangla and stops
+  at ~220 tokens per 30-second window, dropping ~80% of the speech, so non-English audio is cut at pauses into pieces
+  of at most 7 s; `-sns` (suppress non-speech) made English text repeat itself, so it is not used.
+- Not tested: Windows (CPU only there, so the 547 MB model will be slow), Intel Macs (CPU), very long videos,
+  music-heavy audio, the model download through a proxy, Transcribe inside the Mac app window.
+
 **Internal names changed (13 November 2026, at the owner's request):** every internal ID now says AnySave:
 native host `com.anysave.host`, helper binary `anysave-host`, Android package `com.anysave.app`, Mac bundle
 `com.anysave.desktop`, log file `anysave.log`, keystore `android/anysave-release.jks` (alias `anysave`, same key).

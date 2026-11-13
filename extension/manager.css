@@ -131,3 +131,9 @@ footer a { color: var(--muted); }
 .crawl-list li:last-child { border-bottom: 0; }
 .crawl-list .cname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crawl-list .cfrom { flex: 0 1 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: 0.6; }
+
+/* Transcribe */
+.transcribe-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.transcribe-box label { display: flex; align-items: center; gap: 6px; }
+.transcribe-box select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); font: inherit; }
+.transcribe-box .tx-note { flex-basis: 100%; }

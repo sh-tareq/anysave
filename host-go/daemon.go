@@ -252,6 +252,11 @@ func (d *daemonServer) loadPersistedState() {
 					job["status"] = "paused"
 					job["speed"] = ""
 					job["eta"] = ""
+					if k := str(job, "kind"); k == "transcribe" || k == "convert" {
+						// These can't continue where they stopped: offer Retry instead.
+						job["status"] = "error"
+						job["error"] = "Stopped when AnySave closed. Retry to start again."
+					}
 				}
 				d.jobs[id] = job
 			}
@@ -625,6 +630,9 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 				d.mu.Lock()
 				if j, ok := d.jobs[id]; ok {
 					file = str(j, "file")
+					if t := str(j, "txt"); t != "" {
+						file = t // a transcript opens as text
+					}
 				}
 				d.mu.Unlock()
 			}
@@ -679,6 +687,10 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 
 	case "convert":
 		id := d.startConvertJob(req)
+		return map[string]any{"ok": true, "id": id}
+
+	case "transcribe":
+		id := d.startTranscribeJob(req)
 		return map[string]any{"ok": true, "id": id}
 
 	case "pause":
@@ -1048,6 +1060,37 @@ func (d *daemonServer) startConvertJob(req map[string]any) string {
 	return id
 }
 
+var transcribeLangNames = map[string]string{"auto": "Auto-detected", "en": "English", "bn": "Bangla", "hi": "Hindi", "ur": "Urdu",
+	"ar": "Arabic", "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese", "ru": "Russian", "tr": "Turkish",
+	"id": "Indonesian", "zh": "Chinese", "ja": "Japanese", "ko": "Korean"}
+
+// startTranscribeJob turns the speech in a finished download into text and subtitles.
+func (d *daemonServer) startTranscribeJob(req map[string]any) string {
+	id := str(req, "id")
+	if id == "" {
+		id = newDaemonJobID()
+	}
+	lang := str(req, "lang")
+	if !langCodeRe.MatchString(lang) {
+		lang = "en"
+	}
+	label := transcribeLangNames[lang]
+	if label == "" {
+		label = lang
+	}
+	d.mu.Lock()
+	d.settings["transcribeLang"] = lang
+	d.saveSettingsLocked()
+	d.mu.Unlock()
+	d.updateJob(id, map[string]any{
+		"kind": "transcribe", "url": str(req, "path"), "title": str(req, "name"), "lang": lang,
+		"site": "Local file", "qualityLabel": label + " text", "status": "starting", "percent": 0.0,
+		"speed": "", "eta": "", "error": nil, "file": nil, "txt": nil,
+	})
+	go d.startDaemonWorker(id, map[string]any{"action": "transcribe", "path": str(req, "path"), "lang": lang, "proxy": d.proxySetting()})
+	return id
+}
+
 func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 	cmd := command(d.selfBin)
 	stdinPipe, err := cmd.StdinPipe()
@@ -1144,6 +1187,9 @@ func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 			}
 			if sha := str(msg, "sha256"); sha != "" {
 				patch["sha256"] = sha
+			}
+			if t := str(msg, "txt"); t != "" {
+				patch["txt"] = t
 			}
 			if mc, _ := msg["multiConn"].(bool); mc {
 				if pc, ok := msg["peakConns"].(float64); ok && pc > 1 {
@@ -1242,6 +1288,8 @@ func (d *daemonServer) retryJob(id string) {
 			"name": str(j, "title"),
 			"spec": j["spec"],
 		})
+	case "transcribe":
+		d.startTranscribeJob(map[string]any{"id": id, "path": str(j, "url"), "name": str(j, "title"), "lang": str(j, "lang")})
 	default:
 		d.startVideoJob(j)
 	}

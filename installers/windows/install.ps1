@@ -116,6 +116,26 @@ if (-not (Test-Path (Join-Path $Bin 'deno.exe'))) {
   }
 }
 
+# 5b. Speech engine for "Transcribe": the official whisper.cpp build for Windows, made from the
+#     same source as the Mac one (build b5454 = v1.9.5). It needs its DLLs beside it, so it gets
+#     its own folder. The speech model is downloaded the first time it is used.
+$WhisperDir = Join-Path $Bin 'whisper'
+if (-not (Test-Path (Join-Path $WhisperDir 'whisper-cli.exe'))) {
+  Write-Host 'Downloading the speech engine (for Transcribe, about 9 MB)...'
+  $tmp = Join-Path $env:TEMP ('anysave-' + [guid]::NewGuid())
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  try {
+    $zip = Join-Path $tmp 'whisper-bin-x64.zip'
+    Get-File 'https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip' $zip
+    Test-Checksum $zip '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb'
+    Expand-Archive $zip -DestinationPath $tmp
+    New-Item -ItemType Directory -Path $WhisperDir -Force | Out-Null
+    Copy-Item (Join-Path $tmp 'Release\*') $WhisperDir -Recurse -Force
+  } finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 # Clear the "downloaded from the internet" mark from everything we copied.
 Get-ChildItem $App, $ExtDest -Recurse -File | Unblock-File
 

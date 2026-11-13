@@ -280,6 +280,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !fm.isExecutableFile(atPath: installedHost), fm.isExecutableFile(atPath: bundledHost) {
             try? fm.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
             try? fm.copyItem(atPath: bundledHost, toPath: installedHost)
+            // The speech engine for "Transcribe" goes where the installer would put it.
+            let bundledWhisper = Bundle.main.bundlePath + "/Contents/MacOS/whisper-cli"
+            let binDir = (supportDir as NSString).appendingPathComponent("bin")
+            let installedWhisper = (binDir as NSString).appendingPathComponent("whisper-cli")
+            if fm.isExecutableFile(atPath: bundledWhisper), !fm.isExecutableFile(atPath: installedWhisper) {
+                try? fm.createDirectory(atPath: binDir, withIntermediateDirectories: true)
+                try? fm.copyItem(atPath: bundledWhisper, toPath: installedWhisper)
+            }
             let bundledResExt = Bundle.main.bundlePath + "/Contents/Resources/extension"
             let home = fm.homeDirectoryForCurrentUser.path
             let destExt = (home as NSString).appendingPathComponent("AnySave/extension")
