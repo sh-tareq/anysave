@@ -27,6 +27,8 @@ class AnySaveApp : Application(), ImageLoaderFactory {
             )
         }
         scope.launch { Engine.start(this@AnySaveApp) }
+        // Downloads that were waiting for their scheduled hours: start the ones that are due.
+        Schedule.tick(this)
     }
 
     /** Coil image loader that can also show a frame from downloaded videos. */

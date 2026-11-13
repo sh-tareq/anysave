@@ -8,7 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-enum class JobStatus { QUEUED, WAITING_WIFI, DOWNLOADING, PAUSED, SAVING, DONE, ERROR, CANCELLED }
+enum class JobStatus { QUEUED, WAITING_WIFI, SCHEDULED, DOWNLOADING, PAUSED, SAVING, DONE, ERROR, CANCELLED }
 
 /** VIDEO: page link through yt-dlp. FILE: any direct file link. CONVERT: a local file through FFmpeg. */
 enum class JobKind { VIDEO, FILE, CONVERT }
@@ -42,10 +42,18 @@ data class Job(
     /** Bytes downloaded so far / expected (FILE jobs; lets them resume). */
     val doneBytes: Long = 0,
     val totalBytes: Long = 0,
+    /** The user's queue this download is in (blank = the main queue). */
+    val queue: String = "",
+    /** "Start now" or a manual resume: runs even outside the scheduled hours. */
+    val ignoreSchedule: Boolean = false,
+    /** SHA-256 the finished file must have (pasted with the link), and the one it has. */
+    val expectedSha256: String? = null,
+    val sha256: String? = null,
 ) {
     val finished get() = status == JobStatus.DONE || status == JobStatus.ERROR || status == JobStatus.CANCELLED
     val active get() = !finished && status != JobStatus.PAUSED
-    val canPause get() = kind != JobKind.CONVERT && (status == JobStatus.DOWNLOADING || status == JobStatus.QUEUED || status == JobStatus.WAITING_WIFI)
+    val canPause get() = kind != JobKind.CONVERT && (status == JobStatus.DOWNLOADING || status == JobStatus.QUEUED ||
+        status == JobStatus.WAITING_WIFI || status == JobStatus.SCHEDULED)
     val category get() = FileKinds.categoryOf(fileName ?: title, mime, kind, audioOnly)
 
     fun toJson() = JSONObject().apply {
@@ -56,6 +64,8 @@ data class Job(
         put("sizeBytes", sizeBytes); put("error", error); put("createdAt", createdAt)
         put("fixedName", fixedName); put("kind", kind.name); put("spec", spec)
         put("doneBytes", doneBytes); put("totalBytes", totalBytes)
+        put("queue", queue); put("ignoreSchedule", ignoreSchedule)
+        put("expectedSha256", expectedSha256); put("sha256", sha256)
     }
 
     companion object {
@@ -64,7 +74,8 @@ data class Job(
             val kind = runCatching { JobKind.valueOf(o.getString("kind")) }.getOrDefault(JobKind.VIDEO)
             var status = runCatching { JobStatus.valueOf(o.getString("status")) }.getOrDefault(JobStatus.ERROR)
             var error = s("error")
-            if (status != JobStatus.DONE && status != JobStatus.ERROR && status != JobStatus.CANCELLED && status != JobStatus.PAUSED) {
+            if (status != JobStatus.DONE && status != JobStatus.ERROR && status != JobStatus.CANCELLED &&
+                status != JobStatus.PAUSED && status != JobStatus.SCHEDULED) { // scheduled ones keep waiting for their time
                 // The app was closed mid-download: downloads keep their partial file and can resume.
                 if (kind == JobKind.CONVERT) { status = JobStatus.ERROR; error = "Interrupted. Tap Retry." }
                 else status = JobStatus.PAUSED
@@ -77,6 +88,8 @@ data class Job(
                 sizeBytes = o.optLong("sizeBytes"), error = error, createdAt = o.optLong("createdAt"),
                 fixedName = o.optBoolean("fixedName"), kind = kind, spec = s("spec"),
                 doneBytes = o.optLong("doneBytes"), totalBytes = o.optLong("totalBytes"),
+                queue = o.optString("queue"), ignoreSchedule = o.optBoolean("ignoreSchedule"),
+                expectedSha256 = s("expectedSha256"), sha256 = s("sha256"),
             )
         }
     }
@@ -125,7 +138,8 @@ object Downloads {
         jobs.update { list ->
             list.map {
                 if (it.id != id) it else change(it).also { new ->
-                    statusChanged = new.status != it.status || new.title != it.title || new.url != it.url
+                    statusChanged = new.status != it.status || new.title != it.title || new.url != it.url ||
+                        new.queue != it.queue || new.ignoreSchedule != it.ignoreSchedule || new.sha256 != it.sha256
                 }
             }
         }

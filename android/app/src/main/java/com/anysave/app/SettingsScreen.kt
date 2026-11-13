@@ -48,6 +48,45 @@ fun SettingsScreen(vm: MainViewModel) {
     val maxParallel by Settings.maxParallel.collectAsState()
     val speedLimitKbps by Settings.speedLimitKbps.collectAsState()
     val sortFolders by Settings.sortIntoFolders.collectAsState()
+    val subLangs by Settings.subLangs.collectAsState()
+    val embedChapters by Settings.embedChapters.collectAsState()
+    val embedCover by Settings.embedCover.collectAsState()
+    val proxy by Settings.proxy.collectAsState()
+    val scheduleOn by Settings.scheduleOn.collectAsState()
+    val scheduleStart by Settings.scheduleStart.collectAsState()
+    val scheduleStop by Settings.scheduleStop.collectAsState()
+    val scheduleQueue by Settings.scheduleQueue.collectAsState()
+    val queues by Settings.queues.collectAsState()
+    val newQueue by Settings.newQueue.collectAsState()
+    var pickSubs by remember { mutableStateOf(false) }
+    var editProxy by remember { mutableStateOf(false) }
+    var editQueues by remember { mutableStateOf(false) }
+    var pickScheduleQueue by remember { mutableStateOf(false) }
+    var pickNewQueue by remember { mutableStateOf(false) }
+    val exportList = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val ok = runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Backup.exportJson().toByteArray()) } }.isSuccess
+            vm.messages.tryEmit(if (ok) "List exported" else "Couldn't save the file")
+        }
+    }
+    val importList = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }.getOrNull()
+            if (text == null) vm.messages.tryEmit("Couldn't read that file")
+            else {
+                val (added, skipped) = Backup.import(ctx, text)
+                vm.messages.tryEmit(when {
+                    added == 0 && skipped == 0 -> "No links found in that file"
+                    skipped > 0 -> "Imported $added links, $skipped skipped"
+                    else -> "Imported $added links"
+                })
+            }
+        }
+    }
+    fun pickTime(current: String, save: (String) -> Unit) {
+        val m = Schedule.minutes(current) ?: 0
+        android.app.TimePickerDialog(ctx, { _, h, min -> save("%02d:%02d".format(h, min)); Schedule.tick(ctx) }, m / 60, m % 60, true).show()
+    }
     var pickQuality by remember { mutableStateOf(false) }
     var showLegal by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(LoginActivity.loggedInSites(ctx)) }
@@ -111,6 +150,41 @@ fun SettingsScreen(vm: MainViewModel) {
         }
         SwitchRow(Icons.Outlined.FolderCopy, "Sort into folders",
             "Videos, Music, Pictures, Documents, Archives, Apps, Converted", sortFolders) { Settings.setSortIntoFolders(it) }
+
+        Section("Videos")
+        SettingRow(Icons.Outlined.HighQuality, "Subtitles inside videos",
+            SUB_LANGS.filter { it.first in subLangs.split(',') }.joinToString(", ") { it.second }.ifBlank { "None" },
+            "A video gets the ones it has") { pickSubs = true }
+        SwitchRow(Icons.Outlined.FolderCopy, "Chapter marks", "Keep chapter marks inside videos", embedChapters) {
+            Settings.setEmbedChapters(it)
+        }
+        SwitchRow(Icons.Outlined.FolderCopy, "Cover art", "Put the thumbnail inside videos and music", embedCover) {
+            Settings.setEmbedCover(it)
+        }
+
+        Section("Schedule and queues")
+        SwitchRow(Icons.Outlined.Speed, "Only download at set hours",
+            "Outside them downloads wait as Scheduled and start by themselves. Start now on a download skips the wait.",
+            scheduleOn) { Settings.setScheduleOn(it); Schedule.tick(ctx) }
+        SettingRow(Icons.Outlined.Speed, "From", scheduleStart, null) { pickTime(scheduleStart) { Settings.setScheduleStart(it) } }
+        SettingRow(Icons.Outlined.Speed, "Until", scheduleStop, null) { pickTime(scheduleStop) { Settings.setScheduleStop(it) } }
+        SettingRow(Icons.Outlined.Folder, "The hours apply to",
+            if (scheduleQueue.isBlank()) "All downloads" else "The \"$scheduleQueue\" queue only", null) { pickScheduleQueue = true }
+        SettingRow(Icons.Outlined.Folder, "Queues", queues.ifBlank { "Only the main queue" },
+            "Extra queues, names separated by commas (e.g. Night, Work)") { editQueues = true }
+        SettingRow(Icons.Outlined.Folder, "New downloads go to", newQueue.ifBlank { "Main queue" }, null) { pickNewQueue = true }
+
+        Section("Network")
+        SettingRow(Icons.Outlined.Wifi, "Proxy", proxy.ifBlank { "This phone's proxy settings" },
+            "http://host:port, socks5://host:port, or direct") { editProxy = true }
+
+        Section("Backup")
+        SettingRow(Icons.Outlined.FolderCopy, "Export list of links", "Save every link in the list to a file", null) {
+            exportList.launch("anysave-links.json")
+        }
+        SettingRow(Icons.Outlined.FolderCopy, "Import list of links", "From an exported file, or any text file with links", null) {
+            importList.launch(arrayOf("application/json", "text/*", "*/*"))
+        }
 
         Section("Quick Settings tile")
         SettingRow(Icons.Outlined.TouchApp, "Add the AnySave tile",
@@ -203,6 +277,38 @@ fun SettingsScreen(vm: MainViewModel) {
 
     if (showLegal) LegalDialog { showLegal = false }
 
+    if (pickSubs) AlertDialog(
+        onDismissRequest = { pickSubs = false },
+        title = { Text("Subtitles inside videos") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                val picked = subLangs.split(',').filter { it.isNotBlank() }
+                SUB_LANGS.forEach { (code, name) ->
+                    val on = code in picked
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable {
+                        Settings.setSubLangs(SUB_LANGS.map { it.first }.filter { if (it == code) !on else it in picked }.joinToString(","))
+                    }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = on, onCheckedChange = null, modifier = Modifier.padding(8.dp))
+                        Text(name)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { pickSubs = false }) { Text("Done") } },
+    )
+    if (editProxy) TextSettingDialog("Proxy", proxy, "http://host:port, socks5://host:port or direct",
+        "Leave empty to use this phone's own proxy settings.",
+        check = { if (Net.valid(it)) null else "Use http://host:port, socks5://host:port, direct, or leave it empty" },
+        onSave = { Settings.setProxy(it) }) { editProxy = false }
+    if (editQueues) TextSettingDialog("Queues", queues, "Night, Work", "Names separated by commas. Leave empty for only the main queue.",
+        check = { null }, onSave = { Settings.setQueues(it); Schedule.tick(ctx) }) { editQueues = false }
+    if (pickScheduleQueue) ChoiceDialog("The hours apply to",
+        listOf("" to "All downloads") + Schedule.queueNames().map { it to "The \"$it\" queue only" }, scheduleQueue,
+        onPick = { Settings.setScheduleQueue(it); Schedule.tick(ctx) }) { pickScheduleQueue = false }
+    if (pickNewQueue) ChoiceDialog("New downloads go to",
+        listOf("" to "Main queue") + Schedule.queueNames().map { it to it }, newQueue,
+        onPick = { Settings.setNewQueue(it) }) { pickNewQueue = false }
+
     if (pickQuality) AlertDialog(
         onDismissRequest = { pickQuality = false },
         title = { Text("Default quality") },
@@ -222,6 +328,57 @@ fun SettingsScreen(vm: MainViewModel) {
             }
         },
         confirmButton = { TextButton(onClick = { pickQuality = false }) { Text("Close") } },
+    )
+}
+
+/** Subtitle languages offered: English, Bangla and the other most-used ones. */
+private val SUB_LANGS = listOf(
+    "en" to "English", "bn" to "বাংলা (Bangla)", "hi" to "हिन्दी (Hindi)", "ur" to "اردو (Urdu)", "ar" to "العربية (Arabic)",
+    "es" to "Español", "fr" to "Français", "de" to "Deutsch", "pt" to "Português", "ru" to "Русский", "tr" to "Türkçe",
+    "id" to "Indonesia", "zh" to "中文 (Chinese)", "ja" to "日本語 (Japanese)", "ko" to "한국어 (Korean)",
+)
+
+@Composable
+private fun TextSettingDialog(
+    title: String, initial: String, hint: String, note: String,
+    check: (String) -> String?, onSave: (String) -> Unit, onClose: () -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    val problem = check(text.trim())
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true,
+                    placeholder = { Text(hint) }, isError = problem != null, modifier = Modifier.fillMaxWidth())
+                Text(problem ?: note, style = MaterialTheme.typography.bodySmall,
+                    color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+        },
+        confirmButton = { TextButton(enabled = problem == null, onClick = { onSave(text.trim()); onClose() }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ChoiceDialog(title: String, options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onPick(value); onClose() }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = value == selected, onClick = { onPick(value); onClose() })
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
 }
 

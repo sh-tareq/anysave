@@ -93,6 +93,7 @@ class DownloadService : Service() {
             }
             ACTION_CANCEL -> id?.let { stopJob(it, JobStatus.CANCELLED) }
             ACTION_PAUSE -> id?.let { stopJob(it, JobStatus.PAUSED) }
+            ACTION_HOLD -> id?.let { stopJob(it, JobStatus.SCHEDULED) } // paused by the schedule: waits for its hours
         }
         // A pause/cancel can arrive after the last job ended; don't leave the notification behind.
         stopIfIdle()
@@ -136,7 +137,7 @@ class DownloadService : Service() {
     private fun isMetered() = getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
 
     private fun stillWanted(id: String) = Downloads.get(id)?.status.let {
-        it != JobStatus.PAUSED && it != JobStatus.CANCELLED && it != null
+        it != JobStatus.PAUSED && it != JobStatus.CANCELLED && it != JobStatus.SCHEDULED && it != null
     }
 
     private suspend fun runJob(id: String) {
@@ -180,10 +181,12 @@ class DownloadService : Service() {
         } catch (e: Throwable) {
             val now = Downloads.get(id)?.status
             when {
-                now == JobStatus.PAUSED -> keepPartial = true
+                now == JobStatus.PAUSED || now == JobStatus.SCHEDULED -> keepPartial = true
                 now == JobStatus.CANCELLED -> {}
                 e is Stopped || e is YoutubeDL.CanceledException -> {}
                 else -> {
+                    // The full technical message goes to the system log (adb logcat -s AnySave), the list shows a plain one.
+                    android.util.Log.w("AnySave", "download failed [${job.kind}] ${e.message ?: e}")
                     val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else (e.message ?: e.toString())
                     Downloads.update(id) { it.copy(status = JobStatus.ERROR, error = msg, speed = "", eta = "") }
                     // Downloads resume from their partial files with Retry (yt-dlp continues .part files).
@@ -198,7 +201,27 @@ class DownloadService : Service() {
 
     // ---------- videos (yt-dlp) ----------
 
+    /**
+     * Downloads a video. With extras on (subtitles, chapters, cover art) a site sometimes refuses
+     * the download; then it is tried once more without them, so the video itself is never lost.
+     */
     private fun downloadVideo(job: Job, dir: File): File {
+        val langs = Settings.subLangs.value.split(',', ' ').map { it.trim() }.filter { it.matches(Regex("[A-Za-z]{2,3}")) }
+        val wantSubs = langs.isNotEmpty() && !job.audioOnly
+        val extras = wantSubs || Settings.embedChapters.value || Settings.embedCover.value
+        if (!extras) return runYtDlp(job, dir, emptyList(), false)
+        return try {
+            runYtDlp(job, dir, langs.takeIf { wantSubs }.orEmpty(), true)
+        } catch (e: YoutubeDLException) {
+            if (!stillWanted(job.id)) throw e
+            android.util.Log.w("AnySave", "video failed with extras, trying again without them: ${e.message}")
+            // Leftovers of the first try (subtitle and picture files) must not be mistaken for the video.
+            dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }?.forEach { it.delete() }
+            runYtDlp(job, dir, emptyList(), false)
+        }
+    }
+
+    private fun runYtDlp(job: Job, dir: File, langs: List<String>, extras: Boolean): File {
         val id = job.id
         val req = YoutubeDLRequest(job.url)
             .addOption("-f", job.format.ifBlank { "bv*+ba/b" })
@@ -217,32 +240,47 @@ class DownloadService : Service() {
                     "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
             )
             // Title/thumbnail for one-tap downloads that skipped the lookup
-            .addOption("--print", "video:VGT %(title)s")
-            .addOption("--print", "video:VGI %(thumbnail)s")
+            .addOption("--print", "video:AST %(title)s")
+            .addOption("--print", "video:ASI %(thumbnail)s")
             .addOption("--print", "after_move:ASF %(filepath)s")
         val limitKbps = Settings.speedLimitKbps.value
         if (limitKbps > 0) req.addOption("--limit-rate", "${limitKbps}K")
         if (job.audioOnly) req.addOption("-x").addOption("--audio-format", "mp3")
         else req.addOption("--merge-output-format", "mp4")
+        // Extras inside the file: subtitles in the chosen languages, chapter marks, cover art.
+        // "en" also takes en-US / en-GB, but not the dozens of machine-translated tracks ("en-de").
+        if (langs.isNotEmpty()) req.addOption("--write-subs").addOption("--write-auto-subs")
+            .addOption("--sub-langs", langs.joinToString(",") { "$it(-[A-Z0-9][A-Za-z0-9]*)?" })
+            .addOption("--embed-subs").addOption("--convert-subs", "srt").addOption("--compat-options", "no-keep-subs")
+        if (extras && Settings.embedChapters.value) req.addOption("--embed-chapters")
+        if (extras && Settings.embedCover.value) req.addOption("--embed-thumbnail").addOption("--convert-thumbnails", "jpg")
+        if (extras) req.addOption("--ignore-errors") // an extra that can't be added must not cost the video
+        Net.ytdlpProxy()?.let { req.addOption("--proxy", it) }
         Engine.applyCookies(this, req)
         Engine.applyJsRuntime(this, req)
 
         var finalPath: String? = null
+        fun savedFile() = finalPath?.let(::File)?.takeIf { it.exists() }
+        try {
         YoutubeDL.getInstance().execute(req, id) { _, _, line ->
             when {
                 line.startsWith("ASP ") -> onVideoProgress(id, line.removePrefix("ASP "))
                 line.startsWith("ASF ") -> finalPath = line.removePrefix("ASF ").trim()
-                line.startsWith("VGT ") && !job.fixedName -> {
-                    val t = line.removePrefix("VGT ").trim()
+                line.startsWith("AST ") && !job.fixedName -> {
+                    val t = line.removePrefix("AST ").trim()
                     if (t.isNotEmpty() && t != "NA") Downloads.update(id) { it.copy(title = t) }
                 }
-                line.startsWith("VGI ") -> {
-                    val t = line.removePrefix("VGI ").trim()
+                line.startsWith("ASI ") -> {
+                    val t = line.removePrefix("ASI ").trim()
                     if (t.startsWith("http")) Downloads.update(id) { it.copy(thumbnail = t) }
                 }
             }
         }
-        return finalPath?.let(::File)?.takeIf { it.exists() }
+        } catch (e: YoutubeDLException) {
+            // The video itself was saved; only an extra (subtitles, cover art) failed.
+            if (!extras || savedFile() == null || !stillWanted(id)) throw e
+        }
+        return savedFile()
             ?: dir.walkTopDown().filter { it.isFile && !it.name.endsWith(".part") }.maxByOrNull { it.length() }
             ?: throw Exception("Download finished but no file was found")
     }
@@ -313,7 +351,13 @@ class DownloadService : Service() {
                 },
             )
             if (!stillWanted(id)) throw Stopped()
-            Downloads.update(id) { it.copy(doneBytes = res.totalBytes, totalBytes = res.totalBytes) }
+            // A checksum pasted with the link: a file that doesn't match is not kept.
+            val want = currentJob.expectedSha256?.trim()?.lowercase()
+            if (!want.isNullOrEmpty() && !res.sha256.equals(want, ignoreCase = true)) {
+                res.file.delete()
+                throw IOException("The file doesn't match the checksum you gave, so it wasn't kept. It may be damaged or changed.")
+            }
+            Downloads.update(id) { it.copy(doneBytes = res.totalBytes, totalBytes = res.totalBytes, sha256 = res.sha256) }
             val desiredName = Downloads.get(id)?.fileName ?: res.filename
             if (desiredName != res.file.name) {
                 val target = File(dir, safeName(desiredName))
@@ -518,6 +562,7 @@ class DownloadService : Service() {
         private const val ACTION_START = "start"
         private const val ACTION_CANCEL = "cancel"
         private const val ACTION_PAUSE = "pause"
+        private const val ACTION_HOLD = "hold"
         private const val EXTRA_ID = "id"
 
         private val seq = AtomicInteger(0)
@@ -525,17 +570,23 @@ class DownloadService : Service() {
         /** Unique even when many jobs start in the same millisecond (a playlist). */
         fun newId() = System.currentTimeMillis().toString() + (seq.incrementAndGet() % 10000).toString().padStart(4, '0')
 
+        /** New downloads go into the queue chosen in Settings, unless they name one. */
+        private fun inQueue(job: Job) =
+            if (job.kind == JobKind.CONVERT || job.queue.isNotBlank()) job else job.copy(queue = Settings.newQueue.value)
+
         fun start(ctx: Context, job: Job) {
             if (!Settings.acceptedTerms) return
-            Downloads.add(job)
-            enqueue(ctx, job.id)
+            val j = inQueue(job)
+            Downloads.add(j)
+            enqueue(ctx, j.id)
         }
 
         /** Several jobs at once; each waits in the queue (Settings.maxParallel run together). */
         fun startMany(ctx: Context, jobs: List<Job>) {
             if (!Settings.acceptedTerms || jobs.isEmpty()) return
-            Downloads.addAll(jobs)
-            jobs.forEach { enqueue(ctx, it.id) }
+            val list = jobs.map(::inQueue)
+            Downloads.addAll(list)
+            list.forEach { enqueue(ctx, it.id) }
         }
 
         /** A video from a playlist or channel list, as a job ready for [start] or [startMany]. */
@@ -557,8 +608,54 @@ class DownloadService : Service() {
             else startQuick(ctx, url)
         }
 
+        /** Starts a download, unless the schedule says it has to wait for its hours. */
         private fun enqueue(ctx: Context, id: String) {
-            ctx.startForegroundService(Intent(ctx, DownloadService::class.java).setAction(ACTION_START).putExtra(EXTRA_ID, id))
+            val job = Downloads.get(id)
+            if (job != null && Schedule.blocks(job)) {
+                Downloads.update(id) { it.copy(status = JobStatus.SCHEDULED, speed = "", eta = "") }
+                Schedule.arm(ctx)
+                return
+            }
+            launch(ctx, id)
+        }
+
+        private fun launch(ctx: Context, id: String) {
+            val intent = Intent(ctx, DownloadService::class.java).setAction(ACTION_START).putExtra(EXTRA_ID, id)
+            try {
+                ctx.startForegroundService(intent)
+            } catch (e: Exception) {
+                // Newer Android versions may refuse this while the app is closed: it starts when the app is opened.
+                Downloads.update(id) { it.copy(status = JobStatus.SCHEDULED) }
+            }
+        }
+
+        /** The scheduled hours began (or the schedule changed): start a waiting download. */
+        fun release(ctx: Context, id: String) {
+            val job = Downloads.get(id) ?: return
+            if (job.status != JobStatus.SCHEDULED) return
+            Downloads.update(id) { it.copy(status = JobStatus.QUEUED, error = null) }
+            launch(ctx, id)
+        }
+
+        /** The scheduled hours ended: pause a running download until the next time. */
+        fun hold(ctx: Context, id: String) {
+            val job = Downloads.get(id) ?: return
+            if (job.finished || job.status == JobStatus.PAUSED || job.status == JobStatus.SCHEDULED) return
+            runCatching { send(ctx, ACTION_HOLD, id) }
+                .onFailure { Downloads.update(id) { it.copy(status = JobStatus.SCHEDULED, speed = "", eta = "") } }
+        }
+
+        /** "Start now": this download runs even outside the scheduled hours. */
+        fun startNow(ctx: Context, id: String) {
+            val job = Downloads.get(id) ?: return
+            if (job.status != JobStatus.SCHEDULED) return
+            Downloads.update(id) { it.copy(status = JobStatus.QUEUED, ignoreSchedule = true, error = null) }
+            launch(ctx, id)
+        }
+
+        fun moveToQueue(ctx: Context, id: String, queue: String) {
+            Downloads.update(id) { it.copy(queue = queue, ignoreSchedule = false) }
+            Schedule.tick(ctx)
         }
 
         /** Download a video page immediately with the default quality from Settings. */
@@ -588,7 +685,7 @@ class DownloadService : Service() {
         }
 
         /** Any direct file link (PDF, ZIP, APK, image, video file...). */
-        fun startFile(ctx: Context, url: String, name: String? = null, mime: String? = null): Boolean {
+        fun startFile(ctx: Context, url: String, name: String? = null, mime: String? = null, sha256: String? = null): Boolean {
             if (Downloads.isActive(url)) {
                 Toast.makeText(ctx, "Already downloading this link", Toast.LENGTH_SHORT).show()
                 return false
@@ -596,7 +693,7 @@ class DownloadService : Service() {
             start(ctx, Job(
                 id = newId(), url = url, title = name ?: url.substringAfterLast('/').substringBefore('?').ifBlank { url },
                 kind = JobKind.FILE, fileName = name, mime = mime, site = Engine.siteLabel(url),
-                qualityLabel = "File",
+                qualityLabel = "File", expectedSha256 = sha256,
             ))
             return true
         }
@@ -608,12 +705,19 @@ class DownloadService : Service() {
             ))
         }
 
-        fun pause(ctx: Context, id: String) = send(ctx, ACTION_PAUSE, id)
+        fun pause(ctx: Context, id: String) {
+            if (Downloads.get(id)?.status == JobStatus.SCHEDULED) { // not running: just don't start it
+                Downloads.update(id) { it.copy(status = JobStatus.PAUSED) }
+                return
+            }
+            send(ctx, ACTION_PAUSE, id)
+        }
 
+        /** Resumed by hand, so it runs even outside the scheduled hours. */
         fun resume(ctx: Context, id: String) {
             val job = Downloads.get(id) ?: return
             if (job.status != JobStatus.PAUSED && job.status != JobStatus.ERROR) return
-            Downloads.update(id) { it.copy(status = JobStatus.QUEUED, error = null) }
+            Downloads.update(id) { it.copy(status = JobStatus.QUEUED, error = null, ignoreSchedule = true) }
             enqueue(ctx, id)
         }
 
@@ -642,7 +746,7 @@ class DownloadService : Service() {
         fun cancel(ctx: Context, id: String) {
             val job = Downloads.get(id) ?: return
             if (job.finished) return
-            if (job.status == JobStatus.PAUSED) {
+            if (job.status == JobStatus.PAUSED || job.status == JobStatus.SCHEDULED) {
                 Downloads.update(id) { it.copy(status = JobStatus.CANCELLED) }
                 File(ctx.filesDir, "partial/$id").deleteRecursively()
                 return

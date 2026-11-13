@@ -140,6 +140,8 @@ fun JobStatusBadge(job: Job?, noun: String, onDownload: () -> Unit) {
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer),
         ) { Icon(Icons.Outlined.Refresh, "Retry") }
+        JobStatus.SCHEDULED -> Pill("Scheduled", MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant)
         JobStatus.QUEUED, JobStatus.WAITING_WIFI -> Pill("Queued", MaterialTheme.colorScheme.surfaceVariant,
             MaterialTheme.colorScheme.onSurfaceVariant)
         JobStatus.PAUSED -> Pill("Paused", MaterialTheme.colorScheme.surfaceVariant,

@@ -477,29 +477,18 @@ func actionDownload(msg map[string]any) {
 		}
 	}
 	hasFfmpeg := findTool("ffmpeg") != ""
-	args = append(args, extrasArgs(msg, hasFfmpeg)...)
 	if audio, _ := msg["audioOnly"].(bool); audio && hasFfmpeg {
 		args = append(args, "-x", "--audio-format", "mp3")
 	} else if hasFfmpeg {
 		args = append(args, "--merge-output-format", "mp4")
 	}
-	args = append(args, "--", str(msg, "url"))
-	logf("download: %s %q", ytdlp, args)
-
-	cmd := command(ytdlp, args...)
-	stdout, _ := cmd.StdoutPipe()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		fail(err.Error())
-		return
-	}
-	attachChildJob(cmd)
+	extras := extrasArgs(msg, hasFfmpeg)
 
 	// {"action":"cancel"} stops and deletes the unfinished pieces; {"action":"pause"} stops
 	// and keeps them. If Chrome just closes our stdin (browser quit, extension reloaded), that
 	// counts as a pause too, so the download can continue from where it was.
 	var cancelled, paused atomic.Bool
+	var running atomic.Pointer[exec.Cmd]
 	go func() {
 		for {
 			m, err := readMessage()
@@ -515,35 +504,62 @@ func actionDownload(msg map[string]any) {
 			}
 		}
 		cancelled.Store(true)
-		killTree(cmd)
+		if c := running.Load(); c != nil {
+			killTree(c)
+		}
 	}()
 
-	finalFile := ""
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimRight(sc.Text(), "\r")
-		switch {
-		case strings.HasPrefix(line, "ASP "):
-			p := append(strings.Split(line[4:], "|"), "", "", "", "", "")
-			done, total := num(p[0]), num(p[1])
-			if total == 0 {
-				total = num(p[2])
-			}
-			pct := 0.0
-			if done > 0 && total > 0 {
-				pct = float64(int(done/total*1000)) / 10
-			}
-			send(map[string]any{"type": "progress", "percent": pct, "speed": humanSpeed(num(p[3])), "eta": humanETA(p[4])})
-		case strings.HasPrefix(line, "ASF "):
-			finalFile = line[4:]
+	// run starts yt-dlp once and follows it to the end.
+	run := func(extra []string) (finalFile, errText string, err error) {
+		full := append(append(append([]string{}, args...), extra...), "--", str(msg, "url"))
+		logf("download: %s %q", ytdlp, full)
+		cmd := command(ytdlp, full...)
+		stdout, _ := cmd.StdoutPipe()
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		if err := cmd.Start(); err != nil {
+			return "", err.Error(), err
 		}
+		attachChildJob(cmd)
+		running.Store(cmd)
+		if cancelled.Load() { // stopped in the moment between two tries
+			killTree(cmd)
+		}
+		sc := bufio.NewScanner(stdout)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := strings.TrimRight(sc.Text(), "\r")
+			switch {
+			case strings.HasPrefix(line, "ASP "):
+				p := append(strings.Split(line[4:], "|"), "", "", "", "", "")
+				done, total := num(p[0]), num(p[1])
+				if total == 0 {
+					total = num(p[2])
+				}
+				pct := 0.0
+				if done > 0 && total > 0 {
+					pct = float64(int(done/total*1000)) / 10
+				}
+				send(map[string]any{"type": "progress", "percent": pct, "speed": humanSpeed(num(p[3])), "eta": humanETA(p[4])})
+			case strings.HasPrefix(line, "ASF "):
+				finalFile = line[4:]
+			}
+		}
+		err = cmd.Wait()
+		if tail := stderr.String(); len(tail) > 2000 {
+			logf("stderr: %s", tail[len(tail)-2000:])
+		} else {
+			logf("stderr: %s", tail)
+		}
+		return finalFile, stderr.String(), err
 	}
-	err = cmd.Wait()
-	if tail := stderr.String(); len(tail) > 2000 {
-		logf("stderr: %s", tail[len(tail)-2000:])
-	} else {
-		logf("stderr: %s", tail)
+
+	finalFile, errText, err := run(extras)
+	// With extras on (subtitles, chapters, cover art) a site sometimes refuses the download.
+	// Try once more without them, so the video itself is never lost.
+	if err != nil && len(extras) > 0 && !cancelled.Load() && !(finalFile != "" && isFile(finalFile)) {
+		logf("download failed with extras, trying again without them")
+		finalFile, errText, err = run(nil)
 	}
 
 	switch {
@@ -565,7 +581,7 @@ func actionDownload(msg map[string]any) {
 		os.RemoveAll(partsDir)
 		send(map[string]any{"type": "done", "file": finalFile})
 	default:
-		fail(lastError(stderr.String()))
+		fail(lastError(errText))
 	}
 }
 
@@ -900,6 +916,8 @@ func main() {
 		send(actionHash(msg))
 	case "power":
 		send(actionPower(msg))
+	case "crawl":
+		send(actionCrawl(msg))
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":
@@ -948,6 +966,9 @@ func extrasArgs(msg map[string]any, hasFfmpeg bool) []string {
 	}
 	if on, _ := msg["cover"].(bool); on {
 		args = append(args, "--embed-thumbnail", "--convert-thumbnails", "jpg")
+	}
+	if len(args) > 0 && os.Getenv("ANYSAVE_TEST_FAIL_EXTRAS") == "1" {
+		args = append(args, "--anysave-test-bad-option") // tests: makes the try with extras fail
 	}
 	return args
 }

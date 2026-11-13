@@ -106,7 +106,20 @@ new installer once so the browser finds the helper under its new name. These are
 - Finish/fail notifications in the extension (`chrome.notifications`; several at once are summed up).
 - The extension now needs the `notifications` and `alarms` permissions.
 
-**Still not built:** site crawler (depth/filters).
+- Site crawler (`host-go/crawl.go`, helper action `crawl`, "Scan a website for files" panel in the manager):
+  follows links of the same website up to 3 levels, honours robots.txt, 3 pages at a time with a pause, limits of
+  300 pages / 2,000 files / about 50 seconds; file-type filter and "stay inside the start folder".
+- Android now has the same features: subtitles / chapters / cover art, proxy (`Net.kt`), checksum (pasted with the
+  link, and "Check SHA-256" on a finished file), scheduler and queues (`Schedule.kt`, status `SCHEDULED`, an alarm at
+  each boundary), import / export of the link list (`Backup.kt`). On Android 12+ the system may refuse to start a
+  download while the app is closed; it then starts when the app is opened (only Android 10 was tested).
+  Tested on the Mi 8: subtitles + chapters + cover art inside a real YouTube video, the scheduler (waits, Start now,
+  starts by itself when the schedule is switched off), checksum right and wrong. Not tested on the phone: proxy,
+  moving between queues, import/export, the alarm firing at the real hour, pausing when the hours end.
+- Video extras can make YouTube refuse the video now and then (HTTP 403 on the video data; seen on the phone).
+  Both the helper and the Android app therefore try once more without the extras, so the video is never lost.
+  `ANYSAVE_TEST_FAIL_EXTRAS=1` forces that path in the helper for tests. Android writes the raw reason of a failed
+  download to the system log: `adb logcat -s AnySave`.
 
 **CI:** the GitHub workflow (Windows, macOS, Ubuntu) has passed on every push of 13 November, so the Windows
 installer and helper do install and run on real Windows there. Nobody has used the Windows app by hand.

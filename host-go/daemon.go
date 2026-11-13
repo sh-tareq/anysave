@@ -583,6 +583,9 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 	case "probe":
 		req["proxy"] = d.proxySetting()
 		return actionProbe(req)
+	case "crawl":
+		req["proxy"] = d.proxySetting()
+		return actionCrawl(req)
 	case "pickFile":
 		return actionPickFile(req)
 	case "fileInfo":

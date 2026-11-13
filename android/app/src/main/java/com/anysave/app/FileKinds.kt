@@ -58,7 +58,7 @@ object FileKinds {
             ?: probeRequest(url, ua, head = false)
 
     private fun probeRequest(url: String, ua: String, head: Boolean): Probe? = runCatching {
-        val c = (URL(url).openConnection() as HttpURLConnection).apply {
+        val c = Net.open(URL(url)).apply {
             requestMethod = if (head) "HEAD" else "GET"; instanceFollowRedirects = true
             connectTimeout = 8000; readTimeout = 8000
             setRequestProperty("User-Agent", ua)

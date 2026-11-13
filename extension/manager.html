@@ -27,6 +27,32 @@
       <p class="hint">Videos from YouTube, Instagram, TikTok, Facebook, Vimeo and 1,000+ more sites. Any file link downloads directly.
         Tip: right-click any link or video → <b>Download with AnySave</b>. To check a file, paste its SHA-256 checksum after the link.</p>
       <div id="addMsg" class="msg" hidden></div>
+      <details class="crawl-box" id="crawlBox">
+        <summary class="small muted">Scan a website for files (find every PDF, ZIP, video… on a page and the pages it links to)</summary>
+        <form id="crawlForm" class="crawl-form">
+          <input id="crawlUrl" type="text" inputmode="url" autocomplete="off" placeholder="Page to start from, e.g. https://example.com/downloads/" required />
+          <select id="crawlDepth" aria-label="How far to follow links">
+            <option value="0">This page only</option>
+            <option value="1" selected>This page + pages it links to</option>
+            <option value="2">2 levels of links</option>
+            <option value="3">3 levels of links</option>
+          </select>
+          <input id="crawlTypes" type="text" placeholder="File types (blank = all), e.g. pdf, zip" />
+          <button class="primary" type="submit" id="crawlGo">Scan</button>
+        </form>
+        <label class="check small"><input type="checkbox" id="crawlSamePath" checked />
+          <span>Stay inside the start page's folder</span></label>
+        <p class="hint">Only that website is read, gently and within its own rules (robots.txt), up to 300 pages and about a minute.</p>
+        <div id="crawlMsg" class="msg" hidden></div>
+        <div id="crawlResults" hidden>
+          <div class="crawl-bar">
+            <label class="check small"><input type="checkbox" id="crawlAll" /> <span>Select all</span></label>
+            <input id="crawlFilter" type="text" placeholder="Filter the list, e.g. .pdf or report" />
+            <button class="primary" type="button" id="crawlDownload" disabled>Download selected</button>
+          </div>
+          <ul id="crawlList" class="crawl-list"></ul>
+        </div>
+      </details>
       <label class="capture"><input type="checkbox" id="captureAll" />
         <span><b>Catch downloads from websites</b><br /><span class="muted small">When you click a site's own download button, AnySave manages it and saves it into Downloads/AnySave. Progress shows on the AnySave toolbar icon; pin it so Chrome's own download bubble can stay hidden.</span></span>
       </label>

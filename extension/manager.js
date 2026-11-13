@@ -655,6 +655,64 @@ if ($("subLangsBox")) {
     send({ type: "setSettings", patch: { subLangs: picked.join(",") } });
   });
 }
+// ---------- site crawler ----------
+let crawlFiles = [];
+function crawlShown() {
+  const f = ($("crawlFilter")?.value || "").trim().toLowerCase();
+  return crawlFiles.filter((x) => !f || x.name.toLowerCase().includes(f) || ("." + x.ext).includes(f));
+}
+function crawlMsg(text, isErr) {
+  const m = $("crawlMsg");
+  m.hidden = !text; m.className = "msg" + (isErr ? " err" : ""); m.textContent = text || "";
+}
+function renderCrawl() {
+  const shown = crawlShown();
+  $("crawlList").innerHTML = shown.map((x) => `<li><input type="checkbox" data-u="${esc(x.url)}"${x.picked ? " checked" : ""} aria-label="${esc(x.name)}" />
+    <span class="tag">${esc(x.ext.toUpperCase().slice(0, 4))}</span><span class="cname" title="${esc(x.url)}">${esc(x.name)}</span>
+    <span class="cfrom" title="Found on ${esc(x.from)}">${esc(x.from.replace(/^https?:\/\//, ""))}</span></li>`).join("");
+  const n = crawlFiles.filter((x) => x.picked).length;
+  $("crawlDownload").disabled = !n;
+  $("crawlDownload").textContent = n ? `Download selected (${n})` : "Download selected";
+  $("crawlAll").checked = shown.length > 0 && shown.every((x) => x.picked);
+}
+$("crawlList")?.addEventListener("change", (e) => {
+  const item = crawlFiles.find((x) => x.url === e.target.dataset.u);
+  if (item) { item.picked = e.target.checked; renderCrawl(); }
+});
+$("crawlAll")?.addEventListener("change", (e) => { crawlShown().forEach((x) => { x.picked = e.target.checked; }); renderCrawl(); });
+$("crawlFilter")?.addEventListener("input", renderCrawl);
+$("crawlForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let url = $("crawlUrl").value.trim();
+  if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+  const btn = $("crawlGo");
+  btn.disabled = true; btn.textContent = "Scanning…";
+  crawlMsg("Reading the website… this can take up to a minute.");
+  $("crawlResults").hidden = true;
+  const res = await send({ type: "crawl", url, depth: Number($("crawlDepth").value), types: $("crawlTypes").value, samePath: $("crawlSamePath").checked });
+  btn.disabled = false; btn.textContent = "Scan";
+  if (!res?.ok) { crawlFiles = []; crawlMsg(res?.error || "Couldn't scan that website.", true); return; }
+  crawlFiles = (res.files || []).map((x) => ({ ...x, picked: false }));
+  const why = { "page limit": " It stopped at the page limit, so there may be more.", "time limit": " It stopped at the time limit, so there may be more.", "file limit": " Only the first 2,000 files are listed." }[res.stopped] || "";
+  crawlMsg(crawlFiles.length
+    ? `Found ${crawlFiles.length} file${crawlFiles.length === 1 ? "" : "s"} on ${res.pages} page${res.pages === 1 ? "" : "s"}.${why}`
+    : `No files found on ${res.pages} page${res.pages === 1 ? "" : "s"}. Try following more levels of links, or clear the file types.${why}`, !crawlFiles.length);
+  $("crawlResults").hidden = !crawlFiles.length;
+  renderCrawl();
+});
+$("crawlDownload")?.addEventListener("click", async () => {
+  const picked = crawlFiles.filter((x) => x.picked);
+  const btn = $("crawlDownload");
+  btn.disabled = true; btn.textContent = `Adding ${picked.length}…`;
+  let ok = 0;
+  for (const x of picked) {
+    const res = await send({ type: "file", url: x.url, name: x.name, referrer: x.from, queue: addQueue() });
+    if (res?.ok) { ok++; x.picked = false; }
+  }
+  crawlMsg(`Added ${ok} of ${picked.length} file${picked.length === 1 ? "" : "s"}. They're in the list below.`, ok < picked.length);
+  renderCrawl();
+});
+
 // ---------- queues and schedule ----------
 function queueNames() {
   return [...new Set(String(currentSettings.queues || "").split(",").map((q) => q.trim().slice(0, 24)).filter(Boolean))];

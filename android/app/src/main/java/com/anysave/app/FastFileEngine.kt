@@ -912,7 +912,7 @@ object FastFileEngine {
     ): HttpURLConnection {
         var current = startUrl
         repeat(10) {
-            val conn = (URL(current).openConnection() as HttpURLConnection).apply {
+            val conn = Net.open(URL(current)).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 15_000
                 readTimeout = 20_000

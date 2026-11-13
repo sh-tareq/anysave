@@ -207,7 +207,7 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
         title = { Text("Add download") },
         text = {
             Column {
-                Text("Any link or batch pattern (e.g. file[01-10].zip): video pages or direct files.",
+                Text("Any link or batch pattern (e.g. file[01-10].zip): video pages or direct files. To check a file, paste its SHA-256 checksum after the link.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
@@ -218,9 +218,15 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
             Button(enabled = !busy && Engine.extractUrls(link).isNotEmpty(), onClick = {
                 val urls = Engine.extractUrls(link)
                 if (urls.isEmpty()) return@Button
+                // A SHA-256 pasted after one link: the finished file is checked against it.
+                val sha = Regex("""(?i)(?:^|[\s,;])(?:sha-?256\s*[:=]?\s*)?([0-9a-f]{64})(?=$|[\s,;])""").find(link)?.groupValues?.get(1)?.lowercase()
                 busy = true
                 scope.launch {
-                    if (urls.size > 1) {
+                    if (sha != null && urls.size == 1) {
+                        val url = urls.first()
+                        val probe = withContext(Dispatchers.IO) { FileKinds.probe(url) }
+                        DownloadService.startFile(ctx, url, probe?.name, probe?.mime, sha256 = sha)
+                    } else if (urls.size > 1) {
                         urls.forEach { DownloadService.startLink(ctx, it) }
                     } else {
                         val url = urls.first()
@@ -235,6 +241,61 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
             }) { Text(if (busy) "Checking…" else "Download") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+    )
+}
+
+/** Compare a finished file with a checksum from the site it came from. */
+@Composable
+fun ChecksumDialog(job: Job, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var typed by remember { mutableStateOf("") }
+    var actual by remember { mutableStateOf(job.sha256) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(job.id) {
+        if (actual == null) {
+            val sum = withContext(Dispatchers.IO) {
+                runCatching {
+                    val md = java.security.MessageDigest.getInstance("SHA-256")
+                    ctx.contentResolver.openInputStream(job.uri!!)!!.use { input ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) { val n = input.read(buf); if (n <= 0) break; md.update(buf, 0, n) }
+                    }
+                    md.digest().joinToString("") { "%02x".format(it) }
+                }.getOrNull()
+            }
+            if (sum == null) failed = true else { actual = sum; Downloads.update(job.id) { it.copy(sha256 = sum) } }
+        }
+    }
+    val want = typed.replace(Regex("""(?i)^\s*sha-?256\s*[:=]?\s*"""), "").trim().lowercase()
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Check SHA-256") },
+        text = {
+            Column {
+                Text(displayName(job), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                when {
+                    failed -> Text("Couldn't read the file. It may have been moved or deleted.", color = MaterialTheme.colorScheme.error)
+                    actual == null -> Text("Reading the file…")
+                    else -> Text("This file: $actual", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(value = typed, onValueChange = { typed = it }, singleLine = true,
+                    placeholder = { Text("Paste the checksum to compare") }, modifier = Modifier.fillMaxWidth())
+                if (want.isNotEmpty() && actual != null) {
+                    Spacer(Modifier.height(8.dp))
+                    when {
+                        !want.matches(Regex("[0-9a-f]{64}")) -> Text("A SHA-256 checksum has 64 characters (0-9 and a-f).",
+                            style = MaterialTheme.typography.bodySmall)
+                        want == actual -> Text("✓ It matches. The file is exactly the one the site published.",
+                            color = MaterialTheme.colorScheme.primary)
+                        else -> Text("✗ It does NOT match. The file may be damaged or changed. Download it again.",
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
 }
 
@@ -295,6 +356,8 @@ private fun FinishedRow(job: Job) {
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var refreshLink by remember { mutableStateOf(false) }
+    var checkSum by remember { mutableStateOf(false) }
+    if (checkSum) ChecksumDialog(job) { checkSum = false }
     val failed = job.status != JobStatus.DONE
     val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
     Row(
@@ -353,6 +416,8 @@ private fun FinishedRow(job: Job) {
                         onClick = { menu = false; openFile(ctx, job) })
                     DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
                         onClick = { menu = false; share(ctx, job) })
+                    DropdownMenuItem(text = { Text("Check SHA-256 checksum") }, leadingIcon = { Icon(Icons.Outlined.Link, null) },
+                        onClick = { menu = false; checkSum = true })
                     DropdownMenuItem(text = { Text("Delete file") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                         onClick = { menu = false; confirmDelete = true })
                 }

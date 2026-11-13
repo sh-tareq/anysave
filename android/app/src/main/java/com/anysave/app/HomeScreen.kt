@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -455,6 +456,7 @@ private fun InfoCard(vm: MainViewModel, info: Engine.Info, job: Job?) {
                     }
                     JobStatus.QUEUED -> ProgressButton(null, "Queued", button, shape)
                     JobStatus.WAITING_WIFI -> ProgressButton(null, "Waiting for Wi-Fi…", button, shape)
+                    JobStatus.SCHEDULED -> ProgressButton(null, "Scheduled", button, shape)
                     JobStatus.PAUSED -> ProgressButton(job.percent / 100f, "Paused · ${job.percent.toInt()}% · Tap to resume", button, shape) {
                         DownloadService.resume(ctx, job.id)
                     }
@@ -533,20 +535,40 @@ fun ActiveJobCard(job: Job) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 Thumb(job, Modifier.size(width = 80.dp, height = 48.dp))
-                if (job.status != JobStatus.PAUSED)
+                if (job.status != JobStatus.PAUSED && job.status != JobStatus.SCHEDULED)
                     DownloadingBadge(Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(job.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
-                if (job.percent > 0f || job.status == JobStatus.PAUSED) LinearProgressIndicator({ job.percent / 100f }, Modifier.fillMaxWidth())
+                if (job.percent > 0f || job.status == JobStatus.PAUSED || job.status == JobStatus.SCHEDULED) LinearProgressIndicator({ job.percent / 100f }, Modifier.fillMaxWidth())
                 else LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(statusText(job), style = MaterialTheme.typography.bodySmall,
+                Text(listOfNotNull(job.queue.takeIf { it.isNotBlank() }, statusText(job)).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
+            // Waiting downloads can be moved to another queue.
+            val queueNames = Schedule.queueNames()
+            if (queueNames.isNotEmpty() && job.kind != JobKind.CONVERT &&
+                (job.status == JobStatus.SCHEDULED || job.status == JobStatus.PAUSED || job.status == JobStatus.QUEUED)) {
+                var pickQueue by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { pickQueue = true }) { Icon(Icons.Outlined.Folder, "Move to queue") }
+                    DropdownMenu(expanded = pickQueue, onDismissRequest = { pickQueue = false }) {
+                        (listOf("") + queueNames).forEach { q ->
+                            DropdownMenuItem(text = { Text(if (q.isBlank()) "Main queue" else q) },
+                                enabled = q != job.queue,
+                                onClick = { pickQueue = false; DownloadService.moveToQueue(ctx, job.id, q) })
+                        }
+                    }
+                }
+            }
             // Pause / resume (downloads only), refresh expired link, then cancel
-            if (job.status == JobStatus.PAUSED) {
+            if (job.status == JobStatus.SCHEDULED) {
+                IconButton(onClick = { DownloadService.startNow(ctx, job.id) }) { Icon(Icons.Outlined.PlayArrow, "Start now") }
+                IconButton(onClick = { DownloadService.pause(ctx, job.id) }) { Icon(Icons.Outlined.Pause, "Pause") }
+            } else if (job.status == JobStatus.PAUSED) {
                 if (job.kind != JobKind.CONVERT) {
                     IconButton(onClick = { refreshLink = true }) { Icon(Icons.Outlined.Link, "Refresh expired link") }
                 }
@@ -568,6 +590,7 @@ private fun sizeProgress(job: Job): String =
 fun statusText(job: Job): String = when (job.status) {
     JobStatus.QUEUED -> "Queued"
     JobStatus.WAITING_WIFI -> "Waiting for Wi-Fi…"
+    JobStatus.SCHEDULED -> "Scheduled · starts at ${Settings.scheduleStart.value}"
     JobStatus.DOWNLOADING -> when {
         job.kind == JobKind.CONVERT && job.percent <= 0f -> job.eta.takeIf { it.endsWith("…") } ?: "Converting…"
         job.kind == JobKind.CONVERT -> "Converting · ${job.percent.toInt()}% · ETA ${job.eta}"

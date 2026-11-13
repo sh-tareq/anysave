@@ -86,5 +86,7 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+        <!-- Wakes the app when the scheduled download hours begin or end. -->
+        <receiver android:name=".ScheduleReceiver" android:exported="false" />
     </application>
 </manifest>

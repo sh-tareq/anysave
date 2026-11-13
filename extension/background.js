@@ -800,7 +800,7 @@ async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
   return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
-const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert"]);
+const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl"]);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -857,6 +857,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           for (const [k, j] of Object.entries(jobs)) if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];
         });
         return { ok: true };
+      case "crawl":
+        return native({ action: "crawl", url: msg.url, depth: msg.depth, types: msg.types, samePath: !!msg.samePath,
+          proxy: (await getSettings()).proxy || "" });
       case "fileInfo": return native({ action: "fileInfo", path: msg.path });
       case "hashFile": {
         const j = (await getJobs())[msg.id];

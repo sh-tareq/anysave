@@ -116,3 +116,18 @@ footer a { color: var(--muted); }
 #queueChips { display: contents; }
 .row-queue { width: auto; max-width: 120px; padding: 3px 6px; font-size: 12px; }
 .tag.queue { background: rgba(128, 128, 128, 0.22); color: inherit; }
+
+/* Site crawler */
+.crawl-box { margin: 10px 0 14px; }
+.crawl-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+.crawl-form input, .crawl-form select, .crawl-bar input[type="text"] {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); font: inherit; }
+.crawl-form #crawlUrl { flex: 2 1 280px; }
+.crawl-form #crawlTypes { flex: 1 1 170px; }
+.crawl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0 6px; }
+.crawl-bar input[type="text"] { flex: 1 1 160px; }
+.crawl-list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.crawl-list li { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.crawl-list li:last-child { border-bottom: 0; }
+.crawl-list .cname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crawl-list .cfrom { flex: 0 1 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: 0.6; }
