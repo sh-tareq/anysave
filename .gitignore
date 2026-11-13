@@ -22,3 +22,6 @@ android/local.properties
 *.log
 .idea/
 .vscode/
+
+# Converted speech models: too big for git (see dist-assets/models/README.md)
+dist-assets/models/*.bin
