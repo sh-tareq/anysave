@@ -13,6 +13,7 @@
     <nav>
       <button class="tab active" data-tab="downloads">Downloads <span id="activeBadge" class="badge" hidden></span></button>
       <button class="tab" data-tab="convert">Convert</button>
+      <button class="tab" data-tab="transcripts">Transcripts</button>
     </nav>
   </header>
 
@@ -190,6 +191,17 @@
     </section>
 
     <!-- ================= Convert ================= -->
+    <section id="transcripts" class="panel" hidden>
+      <form id="txSearchForm" class="add">
+        <input id="txQuery" type="search" autocomplete="off" placeholder="Search everything you've transcribed, in any language" />
+        <button class="primary" type="submit">Search</button>
+      </form>
+      <p class="hint">Finds a word or phrase in every transcript and shows when it was said. To add a video, use the
+        <b>Transcribe</b> button on it in Downloads.</p>
+      <div id="txMsg" class="msg" hidden></div>
+      <ul id="txResults" class="tx-results"></ul>
+    </section>
+
     <section id="convert" class="panel" hidden>
       <div class="card">
         <h3>1. Choose a file</h3>

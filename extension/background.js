@@ -903,6 +903,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return native({ action: "reveal", file: msg.file || j?.file });
       }
       case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
+      case "searchTranscripts": {
+        const dirs = Array.isArray(msg.dirs) ? msg.dirs.filter((d) => typeof d === "string").slice(0, 50) : [];
+        return native({ action: "searchTranscripts", query: String(msg.query || "").slice(0, 200), dirs });
+      }
+      case "openPath": {
+        // Only transcripts and media; the helper also refuses anything outside Downloads/AnySave.
+        const f = String(msg.file || "");
+        if (!/\.(txt|srt|mp4|mkv|webm|mov|m4v|avi|mp3|m4a|wav|flac|ogg|opus|aac)$/i.test(f)) return { ok: false, error: "Can't open that file" };
+        return native({ action: "open", file: f });
+      }
       case "open": {
         const j = (await getJobs())[msg.id];
         if (!j?.file) return { ok: false, error: "File not found" };

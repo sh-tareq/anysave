@@ -107,6 +107,12 @@ desktop app): pick the spoken language, get `<name>.<lang>.srt` and `<name>.<lan
   "burn" draws the captions onto the picture (`<name> (captions).mp4`, libx264), smaller text for portrait videos.
   Bangla is shaped correctly (libass + HarfBuzz in the installed FFmpeg; Kohinoor Bangla on Mac, Nirmala UI on
   Windows). Files are worked on as copies with plain names, so names with ' : etc. are fine.
+- Transcripts tab in the manager (`host-go/search.go`, helper action `searchTranscripts`): lists every
+  `<name>.<lang>.srt` found under Downloads/AnySave and the folders of Transcribe jobs (so clearing the download list
+  doesn't lose them), and searches a word or phrase in any language, showing the time it was said. Case, punctuation
+  and zero-width joiners are ignored; a phrase split over two subtitle lines is found. Open text / open video use
+  `openPath`, which the helper only allows inside Downloads/AnySave. Spelling mistakes in Bangla transcripts mean a
+  correctly spelled search word can miss: there is no fuzzy matching yet.
 - Not tested: Windows (CPU only there, so the 547 MB model will be slow), Intel Macs (CPU), very long videos,
   music-heavy audio, the model download through a proxy, Transcribe inside the Mac app window.
 

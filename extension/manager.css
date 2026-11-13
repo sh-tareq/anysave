@@ -137,3 +137,16 @@ footer a { color: var(--muted); }
 .transcribe-box label { display: flex; align-items: center; gap: 6px; }
 .transcribe-box select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); font: inherit; }
 .transcribe-box .tx-note { flex-basis: 100%; }
+
+/* Transcripts tab */
+.tx-results { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tx-results > li { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel); }
+.tx-head { display: flex; align-items: center; gap: 8px; }
+.tx-head .tx-name { font-weight: 600; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-head .tx-meta { font-size: 12px; opacity: 0.7; white-space: nowrap; }
+.tx-preview { margin: 6px 0 0; font-size: 13px; opacity: 0.8; }
+.tx-hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tx-hits li { display: flex; gap: 10px; font-size: 13px; line-height: 1.45; }
+.tx-hits .tx-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.7; min-width: 42px; }
+.tx-hits mark { background: rgba(229, 72, 77, 0.28); color: inherit; border-radius: 3px; padding: 0 1px; }
+.tx-more { font-size: 12px; opacity: 0.7; margin-top: 4px; }

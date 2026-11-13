@@ -10,8 +10,10 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $("downloads").hidden = name !== "downloads";
   $("convert").hidden = name !== "convert";
+  $("transcripts").hidden = name !== "transcripts";
   history.replaceState(null, "", "#" + name);
   if (name === "convert") fillDownloadsPicker();
+  if (name === "transcripts") searchTranscripts($("txQuery").value);
 }
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
 
@@ -705,6 +707,68 @@ if ($("subLangsBox")) {
     send({ type: "setSettings", patch: { subLangs: picked.join(",") } });
   });
 }
+// ---------- transcripts: list and search ----------
+const LANG_LABEL = { en: "English", bn: "Bangla", hi: "Hindi", ur: "Urdu", ar: "Arabic", es: "Spanish", fr: "French",
+  de: "German", pt: "Portuguese", ru: "Russian", tr: "Turkish", id: "Indonesian", zh: "Chinese", ja: "Japanese", ko: "Korean", auto: "" };
+// Highlights the searched words; works on Bangla too (no word boundaries assumed).
+function highlight(text, query) {
+  const words = String(query || "").toLowerCase().split(/[\s.,;:!?"'()]+/).filter(Boolean);
+  let html = esc(text);
+  for (const w of words.sort((a, b) => b.length - a.length)) {
+    // \p{M}*: take in vowel signs joined to the last letter, so a Bangla letter is never split.
+    const re = new RegExp(esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\p{M}*", "giu");
+    html = html.replace(re, (m) => `<mark>${m}</mark>`);
+  }
+  return html;
+}
+let txSearchSeq = 0;
+async function searchTranscripts(query) {
+  const seq = ++txSearchSeq;
+  const dirs = [...new Set(Object.values(jobs).filter((j) => j.kind === "transcribe" && j.file)
+    .map((j) => String(j.file).replace(/[\\/][^\\/]*$/, "")))];
+  const m = $("txMsg");
+  m.hidden = false; m.className = "msg"; m.textContent = query ? "Searching…" : "Loading your transcripts…";
+  const res = await send({ type: "searchTranscripts", query, dirs });
+  if (seq !== txSearchSeq) return; // a newer search is running
+  const ul = $("txResults");
+  ul.innerHTML = "";
+  if (!res?.ok) { m.className = "msg err"; m.textContent = res?.error || "Couldn't search. Is the AnySave helper installed?"; return; }
+  const list = res.results || [];
+  const hits = list.reduce((a, r) => a + (r.count || 0), 0);
+  m.textContent = query
+    ? (list.length ? `"${query}" found ${hits} time${hits === 1 ? "" : "s"} in ${list.length} transcript${list.length === 1 ? "" : "s"}.`
+      : `"${query}" wasn't found in your ${res.scanned} transcript${res.scanned === 1 ? "" : "s"}.`)
+    : (list.length ? `${list.length} transcript${list.length === 1 ? "" : "s"}. Search above to find a word or phrase.`
+      : "No transcripts yet. Use the Transcribe button on a finished video in Downloads.");
+  for (const r of list) {
+    const li = document.createElement("li");
+    const lang = LANG_LABEL[r.lang] ?? r.lang;
+    const when = r.modified ? ago(r.modified) : "";
+    li.innerHTML = `<div class="tx-head"><span class="tx-name" title="${esc(r.srt)}">${esc(r.name)}</span>
+        <span class="tx-meta">${[lang, query && `${r.count} match${r.count === 1 ? "" : "es"}`, when].filter(Boolean).map(esc).join(" · ")}</span>
+        <span class="btns"></span></div>` +
+      (query
+        ? `<ul class="tx-hits">${(r.matches || []).map((h) => `<li><span class="tx-time">${esc(h.time)}</span><span>${highlight(h.text, query)}</span></li>`).join("")}</ul>` +
+          (r.count > (r.matches || []).length ? `<div class="tx-more">and ${r.count - r.matches.length} more</div>` : "")
+        : `<p class="tx-preview">${esc(r.preview || "")}${(r.preview || "").length > 150 ? "…" : ""}</p>`);
+    const btns = li.querySelector(".btns");
+    const button = (icon, title, fn) => {
+      const b = Object.assign(document.createElement("button"), { className: "ib", title });
+      b.setAttribute("aria-label", title);
+      b.innerHTML = svg(icon, 18);
+      b.onclick = fn;
+      btns.appendChild(b);
+    };
+    const open = (file) => send({ type: "openPath", file }).then((x) => { if (x && !x.ok) alert(x.error || "Couldn't open the file"); });
+    if (r.txt) button("text", "Open the text", () => open(r.txt));
+    if (r.video) button("open", "Open the video", () => open(r.video));
+    button("folder", "Show in folder", () => send({ type: "reveal", file: r.srt }));
+    ul.appendChild(li);
+  }
+}
+$("txSearchForm")?.addEventListener("submit", (e) => { e.preventDefault(); searchTranscripts($("txQuery").value.trim()); });
+$("txQuery")?.addEventListener("search", () => { if (!$("txQuery").value) searchTranscripts(""); }); // the x in the box
+
 // ---------- site crawler ----------
 let crawlFiles = [];
 function crawlShown() {
@@ -852,5 +916,5 @@ $("loginFastSites")?.addEventListener("change", async (e) => {
   render();
   markSeen();
   updateLabel();
-  showTab(location.hash === "#convert" ? "convert" : "downloads");
+  showTab(["#convert", "#transcripts"].includes(location.hash) ? location.hash.slice(1) : "downloads");
 })();

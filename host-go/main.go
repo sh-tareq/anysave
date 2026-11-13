@@ -927,6 +927,8 @@ func main() {
 		actionTranscribe(msg)
 	case "subs":
 		actionSubs(msg)
+	case "searchTranscripts":
+		send(actionSearchTranscripts(msg))
 	case "convert":
 		actionConvert(msg)
 	case "diagnostics":

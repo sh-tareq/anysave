@@ -697,6 +697,12 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		id := d.startSubsJob(req)
 		return map[string]any{"ok": true, "id": id}
 
+	case "searchTranscripts":
+		return actionSearchTranscripts(req)
+
+	case "openPath":
+		return actionOpen(map[string]any{"file": str(req, "file")}) // only files inside Downloads/AnySave
+
 	case "pause":
 		d.pauseJob(str(req, "id"))
 		return map[string]any{"ok": true}
