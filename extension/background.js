@@ -1157,7 +1157,7 @@ async function syncClickKeyScript() {
         js: ["video-overlay.js"],
         matches,
         runAt: "document_idle",
-        allFrames: false,
+        allFrames: true, // also videos in embedded players (e.g. a YouTube video on a news site)
       });
     }
     await chrome.scripting.registerContentScripts(scripts);

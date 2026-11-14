@@ -166,9 +166,10 @@ installer and helper do install and run on real Windows there. Nobody has used t
 **Still not tested:** anything on real Windows; how the Mac app window, menu-bar item, drop box, global shortcut,
 clipboard watch and notifications look and behave (the test session could not take screenshots of the Mac);
 the `.dmg`/`.exe` installers; self-update; Safari; refresh-expired-link; aria2c; cancel cleanup on Android;
-Android engine speed against a single connection; the "Keep" prompt being answered by a person; Alt/Cmd-click and
-the overlay on sites other than the five built-in ones (needs the optional all-sites permission);
-a real Option-click (the test simulated it in two steps).
+Android engine speed against a single connection; the "Keep" prompt being answered by a person; Alt/Cmd-click on
+sites other than the test page; the video button on Facebook and Instagram feeds (need a login), YouTube's
+hover previews, TikTok's main feed and X (tested: a YouTube video, Meta Ad Library, TikTok Creative Center,
+an ordinary site); a real Option-click (the test simulated it in two steps).
 
 **Other known gaps:**
 - The **Windows installer** (`installers/windows/install.ps1`) has never run on real Windows. Phase 0 of the
@@ -188,6 +189,10 @@ extension/      Chrome MV3 extension
                   Meta/TikTok ad lists (checkboxes, Select all, live progress pills), recent downloads
   manager.*       full download manager + converter page (Open, drag-out, multi-link paste, queue states)
   capture.js      TikTok Creative Center: remembers ads that played on hover
+  video-overlay.js  AnySave icon button on videos (any site, also embedded players): click → quality
+                  menu from the helper's `info` for the video's own page (found from the post/thumbnail
+                  link on YouTube, Facebook, Instagram, TikTok, X); ad libraries and plain video files
+                  → "Video file". Tested by pt/t12.js.
 host-go/        native messaging helper (Go, no deps). Actions: info, playlist, download (streams progress),
                 pause/cancel (via messages), convert (ffmpeg), probe, pickFile, fileInfo, reveal, open.
                 Finds yt-dlp, ffmpeg, deno in ./bin next to itself.

@@ -110,5 +110,5 @@ Confirmed with the owner (12 November 2026) — industry-standard defaults locke
 2. **Build order:** **Engine first (Phase 1), then Desktop App (Phase 2)**.
 3. **Code signing:** **Sign before public desktop app launch in Phase 2** (unsigned builds + Ed25519 signed update manifests until then).
 4. **Default "Who handles downloads":** **AnySave (fast engine) with automatic silent fallback to Chrome** (plus `Alt`-click to bypass AnySave, `Ctrl`-click to force AnySave).
-5. **All-sites cookie permission (`<all_urls>`):** **Optional permission (`optional_host_permissions`)**, requested only when the user turns on fast mode for login-protected sites.
+5. **All-sites access:** **A normal host permission (`*://*/*`) since 1.2.0**, so the AnySave button works on videos on any site (the extension is installed unpacked, so Chrome grants it without a prompt). Chrome logins (cookies) are still only sent to the helper when the user turns that on.
 6. **Pricing & architecture:** **100% Free & Open Source forever** (local-first, zero telemetry, no accounts or license servers).

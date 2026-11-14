@@ -18,13 +18,6 @@
     "alarms"
   ],
   "host_permissions": [
-    "*://*.youtube.com/*",
-    "*://*.facebook.com/*",
-    "*://*.instagram.com/*",
-    "*://*.tiktok.com/*",
-    "*://*.vimeo.com/*"
-  ],
-  "optional_host_permissions": [
     "*://*/*"
   ],
   "icons": {
