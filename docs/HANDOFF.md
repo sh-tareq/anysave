@@ -189,6 +189,7 @@ extension/      Chrome MV3 extension
                   toolbar icon (animated progress ring + % badge + ✓ for unseen finished)
   popup.*         per-page UI: single video (live progress button), playlists/channels/Mixes picker,
                   Meta/TikTok ad lists (checkboxes, Select all, live progress pills), recent downloads
+                  (manager colours and wording since 15 Nov 2026: file badge, "46% · 4.2 MB/s · 1 min 12 s left")
   manager.*       full download manager (IDM-style since 15 Nov 2026): top add-link box, sidebar (status,
                   file types, queues, tools, each with a count), labelled toolbar acting on the selected rows,
                   sortable table (Name/Size/Status/Speed/Time left), details panel for the selected row
@@ -210,7 +211,14 @@ host-go/        native messaging helper (Go, no deps). Actions: info, playlist, 
 installers/     mac/install-mac.sh (shipped as "Install AnySave.command"), windows/install.ps1 + .bat.
                 Download yt-dlp, ffmpeg, Deno with SHA-256 verification; register the native host.
 android/        Kotlin + Jetpack Compose app, youtubedl-android (yt-dlp + ffmpeg), bundled QuickJS
-                (app/src/main/jniLibs/*/libqjs.so) as YouTube's JS runtime.
+                (app/src/main/jniLibs/*/libqjs.so) as YouTube's JS runtime. Same look as the manager since
+                15 Nov 2026: fixed colours in Theme.kt (`AnySaveColors.status` for progress/ok/warn/err, file
+                type badge colours), one row design for Home and Downloads (DownloadRow.kt: badge or thumbnail,
+                "42% · 1.2 MB/s · 0:12 left", amber Paused, green Done), Downloads tab with filters, search,
+                sort, long-press multi-select, details sheet (Open/Share/Copy link/Check SHA-256/Delete/Remove),
+                the "before you download" window (setting `askBeforeAdd`, rename before saving), Settings in
+                cards. While yt-dlp prepares a video (YouTube 10 s to minutes; HLS never gives a percent) the
+                row says "Getting the video…" instead of a bare "Starting…".
 scripts/build.sh  builds helper for mac (universal) + windows, assembles dist/ zip, copies the APK.
 scripts/fetch-quickjs.sh  refreshes the bundled QuickJS (checks SHA-256).
 dist-assets/    marketing images (LinkedIn, Facebook carousel EN + BN) and R8 mappings (mappings are gitignored).
@@ -286,6 +294,11 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026 (later): Android app redesigned to match the manager (see Architecture); popup and video button
+  menu restyled with the manager colours; Android/helper show an IP address as the site name. Tested on the Mi 8
+  (release build): YouTube download, before-download window + rename, speed limit, pause/resume, multi-select +
+  remove, share-to-AnySave, search, sort, Check SHA-256. Not tested on the phone: dark mode (MIUI ignores the adb
+  switch), Quick Settings tile, auto-download of copied links, Wi-Fi only, schedule, Convert, Retry, refresh link.
 - 15 Nov 2026: manager page redesigned in an IDM style (see Architecture); helper `info` gives an estimated size
   per quality; "Use my Chrome login & retry" on video login errors; a late update for a removed download no longer
   brings it back as an empty row (extension and helper); Mac window remembers its size, minimum 720×480.
@@ -320,8 +333,7 @@ Still open:
 - Desktop: no code signing, by the owner's decision (14 Nov 2026: no Apple, Microsoft or Google developer accounts
   for now); the install instructions explain the first-open warnings on Mac, Windows and Android; the Mac file
   picker fix is unconfirmed by a person; no automatic update of the helper itself.
-- Extension: no `_locales`/i18n (Bangla UI). The popup and the video button menu still use the older look
-  (to be restyled to match the new manager).
+- Extension: no `_locales`/i18n (Bangla UI).
 - Android: `targetSdk` 34 (only matters for Google Play); no predictive back; no themed icon; no localization;
   dark-mode launch flash; no transcription.
 - Not tested by a person: everything on Windows (CI installs, transcribes a sample and uninstalls there), the Mac

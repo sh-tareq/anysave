@@ -29,6 +29,9 @@ object Settings {
     /** Off by default: a copied link is only offered on Home until the user opts in. */
     private val _autoClipboard = MutableStateFlow(false)
     val autoClipboard: StateFlow<Boolean> = _autoClipboard
+    /** Show what a pasted link is (qualities with sizes, file name and size) before it downloads. */
+    private val _askBeforeAdd = MutableStateFlow(true)
+    val askBeforeAdd: StateFlow<Boolean> = _askBeforeAdd
     private val _wifiOnly = MutableStateFlow(false)
     val wifiOnly: StateFlow<Boolean> = _wifiOnly
     private val _maxParallel = MutableStateFlow(3)
@@ -72,6 +75,7 @@ object Settings {
         prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
         _quality.value = runCatching { Quality.valueOf(prefs.getString("quality", null)!!) }.getOrDefault(Quality.BEST)
         _autoClipboard.value = prefs.getBoolean("autoClipboard", false)
+        _askBeforeAdd.value = prefs.getBoolean("askBeforeAdd", true)
         _wifiOnly.value = prefs.getBoolean("wifiOnly", false)
         _maxParallel.value = prefs.getInt("maxParallel", 3)
         _speedLimitKbps.value = prefs.getInt("speedLimitKbps", 0)
@@ -108,6 +112,7 @@ object Settings {
 
     fun setQuality(q: Quality) { _quality.value = q; prefs.edit().putString("quality", q.name).apply() }
     fun setAutoClipboard(on: Boolean) { _autoClipboard.value = on; prefs.edit().putBoolean("autoClipboard", on).apply() }
+    fun setAskBeforeAdd(on: Boolean) { _askBeforeAdd.value = on; prefs.edit().putBoolean("askBeforeAdd", on).apply() }
     fun setWifiOnly(on: Boolean) { _wifiOnly.value = on; prefs.edit().putBoolean("wifiOnly", on).apply() }
     fun setMaxParallel(n: Int) { _maxParallel.value = n; prefs.edit().putInt("maxParallel", n).apply() }
     fun setSpeedLimitKbps(kbps: Int) { _speedLimitKbps.value = kbps; prefs.edit().putInt("speedLimitKbps", kbps).apply() }

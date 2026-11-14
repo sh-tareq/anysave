@@ -65,6 +65,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var clipboardLinks by mutableStateOf<List<String>>(emptyList())
     /** Job started from the video card, so its button can show the progress. */
     var infoJobId by mutableStateOf<String?>(null)
+    /** A file link waiting for "Start download" (name and size shown first). */
+    var fileOffer by mutableStateOf<FileOffer?>(null)
+
+    fun startOffer(name: String) {
+        val o = fileOffer ?: return
+        fileOffer = null
+        if (DownloadService.startFile(ctx, o.url, name, o.mime)) messages.tryEmit("Downloading $name")
+        url = ""; tab = MainActivity.TAB_DOWNLOADS
+    }
 
     // Playlist or channel found by the lookup, its selection, and the jobs started from it.
     var playlist by mutableStateOf<Engine.Playlist?>(null)
@@ -103,8 +112,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 openAdLibrary = lib to link; return
             }
         }
-        // A direct file link (PDF, ZIP, APK, MP4 file...) downloads straight away.
+        // A direct file link (PDF, ZIP, APK, MP4 file...): show its name and size first, or download straight away.
         if (FileKinds.looksLikeFile(link) && Engine.siteOf(link) == null) {
+            if (Settings.askBeforeAdd.value) {
+                clearLookup(); loading = true; tab = MainActivity.TAB_HOME
+                lookupJob = viewModelScope.launch {
+                    val probe = withContext(Dispatchers.IO) { FileKinds.probe(link) }
+                    if (isActive) { loading = false; fileOffer = FileOffer.of(link, probe) }
+                }
+                return
+            }
             if (DownloadService.startFile(ctx, link)) messages.tryEmit("Downloading file")
             url = ""; tab = MainActivity.TAB_DOWNLOADS
             return
@@ -126,6 +143,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Files download directly; only web pages go to yt-dlp, which would otherwise
                 // read a big file just to find out it isn't a page.
                 val probe = if (Engine.siteOf(link) == null) withContext(Dispatchers.IO) { FileKinds.probe(link) } else null
+                if (probe?.isFile == true && Settings.askBeforeAdd.value) {
+                    fileOffer = FileOffer.of(link, probe)
+                    return@launch
+                }
                 if (probe?.isFile == true) {
                     DownloadService.startFile(ctx, link, probe.name, probe.mime)
                     messages.tryEmit("Downloading ${probe.name ?: "file"}")
@@ -164,7 +185,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun clearLookup() {
         lookupJob?.cancel(); lookupJob = null
         playlistJob?.cancel(); playlistJob = null
-        info = null; error = null; errorIsWebPage = false; infoJobId = null; loading = false
+        info = null; error = null; errorIsWebPage = false; infoJobId = null; loading = false; fileOffer = null
         playlist = null; playlistLoading = false
         playlistSelected.clear(); playlistStarted.clear(); playlistBatch = emptyList()
     }
@@ -403,12 +424,14 @@ fun AppShell(vm: MainViewModel) {
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (vm.tab) {
                 MainActivity.TAB_HOME -> HomeScreen(vm, jobs)
-                MainActivity.TAB_DOWNLOADS -> DownloadsScreen(jobs)
+                MainActivity.TAB_DOWNLOADS -> DownloadsScreen(jobs) { vm.lookUp(it) }
                 MainActivity.TAB_CONVERT -> ConvertScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
                 else -> SettingsScreen(vm)
             }
         }
     }
+
+    vm.fileOffer?.let { o -> FileOfferDialog(o, onStart = { vm.startOffer(it) }, onClose = { vm.fileOffer = null; vm.url = "" }) }
 
     if (showWelcome) WelcomeDialog {
         Settings.onboarded = true; Settings.acceptedTerms = true; showWelcome = false

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -45,6 +46,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val quality by Settings.quality.collectAsState()
     val autoClip by Settings.autoClipboard.collectAsState()
     val wifiOnly by Settings.wifiOnly.collectAsState()
+    val askBefore by Settings.askBeforeAdd.collectAsState()
     val maxParallel by Settings.maxParallel.collectAsState()
     val speedLimitKbps by Settings.speedLimitKbps.collectAsState()
     val sortFolders by Settings.sortIntoFolders.collectAsState()
@@ -102,178 +104,191 @@ fun SettingsScreen(vm: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
 
-        Section("Downloads")
-        SettingRow(Icons.Outlined.HighQuality, "Default quality", quality.label,
-            "Used for one-tap downloads (copied links, Share → Download, Quick Settings tile)") { pickQuality = true }
-        SwitchRow(Icons.Outlined.ContentCopy, "Auto-download copied links",
-            "Open AnySave after copying a link from a video site and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
-        SwitchRow(Icons.Outlined.Wifi, "Wi-Fi only", "Wait for Wi-Fi instead of using mobile data", wifiOnly) {
-            Settings.setWifiOnly(it)
+        SettingsGroup("Downloads") {
+            SettingRow(Icons.Outlined.HighQuality, "Default quality", quality.label,
+                "Used for one-tap downloads (copied links, Share → Download, Quick Settings tile)") { pickQuality = true }
+            SwitchRow(Icons.Outlined.FactCheck, "Ask before each download",
+                "After you paste a link: pick the quality and see the size before it starts", askBefore) { Settings.setAskBeforeAdd(it) }
+            SwitchRow(Icons.Outlined.ContentCopy, "Auto-download copied links",
+                "Open AnySave after copying a link from a video site and it starts downloading", autoClip) { Settings.setAutoClipboard(it) }
+            SwitchRow(Icons.Outlined.Wifi, "Wi-Fi only", "Wait for Wi-Fi instead of using mobile data", wifiOnly) {
+                Settings.setWifiOnly(it)
+            }
         }
 
-        Section("Download manager")
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Downloads at the same time")
-                    Text("Applies to the next downloads you start", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsGroup("Download manager") {
+            Column(Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Downloads at the same time")
+                        Text("Applies to the next downloads you start", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Row(Modifier.padding(start = 40.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (1..5).forEach { n ->
+                        FilterChip(selected = maxParallel == n, onClick = { Settings.setMaxParallel(n) }, label = { Text("$n") })
+                    }
                 }
             }
-            Row(Modifier.padding(start = 40.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                (1..5).forEach { n ->
-                    FilterChip(selected = maxParallel == n, onClick = { Settings.setMaxParallel(n) }, label = { Text("$n") })
+            Column(Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Speed limit")
+                        Text("Cap total download speed so other apps stay fast", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
+                val speedPresets = listOf(0 to "Unlimited", 10240 to "10 MB/s", 5120 to "5 MB/s", 2048 to "2 MB/s", 512 to "500 KB/s")
+                Row(
+                    Modifier.padding(start = 40.dp, top = 8.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    speedPresets.forEach { (kbps, label) ->
+                        FilterChip(selected = speedLimitKbps == kbps, onClick = { Settings.setSpeedLimitKbps(kbps) }, label = { Text(label) })
+                    }
+                }
+            }
+            SwitchRow(Icons.Outlined.FolderCopy, "Sort into folders",
+                "Videos, Music, Pictures, Documents, Archives, Apps, Converted", sortFolders) { Settings.setSortIntoFolders(it) }
+        }
+
+        SettingsGroup("Videos") {
+            SettingRow(Icons.Outlined.ClosedCaption, "Subtitles inside videos",
+                SUB_LANGS.filter { it.first in subLangs.split(',') }.joinToString(", ") { it.second }.ifBlank { "None" },
+                "A video gets the ones it has") { pickSubs = true }
+            SwitchRow(Icons.Outlined.Bookmarks, "Chapter marks", "Keep chapter marks inside videos", embedChapters) {
+                Settings.setEmbedChapters(it)
+            }
+            SwitchRow(Icons.Outlined.Image, "Cover art", "Put the thumbnail inside videos and music", embedCover) {
+                Settings.setEmbedCover(it)
             }
         }
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Speed, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Speed limit")
-                    Text("Cap total download speed so other apps stay fast", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+
+        SettingsGroup("Schedule and queues") {
+            SwitchRow(Icons.Outlined.Schedule, "Only download at set hours",
+                "Outside them downloads wait as Scheduled and start by themselves. Start now on a download skips the wait.",
+                scheduleOn) { Settings.setScheduleOn(it); Schedule.tick(ctx) }
+            SettingRow(Icons.Outlined.AccessTime, "From", scheduleStart, null) { pickTime(scheduleStart) { Settings.setScheduleStart(it) } }
+            SettingRow(Icons.Outlined.AccessTime, "Until", scheduleStop, null) { pickTime(scheduleStop) { Settings.setScheduleStop(it) } }
+            SettingRow(Icons.Outlined.Folder, "The hours apply to",
+                if (scheduleQueue.isBlank()) "All downloads" else "The \"$scheduleQueue\" queue only", null) { pickScheduleQueue = true }
+            SettingRow(Icons.Outlined.Folder, "Queues", queues.ifBlank { "Only the main queue" },
+                "Extra queues, names separated by commas (e.g. Night, Work)") { editQueues = true }
+            SettingRow(Icons.Outlined.Folder, "New downloads go to", newQueue.ifBlank { "Main queue" }, null) { pickNewQueue = true }
+        }
+
+        SettingsGroup("Network") {
+            SettingRow(Icons.Outlined.Lan, "Proxy", proxy.ifBlank { "This phone's proxy settings" },
+                "http://host:port, socks5://host:port, or direct") { editProxy = true }
+        }
+
+        SettingsGroup("Backup") {
+            SettingRow(Icons.Outlined.Upload, "Export list of links", "Save every link in the list to a file", null) {
+                exportList.launch("anysave-links.json")
             }
-            val speedPresets = listOf(0 to "Unlimited", 10240 to "10 MB/s", 5120 to "5 MB/s", 2048 to "2 MB/s", 512 to "500 KB/s")
-            Row(
-                Modifier.padding(start = 40.dp, top = 8.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            SettingRow(Icons.Outlined.Download, "Import list of links", "From an exported file, or any text file with links", null) {
+                importList.launch(arrayOf("application/json", "text/*", "*/*"))
+            }
+        }
+
+        SettingsGroup("Quick Settings tile") {
+            SettingRow(Icons.Outlined.TouchApp, "Add the AnySave tile",
+                if (Build.VERSION.SDK_INT >= 33) "Tap to add it now"
+                else "Swipe down twice, tap the pencil (Edit), and drag AnySave into your tiles",
+                "Copy a link anywhere, swipe down, tap AnySave"
             ) {
-                speedPresets.forEach { (kbps, label) ->
-                    FilterChip(selected = speedLimitKbps == kbps, onClick = { Settings.setSpeedLimitKbps(kbps) }, label = { Text(label) })
+                if (Build.VERSION.SDK_INT >= 33) {
+                    ctx.getSystemService(StatusBarManager::class.java).requestAddTileService(
+                        ComponentName(ctx, DownloadTileService::class.java), "AnySave",
+                        AndroidIcon.createWithResource(ctx, R.drawable.ic_stat_download), ctx.mainExecutor
+                    ) { }
                 }
             }
         }
-        SwitchRow(Icons.Outlined.FolderCopy, "Sort into folders",
-            "Videos, Music, Pictures, Documents, Archives, Apps, Converted", sortFolders) { Settings.setSortIntoFolders(it) }
 
-        Section("Videos")
-        SettingRow(Icons.Outlined.HighQuality, "Subtitles inside videos",
-            SUB_LANGS.filter { it.first in subLangs.split(',') }.joinToString(", ") { it.second }.ifBlank { "None" },
-            "A video gets the ones it has") { pickSubs = true }
-        SwitchRow(Icons.Outlined.FolderCopy, "Chapter marks", "Keep chapter marks inside videos", embedChapters) {
-            Settings.setEmbedChapters(it)
-        }
-        SwitchRow(Icons.Outlined.FolderCopy, "Cover art", "Put the thumbnail inside videos and music", embedCover) {
-            Settings.setEmbedCover(it)
-        }
-
-        Section("Schedule and queues")
-        SwitchRow(Icons.Outlined.Speed, "Only download at set hours",
-            "Outside them downloads wait as Scheduled and start by themselves. Start now on a download skips the wait.",
-            scheduleOn) { Settings.setScheduleOn(it); Schedule.tick(ctx) }
-        SettingRow(Icons.Outlined.Speed, "From", scheduleStart, null) { pickTime(scheduleStart) { Settings.setScheduleStart(it) } }
-        SettingRow(Icons.Outlined.Speed, "Until", scheduleStop, null) { pickTime(scheduleStop) { Settings.setScheduleStop(it) } }
-        SettingRow(Icons.Outlined.Folder, "The hours apply to",
-            if (scheduleQueue.isBlank()) "All downloads" else "The \"$scheduleQueue\" queue only", null) { pickScheduleQueue = true }
-        SettingRow(Icons.Outlined.Folder, "Queues", queues.ifBlank { "Only the main queue" },
-            "Extra queues, names separated by commas (e.g. Night, Work)") { editQueues = true }
-        SettingRow(Icons.Outlined.Folder, "New downloads go to", newQueue.ifBlank { "Main queue" }, null) { pickNewQueue = true }
-
-        Section("Network")
-        SettingRow(Icons.Outlined.Wifi, "Proxy", proxy.ifBlank { "This phone's proxy settings" },
-            "http://host:port, socks5://host:port, or direct") { editProxy = true }
-
-        Section("Backup")
-        SettingRow(Icons.Outlined.FolderCopy, "Export list of links", "Save every link in the list to a file", null) {
-            exportList.launch("anysave-links.json")
-        }
-        SettingRow(Icons.Outlined.FolderCopy, "Import list of links", "From an exported file, or any text file with links", null) {
-            importList.launch(arrayOf("application/json", "text/*", "*/*"))
-        }
-
-        Section("Quick Settings tile")
-        SettingRow(Icons.Outlined.TouchApp, "Add the AnySave tile",
-            if (Build.VERSION.SDK_INT >= 33) "Tap to add it now"
-            else "Swipe down twice, tap the pencil (Edit), and drag AnySave into your tiles",
-            "Copy a link anywhere, swipe down, tap AnySave"
-        ) {
-            if (Build.VERSION.SDK_INT >= 33) {
-                ctx.getSystemService(StatusBarManager::class.java).requestAddTileService(
-                    ComponentName(ctx, DownloadTileService::class.java), "AnySave",
-                    AndroidIcon.createWithResource(ctx, R.drawable.ic_stat_download), ctx.mainExecutor
-                ) { }
-            }
-        }
-
-        Section("Accounts")
-        Text("Log in to download private posts and most Instagram videos. The login stays on this phone.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp))
-        LoginActivity.Site.entries.forEach { site ->
-            val on = site.label in loggedIn
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .clickable { login.launch(LoginActivity.intent(ctx, site)) }.padding(horizontal = 12.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SiteIcon(site.label, 24.dp)
-                Spacer(Modifier.width(14.dp))
-                Text(site.label, Modifier.weight(1f))
-                if (on) AssistChip(onClick = { login.launch(LoginActivity.intent(ctx, site)) }, label = { Text("Logged in") },
-                    leadingIcon = { Icon(Icons.Outlined.AccountCircle, null, Modifier.size(18.dp)) })
-                else TextButton(onClick = { login.launch(LoginActivity.intent(ctx, site)) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(36.dp)) { Text("Log in") }
-            }
-        }
-        if (loggedIn.isNotEmpty()) TextButton(onClick = { LoginActivity.logOutAll(ctx); loggedIn = emptyList() }) {
-            Text("Log out of all sites")
-        }
-
-        Section("Downloader")
-        SettingRow(Icons.Outlined.SystemUpdate, "Update downloader",
-            (vm.ytdlpVersion?.let { if (it.startsWith("yt-dlp")) it else "yt-dlp $it" } ?: "yt-dlp …") + if (vm.updating) " · updating…" else "",
-            "Updates itself every 2 days. Update now if a site stops working."
-        ) { if (!vm.updating && Downloads.jobs.value.none { it.active }) vm.updateDownloader()
-            else if (!vm.updating) vm.messages.tryEmit("Wait for downloads to finish first") }
-
-        Section("Storage")
-        SettingRow(Icons.Outlined.Folder, "Save location",
-            if (sortFolders) "Downloads/AnySave/<type>" else "Downloads/AnySave", "Tap to open the folder") {
-            openSaveFolder(ctx)
-        }
-        SettingRow(Icons.Outlined.DeleteSweep, "Clear download list", "Files are kept", null) {
-            Downloads.clearFinished(); vm.messages.tryEmit("List cleared")
-        }
-
-        Section("About")
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            AnimatedLogo(56.dp)
-            Spacer(Modifier.width(16.dp))
-            Column {
-                Text("AnySave $appVersion", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Made by $AUTHOR", color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        CopyrightNotice(Modifier.padding(horizontal = 4.dp))
-        SettingRow(Icons.Outlined.ContentCopy, "Copy diagnostics",
-            "App & yt-dlp versions, device info, recent errors (no personal links)", null) {
-            val failed = Downloads.jobs.value.filter { it.status == JobStatus.ERROR }.take(5)
-                .joinToString("\n") { "  - [${it.kind}] ${it.site ?: ""}: ${it.error ?: "unknown"}" }
-            val text = buildString {
-                appendLine("AnySave Android Diagnostics")
-                appendLine("===========================")
-                appendLine("App:       $appVersion")
-                appendLine("yt-dlp:    ${vm.ytdlpVersion ?: "unknown"}")
-                appendLine("Android:   ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-                appendLine("Device:    ${Build.MANUFACTURER} ${Build.MODEL} (${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"})")
-                appendLine("Logged in: ${if (loggedIn.isEmpty()) "none" else loggedIn.joinToString(", ")}")
-                if (failed.isNotEmpty()) {
-                    appendLine("\nRecent failed jobs:")
-                    appendLine(failed)
+        SettingsGroup("Accounts") {
+            Text("Log in to download private posts and most Instagram videos. The login stays on this phone.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp))
+            LoginActivity.Site.entries.forEach { site ->
+                val on = site.label in loggedIn
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .clickable { login.launch(LoginActivity.intent(ctx, site)) }.padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SiteIcon(site.label, 24.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Text(site.label, Modifier.weight(1f))
+                    if (on) AssistChip(onClick = { login.launch(LoginActivity.intent(ctx, site)) }, label = { Text("Logged in") },
+                        leadingIcon = { Icon(Icons.Outlined.AccountCircle, null, Modifier.size(18.dp)) })
+                    else TextButton(onClick = { login.launch(LoginActivity.intent(ctx, site)) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(36.dp)) { Text("Log in") }
                 }
             }
-            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("AnySave diagnostics", text))
-            vm.messages.tryEmit("Diagnostics copied to clipboard")
+            if (loggedIn.isNotEmpty()) TextButton(onClick = { LoginActivity.logOutAll(ctx); loggedIn = emptyList() }) {
+                Text("Log out of all sites")
+            }
         }
-        SettingRow(Icons.Outlined.Gavel, "Legal & disclaimer",
-            "Copyright, your responsibility, privacy, open-source licences", null) { showLegal = true }
+
+        SettingsGroup("Downloader") {
+            SettingRow(Icons.Outlined.SystemUpdate, "Update downloader",
+                (vm.ytdlpVersion?.let { if (it.startsWith("yt-dlp")) it else "yt-dlp $it" } ?: "yt-dlp …") + if (vm.updating) " · updating…" else "",
+                "Updates itself every 2 days. Update now if a site stops working."
+            ) { if (!vm.updating && Downloads.jobs.value.none { it.active }) vm.updateDownloader()
+                else if (!vm.updating) vm.messages.tryEmit("Wait for downloads to finish first") }
+        }
+
+        SettingsGroup("Storage") {
+            SettingRow(Icons.Outlined.Folder, "Save location",
+                if (sortFolders) "Downloads/AnySave/<type>" else "Downloads/AnySave", "Tap to open the folder") {
+                openSaveFolder(ctx)
+            }
+            SettingRow(Icons.Outlined.DeleteSweep, "Clear download list", "Files are kept", null) {
+                Downloads.clearFinished(); vm.messages.tryEmit("List cleared")
+            }
+        }
+
+        SettingsGroup("About") {
+            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                AnimatedLogo(56.dp)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text("AnySave $appVersion", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Made by $AUTHOR", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            CopyrightNotice(Modifier.padding(horizontal = 4.dp))
+            SettingRow(Icons.Outlined.ContentCopy, "Copy diagnostics",
+                "App & yt-dlp versions, device info, recent errors (no personal links)", null) {
+                val failed = Downloads.jobs.value.filter { it.status == JobStatus.ERROR }.take(5)
+                    .joinToString("\n") { "  - [${it.kind}] ${it.site ?: ""}: ${it.error ?: "unknown"}" }
+                val text = buildString {
+                    appendLine("AnySave Android Diagnostics")
+                    appendLine("===========================")
+                    appendLine("App:       $appVersion")
+                    appendLine("yt-dlp:    ${vm.ytdlpVersion ?: "unknown"}")
+                    appendLine("Android:   ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+                    appendLine("Device:    ${Build.MANUFACTURER} ${Build.MODEL} (${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"})")
+                    appendLine("Logged in: ${if (loggedIn.isEmpty()) "none" else loggedIn.joinToString(", ")}")
+                    if (failed.isNotEmpty()) {
+                        appendLine("\nRecent failed jobs:")
+                        appendLine(failed)
+                    }
+                }
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("AnySave diagnostics", text))
+                vm.messages.tryEmit("Diagnostics copied to clipboard")
+            }
+            SettingRow(Icons.Outlined.Gavel, "Legal & disclaimer",
+                "Copyright, your responsibility, privacy, open-source licences", null) { showLegal = true }
+        }
     }
     }
 
@@ -402,10 +417,18 @@ private fun ChoiceDialog(title: String, options: List<Pair<String, String>>, sel
     )
 }
 
+/** One card per topic, like the desktop Settings page. */
 @Composable
-private fun Section(title: String) =
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 16.dp, start = 4.dp))
+private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.padding(top = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.padding(vertical = 4.dp), content = content)
+        }
+    }
+}
 
 @Composable
 private fun SettingRow(icon: ImageVector, title: String, value: String, desc: String?, onClick: () -> Unit) {

@@ -38,6 +38,13 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,14 +57,33 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 
+/** The desktop sidebar's filters, as one swipeable row of chips with counts. */
 private enum class Filter(val label: String) {
-    ALL("All"), VIDEO("Videos"), AUDIO("Music"), FILES("Files"), CONVERTED("Converted"), FAILED("Failed")
+    ALL("All"), ACTIVE("In progress"), DONE("Finished"), WAITING("Waiting"), FAILED("Failed"),
+    VIDEOS("Videos"), MUSIC("Music"), PICTURES("Pictures"), DOCUMENTS("Documents"), ARCHIVES("Archives & apps"),
+    CONVERTED("Converted"), OTHER("Other"),
+}
+
+private enum class Sort(val label: String) { NORMAL("In progress first, then newest"), NAME("Name (A–Z)"), SIZE("Size (largest first)"), OLDEST("Oldest first") }
+
+private fun inFilter(j: Job, f: Filter): Boolean = when (f) {
+    Filter.ALL -> true
+    Filter.ACTIVE -> j.isRunning
+    Filter.DONE -> j.status == JobStatus.DONE
+    Filter.WAITING -> j.isWaiting || j.status == JobStatus.PAUSED
+    Filter.FAILED -> j.status == JobStatus.ERROR
+    Filter.VIDEOS -> j.category == FileKinds.Category.VIDEOS
+    Filter.MUSIC -> j.category == FileKinds.Category.MUSIC || (j.kind == JobKind.CONVERT && j.audioOnly)
+    Filter.PICTURES -> j.category == FileKinds.Category.PICTURES
+    Filter.DOCUMENTS -> j.category == FileKinds.Category.DOCUMENTS
+    Filter.ARCHIVES -> j.category == FileKinds.Category.ARCHIVES || j.category == FileKinds.Category.APPS
+    Filter.CONVERTED -> j.kind == JobKind.CONVERT
+    Filter.OTHER -> j.category == FileKinds.Category.OTHER
 }
 
 /** "Big Buck Bunny [BigBuckBunny_124] 720p.mp4" -> "Big Buck Bunny 720p" (IDs and extension hidden). */
 fun displayName(job: Job): String {
-    val raw = if (job.status == JobStatus.DONE && job.kind != JobKind.VIDEO) job.fileName ?: job.title
-    else if (job.status == JobStatus.DONE) job.fileName ?: job.title else job.title
+    val raw = if (job.status == JobStatus.DONE) job.fileName ?: job.title else job.title
     val noExt = if (FileKinds.extOf(raw).length in 2..5) raw.substringBeforeLast('.') else raw
     return noExt.replace(Regex("""\s*\[[^\]]{4,}\]"""), "").replace(Regex("\\s+"), " ").trim().ifBlank { raw }
 }
@@ -74,113 +100,167 @@ private fun dayGroup(t: Long): String {
     return "Earlier"
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(jobs: List<Job>) {
+fun DownloadsScreen(jobs: List<Job>, onLookUp: (String) -> Unit) {
     val ctx = LocalContext.current
-    var filter by remember { mutableStateOf(Filter.ALL) }
+    var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
+    var sort by rememberSaveable { mutableStateOf(Sort.NORMAL) }
     var confirmClear by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
     var addLink by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     var overflow by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<String>() }
+    val selecting = selected.isNotEmpty()
+    // Ids that left the list can't stay selected.
+    LaunchedEffect(jobs) { selected.retainAll(jobs.map { it.id }.toSet()) }
+    BackHandler(enabled = selecting) { selected.clear() }
 
-    val active = jobs.filter { it.active }
-    val paused = jobs.filter { it.status == JobStatus.PAUSED }
     val done = jobs.filter { it.status == JobStatus.DONE }
+    val pausable = jobs.filter { it.canPause && it.status != JobStatus.SCHEDULED }
+    val resumable = jobs.filter { it.status == JobStatus.PAUSED }
     val failed = jobs.filter { it.status == JobStatus.ERROR }
     fun matches(j: Job) = query.isBlank() ||
-        listOfNotNull(j.title, j.fileName, j.site).any { it.contains(query.trim(), ignoreCase = true) }
-    fun inFilter(j: Job) = when (filter) {
-        Filter.ALL -> true
-        Filter.VIDEO -> j.category == FileKinds.Category.VIDEOS
-        Filter.AUDIO -> j.category == FileKinds.Category.MUSIC || (j.kind == JobKind.CONVERT && j.audioOnly)
-        Filter.FILES -> j.category !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED)
-        Filter.CONVERTED -> j.kind == JobKind.CONVERT
-        Filter.FAILED -> false
+        listOfNotNull(j.title, j.fileName, j.site, j.url).any { it.contains(query.trim(), ignoreCase = true) }
+    val shown = jobs.filter { inFilter(it, filter) && matches(it) }.let { list ->
+        when (sort) {
+            Sort.NORMAL -> list.sortedWith(compareBy<Job> { it.finished }.thenByDescending { it.createdAt })
+            Sort.NAME -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { displayName(it) })
+            Sort.SIZE -> list.sortedByDescending { it.size() }
+            Sort.OLDEST -> list.sortedBy { it.createdAt }
+        }
     }
-    val saved = if (filter == Filter.FAILED) emptyList() else done.filter { inFilter(it) && matches(it) }
-    val failedShown = if (filter == Filter.FAILED || filter == Filter.ALL) failed.filter(::matches) else emptyList()
-    val counts = mapOf(
-        Filter.ALL to done.size, Filter.VIDEO to done.count { it.category == FileKinds.Category.VIDEOS },
-        Filter.AUDIO to done.count { it.category == FileKinds.Category.MUSIC || (it.kind == JobKind.CONVERT && it.audioOnly) },
-        Filter.FILES to done.count { it.category !in setOf(FileKinds.Category.VIDEOS, FileKinds.Category.MUSIC, FileKinds.Category.CONVERTED) },
-        Filter.CONVERTED to done.count { it.kind == JobKind.CONVERT }, Filter.FAILED to failed.size,
-    )
+    val counts = Filter.entries.associateWith { f -> jobs.count { inFilter(it, f) } }
 
     ScreenScaffold(
-        title = "Downloads",
-        subtitle = "${done.size} saved · ${Engine.humanSize(done.sumOf { it.sizeBytes }) ?: "0 MB"} · Downloads/AnySave",
+        title = if (selecting) "${selected.size} selected" else "Downloads",
+        subtitle = if (selecting) null else "${done.size} saved · ${Engine.humanSize(done.sumOf { it.size() }) ?: "0 MB"} · Downloads/AnySave",
+        leading = if (selecting) ({ IconButton(onClick = { selected.clear() }) { Icon(Icons.Outlined.Close, "Stop selecting") } }) else null,
         actions = {
-            IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                Icon(if (searching) Icons.Outlined.Close else Icons.Outlined.Search, "Search")
-            }
-            Box {
-                IconButton(onClick = { overflow = true }) { Icon(Icons.Outlined.MoreVert, "More") }
-                DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                    if (active.any { it.canPause }) DropdownMenuItem(text = { Text("Pause all") },
-                        onClick = { overflow = false; active.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) } })
-                    if (paused.isNotEmpty()) DropdownMenuItem(text = { Text("Resume all") },
-                        onClick = { overflow = false; paused.forEach { DownloadService.resume(ctx, it.id) } })
-                    if (failed.isNotEmpty()) DropdownMenuItem(text = { Text("Retry all failed") },
-                        onClick = { overflow = false; failed.forEach { DownloadService.retry(ctx, it.id) } })
-                    DropdownMenuItem(text = { Text("Clear finished from list") }, enabled = jobs.any { it.finished },
-                        onClick = { overflow = false; confirmClear = true })
+            if (selecting) {
+                val sel = jobs.filter { it.id in selected }
+                IconButton(onClick = { selected.clear(); selected.addAll(shown.map { it.id }) }) { Icon(Icons.Outlined.SelectAll, "Select all") }
+                if (sel.any { it.canPause && it.status != JobStatus.SCHEDULED }) IconButton(onClick = {
+                    sel.filter { it.canPause }.forEach { DownloadService.pause(ctx, it.id) }
+                }) { Icon(Icons.Outlined.Pause, "Pause") }
+                if (sel.any { it.status == JobStatus.PAUSED || it.status == JobStatus.SCHEDULED || it.status == JobStatus.ERROR }) IconButton(onClick = {
+                    sel.forEach {
+                        when (it.status) {
+                            JobStatus.PAUSED -> DownloadService.resume(ctx, it.id)
+                            JobStatus.SCHEDULED -> DownloadService.startNow(ctx, it.id)
+                            JobStatus.ERROR -> DownloadService.retry(ctx, it.id)
+                            else -> {}
+                        }
+                    }
+                }) { Icon(Icons.Outlined.PlayArrow, "Resume") }
+                IconButton(onClick = { confirmRemove = true }) { Icon(Icons.Outlined.Delete, "Remove") }
+            } else {
+                IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+                    Icon(if (searching) Icons.Outlined.Close else Icons.Outlined.Search, "Search")
+                }
+                Box {
+                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, "Sort") }
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        Sort.entries.forEach { s ->
+                            DropdownMenuItem(text = { Text(s.label) }, onClick = { sort = s; sortMenu = false },
+                                leadingIcon = { RadioButton(selected = sort == s, onClick = null) })
+                        }
+                    }
+                }
+                Box {
+                    IconButton(onClick = { overflow = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                        DropdownMenuItem(text = { Text("Select") }, leadingIcon = { Icon(Icons.Outlined.Checklist, null) },
+                            enabled = shown.isNotEmpty(), onClick = { overflow = false; shown.firstOrNull()?.let { selected.add(it.id) } })
+                        if (failed.isNotEmpty()) DropdownMenuItem(text = { Text("Retry all failed") }, leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
+                            onClick = { overflow = false; failed.forEach { DownloadService.retry(ctx, it.id) } })
+                        DropdownMenuItem(text = { Text("Clear finished from list") }, leadingIcon = { Icon(Icons.Outlined.DoneAll, null) },
+                            enabled = jobs.any { it.finished }, onClick = { overflow = false; confirmClear = true })
+                    }
                 }
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { addLink = true },
+            if (!selecting) ExtendedFloatingActionButton(onClick = { addLink = true },
                 icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add") })
         },
+        bottomBar = { SpeedStrip(jobs) },
     ) { pad ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(pad),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            if (searching) item {
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
-                    placeholder = { Text("Search by name or site") },
-                    leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                    shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-            }
-            // One swipeable row of filters with counts
-            item {
-                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Filter.entries.forEach { f ->
-                        val n = counts[f] ?: 0
-                        if (f == Filter.FAILED && n == 0 && filter != f) return@forEach
-                        FilterChip(selected = filter == f, onClick = { filter = f },
-                            label = { Text(if (n > 0 && f != Filter.ALL) "${f.label} $n" else f.label) })
-                    }
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            if (searching) OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text("Search by name, site or link") },
+                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            )
+            // Filters with counts. Empty type filters stay hidden so the row stays short.
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Filter.entries.forEach { f ->
+                    val n = counts[f] ?: 0
+                    if (f.ordinal > Filter.DONE.ordinal && n == 0 && filter != f) return@forEach
+                    FilterChip(
+                        selected = filter == f, onClick = { filter = f },
+                        label = { Text(f.label) },
+                        trailingIcon = if (n > 0) ({
+                            Text("$n", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                                color = when {
+                                    f == Filter.FAILED -> AnySaveColors.status.err
+                                    f == Filter.ACTIVE -> AnySaveColors.status.progress
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                })
+                        }) else null,
+                        shape = RoundedCornerShape(10.dp),
+                    )
                 }
             }
-            if (active.isNotEmpty() || paused.isNotEmpty()) {
-                item { SectionLabel("In progress") }
-                items(active + paused, key = { it.id }) { ActiveJobCard(it) }
+            // The desktop toolbar's two big buttons, when they'd do something.
+            if (!selecting && (pausable.isNotEmpty() || resumable.isNotEmpty())) Row(
+                Modifier.padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { resumable.forEach { DownloadService.resume(ctx, it.id) } }, enabled = resumable.isNotEmpty()) {
+                    Icon(Icons.Outlined.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Resume all")
+                }
+                TextButton(onClick = { pausable.forEach { DownloadService.pause(ctx, it.id) } }, enabled = pausable.isNotEmpty()) {
+                    Icon(Icons.Outlined.Pause, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Pause all")
+                }
             }
-            // Saved files grouped by day
-            saved.groupBy { dayGroup(it.createdAt) }.forEach { (day, list) ->
-                item(key = "h-$day") { SectionLabel(day) }
-                items(list, key = { it.id }) { FinishedRow(it) }
-            }
-            if (failedShown.isNotEmpty()) {
-                item(key = "h-failed") { SectionLabel("Couldn't download") }
-                items(failedShown, key = { it.id }) { FinishedRow(it) }
-            }
-            if (active.isEmpty() && paused.isEmpty() && saved.isEmpty() && failedShown.isEmpty()) item {
-                if (query.isNotBlank() || filter != Filter.ALL) Text("Nothing matches.", Modifier.padding(vertical = 32.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                else EmptyState()
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // The normal order reads like a phone app: what's going on, then saved files by day.
+                val groups: List<Pair<String?, List<Job>>> = if (sort != Sort.NORMAL) listOf(null to shown) else buildList {
+                    val open = shown.filter { !it.finished }
+                    if (open.isNotEmpty()) add("In progress & waiting" to open)
+                    shown.filter { it.status == JobStatus.DONE }.groupBy { dayGroup(it.createdAt) }.forEach { (d, l) -> add(d to l) }
+                    val bad = shown.filter { it.status == JobStatus.ERROR || it.status == JobStatus.CANCELLED }
+                    if (bad.isNotEmpty()) add("Couldn't download" to bad)
+                }
+                groups.forEach { (title, list) ->
+                    if (title != null) item(key = "h-$title") { SectionLabel(title) }
+                    items(list, key = { it.id }) { j ->
+                        DownloadRow(
+                            j, selecting = selecting, selected = j.id in selected,
+                            onToggleSelect = { if (j.id in selected) selected.remove(j.id) else selected.add(j.id) },
+                            onLongPress = { if (j.id !in selected) selected.add(j.id) },
+                        )
+                    }
+                }
+                if (shown.isEmpty()) item {
+                    if (query.isNotBlank() || filter != Filter.ALL) Text("Nothing matches.", Modifier.padding(vertical = 32.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else EmptyState()
+                }
             }
         }
     }
 
-    if (addLink) AddDownloadDialog { addLink = false }
+    if (addLink) AddDownloadDialog(onLookUp = { addLink = false; onLookUp(it) }) { addLink = false }
 
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
@@ -189,18 +269,42 @@ fun DownloadsScreen(jobs: List<Job>) {
         confirmButton = { TextButton(onClick = { Downloads.clearFinished(); confirmClear = false }) { Text("Clear") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
     )
+    if (confirmRemove) {
+        val sel = jobs.filter { it.id in selected }
+        val running = sel.count { !it.finished }
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove ${sel.size} from the list?") },
+            text = { Text(if (running > 0) "$running of them haven't finished and will be cancelled. Saved files stay in Downloads/AnySave."
+                else "Only the list changes. Your files stay in Downloads/AnySave.") },
+            confirmButton = { TextButton(onClick = {
+                sel.filter { !it.finished }.forEach { DownloadService.cancel(ctx, it.id) }
+                sel.forEach { Downloads.remove(it.id) }
+                selected.clear(); confirmRemove = false
+            }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
+        )
+    }
 }
 
-/** Paste any link: files download directly, everything else goes through the video downloader. */
+/**
+ * Paste a link. A file shows its name and size first (and can be renamed); a video page goes to Home,
+ * which shows the qualities with their sizes. Several links or a pattern start straight away.
+ */
 @Composable
-private fun AddDownloadDialog(onClose: () -> Unit) {
+private fun AddDownloadDialog(onLookUp: (String) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var link by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var offer by remember { mutableStateOf<FileOffer?>(null) }
     LaunchedEffect(Unit) {
         val clip = ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClip
         Engine.extractUrl(clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString())?.let { link = it }
+    }
+    offer?.let { o ->
+        FileOfferDialog(o, onStart = { name -> DownloadService.startFile(ctx, o.url, name, o.mime); onClose() }, onClose = onClose)
+        return
     }
     AlertDialog(
         onDismissRequest = onClose,
@@ -226,23 +330,69 @@ private fun AddDownloadDialog(onClose: () -> Unit) {
                         val url = urls.first()
                         val probe = withContext(Dispatchers.IO) { FileKinds.probe(url) }
                         DownloadService.startFile(ctx, url, probe?.name, probe?.mime, sha256 = sha)
+                        onClose()
                     } else if (urls.size > 1) {
                         urls.forEach { DownloadService.startLink(ctx, it) }
+                        onClose()
                     } else {
                         val url = urls.first()
                         val known = Engine.siteOf(url) != null
                         val probe = if (known) null else withContext(Dispatchers.IO) { FileKinds.probe(url) }
-                        if (!known && (FileKinds.looksLikeFile(url) || probe?.isFile == true))
-                            DownloadService.startFile(ctx, url, probe?.name, probe?.mime)
-                        else DownloadService.startQuick(ctx, url)
+                        when {
+                            !known && (FileKinds.looksLikeFile(url) || probe?.isFile == true) -> {
+                                if (Settings.askBeforeAdd.value) { offer = FileOffer.of(url, probe); busy = false }
+                                else { DownloadService.startFile(ctx, url, probe?.name, probe?.mime); onClose() }
+                            }
+                            Settings.askBeforeAdd.value -> onLookUp(url)
+                            else -> { DownloadService.startQuick(ctx, url); onClose() }
+                        }
                     }
-                    onClose()
                 }
-            }) { Text(if (busy) "Checking…" else "Download") }
+            }) { Text(if (busy) "Checking…" else "Next") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
 }
+
+/** What a file link turned out to be, shown before it downloads. */
+data class FileOffer(val url: String, val name: String, val mime: String?, val length: Long) {
+    companion object {
+        fun of(url: String, p: FileKinds.Probe?) = FileOffer(
+            url, p?.name ?: android.net.Uri.decode(url.substringBefore('?').substringBefore('#').substringAfterLast('/')).ifBlank { "download" },
+            p?.mime, p?.length ?: -1,
+        )
+    }
+}
+
+/** The "before you download" window for a file: name (editable), size, where it goes. */
+@Composable
+fun FileOfferDialog(o: FileOffer, onStart: (String) -> Unit, onClose: () -> Unit) {
+    var name by remember { mutableStateOf(o.name) }
+    val ext = FileKinds.extOf(o.name)
+    // Keep the file type when someone renames without typing it.
+    fun finalName() = name.trim().ifBlank { o.name }.let { if (ext.isNotEmpty() && FileKinds.extOf(it).isEmpty()) "$it.$ext" else it }
+    val probeJob = Job(id = "", url = o.url, title = o.name, fileName = o.name, mime = o.mime, kind = JobKind.FILE)
+    val folder = if (Settings.sortIntoFolders.value) "Downloads/AnySave/${probeJob.category.folder}" else "Downloads/AnySave"
+    AlertDialog(
+        onDismissRequest = onClose,
+        icon = { FileBadge(probeJob, 48.dp) },
+        title = { Text(o.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                Text(listOfNotNull(Engine.humanSize(o.length) ?: "Size not given by the site", Engine.siteLabel(o.url)).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Save as") },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("Saved in $folder", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { Button(onClick = { onStart(finalName()) }) { Text("Start download") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+    )
+}
+
 
 /** Compare a finished file with a checksum from the site it came from. */
 @Composable
@@ -288,7 +438,7 @@ fun ChecksumDialog(job: Job, onClose: () -> Unit) {
                         !want.matches(Regex("[0-9a-f]{64}")) -> Text("A SHA-256 checksum has 64 characters (0-9 and a-f).",
                             style = MaterialTheme.typography.bodySmall)
                         want == actual -> Text("✓ It matches. The file is exactly the one the site published.",
-                            color = MaterialTheme.colorScheme.primary)
+                            color = AnySaveColors.status.ok, fontWeight = FontWeight.SemiBold)
                         else -> Text("✗ It does NOT match. The file may be damaged or changed. Download it again.",
                             color = MaterialTheme.colorScheme.error)
                     }
@@ -349,95 +499,6 @@ fun Thumb(job: Job, modifier: Modifier) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun FinishedRow(job: Job) {
-    val ctx = LocalContext.current
-    var menu by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var refreshLink by remember { mutableStateOf(false) }
-    var checkSum by remember { mutableStateOf(false) }
-    if (checkSum) ChecksumDialog(job) { checkSum = false }
-    val failed = job.status != JobStatus.DONE
-    val ext = FileKinds.extOf(job.fileName).uppercase().take(4)
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .combinedClickable(onClick = { if (failed) menu = true else openFile(ctx, job) }, onLongClick = { menu = true })
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box {
-            Thumb(job, Modifier.size(width = 88.dp, height = 50.dp))
-            if (!failed && (job.category == FileKinds.Category.VIDEOS || (job.kind == JobKind.CONVERT && !job.audioOnly && job.mime?.startsWith("video") == true)))
-                Icon(Icons.Outlined.PlayArrow, null, tint = Color.White,
-                    modifier = Modifier.align(Alignment.Center).size(22.dp).background(Color(0x66000000), RoundedCornerShape(50)))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(displayName(job), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium,
-                style = MaterialTheme.typography.bodyLarge)
-            if (failed) {
-                Text(statusText(job), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    if (ext.isNotEmpty()) {
-                        Text(ext, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 5.dp, vertical = 1.dp))
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    if (job.site != null && job.kind != JobKind.CONVERT) { SiteIcon(job.site, 14.dp); Spacer(Modifier.width(5.dp)) }
-                    val time = android.text.format.DateFormat.getTimeFormat(ctx).format(java.util.Date(job.createdAt))
-                    val when_ = if (dayGroup(job.createdAt) in setOf("Today", "Yesterday")) time
-                        else DateUtils.formatDateTime(ctx, job.createdAt, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH)
-                    Text(listOfNotNull(Engine.humanSize(job.sizeBytes), when_).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        if (failed) FilledTonalIconButton(onClick = { DownloadService.retry(ctx, job.id) }) {
-            Icon(Icons.Outlined.Refresh, "Retry")
-        }
-        Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (failed) {
-                    DropdownMenuItem(text = { Text("Retry") }, leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
-                        onClick = { menu = false; DownloadService.retry(ctx, job.id) })
-                    if (job.kind != JobKind.CONVERT) {
-                        DropdownMenuItem(text = { Text("Refresh expired link") }, leadingIcon = { Icon(Icons.Outlined.Link, null) },
-                            onClick = { menu = false; refreshLink = true })
-                    }
-                } else {
-                    DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
-                        onClick = { menu = false; openFile(ctx, job) })
-                    DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Outlined.Share, null) },
-                        onClick = { menu = false; share(ctx, job) })
-                    DropdownMenuItem(text = { Text("Check SHA-256 checksum") }, leadingIcon = { Icon(Icons.Outlined.Link, null) },
-                        onClick = { menu = false; checkSum = true })
-                    DropdownMenuItem(text = { Text("Delete file") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) },
-                        onClick = { menu = false; confirmDelete = true })
-                }
-                DropdownMenuItem(text = { Text("Remove from list") }, leadingIcon = { Icon(Icons.Outlined.PlaylistRemove, null) },
-                    onClick = { menu = false; Downloads.remove(job.id) })
-            }
-        }
-    }
-
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text("Delete this file?") },
-        text = { Text("${job.fileName ?: job.title} will be removed from your phone. This can't be undone.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; deleteFile(ctx, job) }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
-    )
-
-    if (refreshLink) RefreshLinkDialog(job) { refreshLink = false }
-}
-
 /** Paste a fresh signed download URL for an expired link and resume from saved partial bytes. */
 @Composable
 fun RefreshLinkDialog(job: Job, onClose: () -> Unit) {
@@ -491,13 +552,13 @@ fun openFile(ctx: Context, job: Job) {
         .onFailure { Toast.makeText(ctx, "File not found or no app can open it", Toast.LENGTH_SHORT).show() }
 }
 
-private fun share(ctx: Context, job: Job) {
+fun shareFile(ctx: Context, job: Job) {
     val i = Intent(Intent.ACTION_SEND).setType(job.mime).putExtra(Intent.EXTRA_STREAM, job.uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(i, "Share"))
 }
 
-private fun deleteFile(ctx: Context, job: Job) {
+fun deleteFile(ctx: Context, job: Job) {
     val ok = runCatching { job.uri?.let { ctx.contentResolver.delete(it, null, null) } ?: 0 }.getOrDefault(0) > 0
     Downloads.remove(job.id)
     Toast.makeText(

@@ -342,6 +342,8 @@ object Engine {
         siteOf(url)?.let { return it }
         val host = runCatching { android.net.Uri.parse(url).host.orEmpty().lowercase() }.getOrDefault("")
             .removePrefix("www.").removePrefix("m.")
+        // A number address (192.168.0.5, a home server): show it whole, not "5".
+        if (host.matches(Regex("""[\d.]+|\[?[0-9a-f:]+]?"""))) return host
         val name = host.split('.').let { if (it.size >= 2) it[it.size - 2] else it.firstOrNull() }.orEmpty()
         return name.replaceFirstChar { it.uppercase() }.ifBlank { "Web" }
     }

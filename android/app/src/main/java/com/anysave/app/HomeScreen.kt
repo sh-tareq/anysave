@@ -73,9 +73,19 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
         subtitle = "Download videos & files. Convert anything.",
         leading = { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.anysave_logo), null, Modifier.size(34.dp)) },
     ) { pad ->
+    // When a looked-up video arrives, bring its card (qualities and sizes) into view.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(vm.info) {
+        if (vm.info != null) {
+            val before = 3 + listOf(engine == Engine.State.STARTING, engine == Engine.State.FAILED,
+                vm.clipboardLinks.isNotEmpty(), vm.loading, vm.error != null).count { it }
+            listState.animateScrollToItem(before)
+        }
+    }
     Box(Modifier.fillMaxSize().padding(pad)) {
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         // Room for the playlist's download button that floats at the bottom.
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = if (playlist != null) 96.dp else 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -102,7 +112,7 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
 
         if (vm.loading) item { LoadingCard(if (vm.playlistLoading && !Engine.isYoutubeVideo(vm.url)) "Listing videos…" else "Looking up video…") }
         vm.error?.let { item { LookupError(vm, it) } }
-        vm.info?.let { item { InfoCard(vm, it, vm.infoJobId?.let { id -> index[id] }) } }
+        vm.info?.let { info -> item(key = "info") { InfoCard(vm, info, vm.infoJobId?.let { id -> index[id] }) } }
         if (vm.playlistLoading && !vm.loading) item {
             Card {
                 Column(Modifier.padding(14.dp)) {
@@ -131,7 +141,7 @@ fun HomeScreen(vm: MainViewModel, jobs: List<Job>) {
                     TextButton(onClick = { vm.tab = MainActivity.TAB_DOWNLOADS }) { Text("See all") }
                 }
             }
-            items(active, key = { it.id }) { ActiveJobCard(it) }
+            items(active, key = { it.id }) { DownloadRow(it) }
         }
 
         if (vm.info == null && playlist == null && !vm.loading && active.isEmpty()) item { HowToCard() }
@@ -182,6 +192,10 @@ private fun PlaylistHeader(vm: MainViewModel, p: Engine.Playlist, index: JobInde
 @Composable
 private fun LinkInput(vm: MainViewModel) {
     val ctx = LocalContext.current
+    // Close the keyboard once a link is sent, so the result (and its Download button) can be seen.
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    fun done() { keyboard?.hide(); focus.clearFocus() }
     val links = remember(vm.url) { Engine.extractUrls(vm.url) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
@@ -208,11 +222,11 @@ private fun LinkInput(vm: MainViewModel) {
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { if (links.size > 1) vm.downloadAll(links) else vm.lookUp() }),
+            keyboardActions = KeyboardActions(onGo = { done(); if (links.size > 1) vm.downloadAll(links) else vm.lookUp() }),
         )
         if (links.size > 1) {
             Button(
-                onClick = { vm.downloadAll(links) },
+                onClick = { done(); vm.downloadAll(links) },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
@@ -223,7 +237,7 @@ private fun LinkInput(vm: MainViewModel) {
                 Text("Choose quality for the first link only")
             }
         } else Button(
-            onClick = { vm.lookUp() },
+            onClick = { done(); vm.lookUp() },
             enabled = !vm.loading && vm.url.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(50.dp),
             shape = RoundedCornerShape(16.dp),
@@ -392,7 +406,8 @@ fun ErrorCard(msg: String, hint: String?, actionLabel: String? = null, onAction:
 @Composable
 private fun InfoCard(vm: MainViewModel, info: Engine.Info, job: Job?) {
     val ctx = LocalContext.current
-    Card {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column {
             Box {
                 AsyncImage(
@@ -434,7 +449,9 @@ private fun InfoCard(vm: MainViewModel, info: Engine.Info, job: Job?) {
                         Spacer(Modifier.width(8.dp))
                         Text("Download", fontWeight = FontWeight.SemiBold)
                     }
-                    JobStatus.DONE -> Button(onClick = { openFile(ctx, job) }, modifier = button, shape = shape) {
+                    JobStatus.DONE -> Button(onClick = { openFile(ctx, job) }, modifier = button, shape = shape,
+                        colors = ButtonDefaults.buttonColors(containerColor = AnySaveColors.status.okSoft,
+                            contentColor = AnySaveColors.status.ok)) {
                         Icon(Icons.Outlined.CheckCircle, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Saved ✓ · Open", fontWeight = FontWeight.SemiBold)
@@ -462,11 +479,9 @@ private fun InfoCard(vm: MainViewModel, info: Engine.Info, job: Job?) {
                     }
                     JobStatus.SAVING -> ProgressButton(1f, "Saving…", button, shape)
                     JobStatus.DOWNLOADING -> {
+                        // The same words as the Downloads tab: "42% · 1.2 MB/s · 0:12 left".
                         val started = job.percent > 0f
-                        val text = if (!started) job.eta.takeIf { it.endsWith("…") } ?: "Starting…"
-                            else listOf("${job.percent.toInt()}%", job.speed, job.eta.takeIf { it.isNotBlank() && it != "?" }?.let { "$it left" }.orEmpty())
-                                .filter { it.isNotBlank() }.joinToString(" · ")
-                        ProgressButton(if (started) job.percent / 100f else null, text, button, shape)
+                        ProgressButton(if (started) job.percent / 100f else null, statusText(job), button, shape)
                     }
                 }
             }
@@ -527,61 +542,6 @@ private fun QualityDropdown(options: List<Engine.Option>, selected: Int, onSelec
     }
 }
 
-@Composable
-fun ActiveJobCard(job: Job) {
-    val ctx = LocalContext.current
-    var refreshLink by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                Thumb(job, Modifier.size(width = 80.dp, height = 48.dp))
-                if (job.status != JobStatus.PAUSED && job.status != JobStatus.SCHEDULED)
-                    DownloadingBadge(Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 6.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(job.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(6.dp))
-                if (job.percent > 0f || job.status == JobStatus.PAUSED || job.status == JobStatus.SCHEDULED) LinearProgressIndicator({ job.percent / 100f }, Modifier.fillMaxWidth())
-                else LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(listOfNotNull(job.queue.takeIf { it.isNotBlank() }, statusText(job)).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-            }
-            // Waiting downloads can be moved to another queue.
-            val queueNames = Schedule.queueNames()
-            if (queueNames.isNotEmpty() && job.kind != JobKind.CONVERT &&
-                (job.status == JobStatus.SCHEDULED || job.status == JobStatus.PAUSED || job.status == JobStatus.QUEUED)) {
-                var pickQueue by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { pickQueue = true }) { Icon(Icons.Outlined.Folder, "Move to queue") }
-                    DropdownMenu(expanded = pickQueue, onDismissRequest = { pickQueue = false }) {
-                        (listOf("") + queueNames).forEach { q ->
-                            DropdownMenuItem(text = { Text(if (q.isBlank()) "Main queue" else q) },
-                                enabled = q != job.queue,
-                                onClick = { pickQueue = false; DownloadService.moveToQueue(ctx, job.id, q) })
-                        }
-                    }
-                }
-            }
-            // Pause / resume (downloads only), refresh expired link, then cancel
-            if (job.status == JobStatus.SCHEDULED) {
-                IconButton(onClick = { DownloadService.startNow(ctx, job.id) }) { Icon(Icons.Outlined.PlayArrow, "Start now") }
-                IconButton(onClick = { DownloadService.pause(ctx, job.id) }) { Icon(Icons.Outlined.Pause, "Pause") }
-            } else if (job.status == JobStatus.PAUSED) {
-                if (job.kind != JobKind.CONVERT) {
-                    IconButton(onClick = { refreshLink = true }) { Icon(Icons.Outlined.Link, "Refresh expired link") }
-                }
-                IconButton(onClick = { DownloadService.resume(ctx, job.id) }) { Icon(Icons.Outlined.PlayArrow, "Resume") }
-            } else if (job.canPause) {
-                IconButton(onClick = { DownloadService.pause(ctx, job.id) }) { Icon(Icons.Outlined.Pause, "Pause") }
-            }
-            IconButton(onClick = { DownloadService.cancel(ctx, job.id) }) { Icon(Icons.Outlined.Close, "Cancel") }
-        }
-    }
-    if (refreshLink) RefreshLinkDialog(job) { refreshLink = false }
-}
-
 /** "12 MB of 80 MB" for direct file downloads. */
 private fun sizeProgress(job: Job): String =
     if (job.kind == JobKind.FILE && job.totalBytes > 0)
@@ -589,18 +549,18 @@ private fun sizeProgress(job: Job): String =
 
 fun statusText(job: Job): String = when (job.status) {
     JobStatus.QUEUED -> "Queued"
-    JobStatus.WAITING_WIFI -> "Waiting for Wi-Fi…"
+    JobStatus.WAITING_WIFI -> "Waiting for Wi-Fi"
     JobStatus.SCHEDULED -> "Scheduled · starts at ${Settings.scheduleStart.value}"
     JobStatus.DOWNLOADING -> when {
         job.kind == JobKind.CONVERT && job.percent <= 0f -> job.eta.takeIf { it.endsWith("…") } ?: "Converting…"
         job.kind == JobKind.CONVERT -> "Converting · ${job.percent.toInt()}% · ETA ${job.eta}"
         job.percent <= 0f && job.speed.isEmpty() -> job.eta.takeIf { it.endsWith("…") } ?: "Starting…"
-        else -> listOf("${job.percent.toInt()}%", sizeProgress(job), job.speed, "ETA ${job.eta}")
+        else -> listOf("${job.percent.toInt()}%", sizeProgress(job), fmtSpeed(bytesPerSec(job.speed)), fmtEta(job.eta).takeIf { it.isNotEmpty() }?.let { "$it left" }.orEmpty())
             .filter { it.isNotBlank() }.joinToString(" · ")
     }
     JobStatus.PAUSED -> listOf("Paused", "${job.percent.toInt()}%", sizeProgress(job)).filter { it.isNotBlank() }.joinToString(" · ")
     JobStatus.SAVING -> "Saving to Downloads…"
-    JobStatus.DONE -> "Saved ✓"
+    JobStatus.DONE -> "Done"
     JobStatus.CANCELLED -> "Cancelled"
     JobStatus.ERROR -> job.error ?: "Failed"
 }

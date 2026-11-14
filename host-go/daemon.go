@@ -526,6 +526,9 @@ func siteLabelOf(rawURL string) string {
 		return "Web"
 	}
 	h := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	if net.ParseIP(h) != nil { // a number address (a home server): show it whole, not "127"
+		return h
+	}
 	switch {
 	case strings.Contains(h, "youtube") || h == "youtu.be":
 		return "YouTube"

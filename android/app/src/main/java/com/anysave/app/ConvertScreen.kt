@@ -214,7 +214,7 @@ fun ConvertScreen(jobs: List<Job>, onStarted: () -> Unit) {
 
         if (converting.isNotEmpty()) {
             item { Text("Converting now", style = MaterialTheme.typography.titleMedium) }
-            items(converting, key = { it.id }) { ActiveJobCard(it) }
+            items(converting, key = { it.id }) { DownloadRow(it) }
         }
         item { MadeBy() }
     }

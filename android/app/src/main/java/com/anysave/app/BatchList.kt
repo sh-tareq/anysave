@@ -132,8 +132,8 @@ fun JobStatusBadge(job: Job?, noun: String, onDownload: () -> Unit) {
         null, JobStatus.CANCELLED -> FilledTonalIconButton(onClick = onDownload) {
             Icon(Icons.Outlined.Download, contentDescription = "Download this $noun")
         }
-        JobStatus.DONE -> Pill("Saved ✓", MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer) { openFile(ctx, job) }
+        // Green like "Done" everywhere else (the desktop popup's saved button too).
+        JobStatus.DONE -> Pill("Saved ✓", AnySaveColors.status.okSoft, AnySaveColors.status.ok) { openFile(ctx, job) }
         JobStatus.ERROR -> FilledTonalIconButton(
             onClick = { DownloadService.retry(ctx, job.id) },
             colors = IconButtonDefaults.filledTonalIconButtonColors(

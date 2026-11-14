@@ -50,25 +50,32 @@
     @keyframes tick { to { stroke-dashoffset: 0; } }
     @media (prefers-reduced-motion: reduce) { .arrow { animation: none; } }
 
+    /* The quality menu uses the manager page's colours (manager.css), light or dark like the computer. */
     .menu {
+      --panel: #fff; --fg: #17181c; --muted: #676a74; --line: #e3e5ea; --hover: #f2f4f7; --err: #d42f35; --brand: #e5484d;
+      --pop: 0 12px 40px rgba(15,20,30,.18), 0 2px 6px rgba(15,20,30,.08);
       position: fixed; width: 248px; max-height: 340px; overflow: auto; pointer-events: auto;
-      background: #1c1c21; color: #f2f2f4; border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.45); padding: 6px;
+      background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: var(--pop); padding: 5px;
       font: 13px/1.3 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+    @media (prefers-color-scheme: dark) {
+      .menu { --panel: #18191d; --fg: #ececf0; --muted: #9b9ea8; --line: #2a2c32; --hover: #202227; --err: #ff5c61;
+        --pop: 0 16px 48px rgba(0,0,0,.55); }
+    }
     .menu[hidden] { display: none; }
-    .head { padding: 6px 8px 8px; font-weight: 600; font-size: 12px; color: #a9a9b3;
+    .head { padding: 6px 10px 7px; font-weight: 600; font-size: 12px; color: var(--muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .item { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; text-align: left;
-      padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; }
-    .item:hover, .item:focus-visible { background: #e5484d; color: #fff; outline: none; }
-    .item .sub { margin-left: auto; font-size: 11px; opacity: .65; }
-    .note { padding: 8px 10px; font-size: 12px; color: #a9a9b3; display: flex; align-items: center; gap: 8px; }
-    .note.err { color: #ff8a8e; }
-    .spin { width: 12px; height: 12px; border: 2px solid #555; border-top-color: #e5484d; border-radius: 50%;
+      padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
+    .item:hover, .item:focus-visible { background: var(--hover); outline: none; }
+    .item .sub { margin-left: auto; font-size: 11px; color: var(--muted); }
+    .note { padding: 8px 10px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .note.err { color: var(--err); }
+    .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--brand); border-radius: 50%;
       animation: spin .8s linear infinite; flex: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    hr { border: 0; border-top: 1px solid rgba(255,255,255,.1); margin: 4px 2px; }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
   `;
 
   function ensureUI() {

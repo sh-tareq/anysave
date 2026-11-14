@@ -275,6 +275,9 @@ class DownloadService : Service() {
 
         var finalPath: String? = null
         fun savedFile() = finalPath?.let(::File)?.takeIf { it.exists() }
+        // Sites like YouTube take 10-20 s before the first byte, and some videos (HLS) never report a
+        // percentage at all; say something true for both instead of a bare "Starting…". A progress line replaces it.
+        if ((Downloads.get(id)?.percent ?: 0f) <= 0f) Downloads.update(id) { it.copy(eta = "Getting the video…") }
         try {
         YoutubeDL.getInstance().execute(req, id) { _, _, line ->
             when {

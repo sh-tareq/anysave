@@ -641,6 +641,48 @@ function startDrag(e, j) {
   e.dataTransfer.setData("text/uri-list", fileUrl(j.file));
 }
 
+// ---------- the same helpers as the manager page (manager.js) ----------
+function extOf(n) { const m = String(n || "").split(/[?#]/)[0].match(/\.([a-z0-9]{1,8})$/i); return m ? m[1].toLowerCase() : ""; }
+function category(j) {
+  if (j.kind === "convert") return "Converted";
+  if (j.kind === "transcribe") return "Documents";
+  if (j.kind === "subs") return "Videos";
+  const e = extOf(j.fileName || j.file || j.title);
+  if (j.audioOnly || /^(mp3|m4a|aac|wav|flac|ogg|opus|wma)$/.test(e)) return "Music";
+  if (j.kind === "video" || /^(mp4|mkv|webm|mov|avi|m4v|flv|wmv|ts|mpe?g|3gp)$/.test(e)) return "Videos";
+  if (/^(jpe?g|png|gif|webp|heic|bmp|svg|tiff?)$/.test(e)) return "Pictures";
+  if (/^(pdf|docx?|xlsx?|pptx?|txt|csv|rtf|odt|ods|epub|srt)$/.test(e)) return "Documents";
+  if (/^(zip|rar|7z|tar|gz|tgz|bz2|xz|iso|dmg)$/.test(e)) return "Archives";
+  if (/^(apk|exe|msi|pkg|deb|rpm|appimage)$/.test(e)) return "Apps";
+  return "Other";
+}
+function bytesPerSec(s) {
+  const m = String(s || "").match(/([\d.]+)\s*([KMGT]?)i?B\/s/i);
+  if (!m) return 0;
+  return (parseFloat(m[1]) || 0) * ({ "": 1, K: 1024, M: 1048576, G: 1073741824, T: 1099511627776 }[m[2].toUpperCase()] || 1);
+}
+function fmtSpeed(bps) {
+  if (!bps) return "";
+  return bps >= 1048576 ? (bps / 1048576).toFixed(bps >= 104857600 ? 0 : 1) + " MB/s" : Math.max(1, Math.round(bps / 1024)) + " KB/s";
+}
+function etaSeconds(s) {
+  s = String(s || "").trim();
+  if (!s || /unknown|^-/i.test(s)) return null;
+  if (/^\d+(:\d+){1,2}$/.test(s)) return s.split(":").map(Number).reduce((a, v) => a * 60 + v, 0);
+  let t = 0, m, found = false;
+  const re = /(\d+)\s*(h|m|s)/gi;
+  while ((m = re.exec(s))) { found = true; t += Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2].toLowerCase()]; }
+  return found ? t : null;
+}
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec)) return "";
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec} s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)} min${sec % 60 ? ` ${sec % 60} s` : ""}`;
+  const h = Math.floor(sec / 3600), mn = Math.floor((sec % 3600) / 60);
+  return `${h} h${mn ? ` ${mn} min` : ""}`;
+}
+
 function renderJobs(jobs) {
   if (dragging) { redrawAfterDrag = () => renderJobs(jobs); return; }
   const list = Object.values(jobs || {}).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id)).slice(0, 5);
@@ -648,16 +690,27 @@ function renderJobs(jobs) {
   ul.innerHTML = list.length ? "" : '<li class="muted small">Nothing yet.</li>';
   for (const j of list) {
     const li = document.createElement("li");
+    li.className = "job";
     const pct = Math.max(0, Math.min(100, j.percent || 0));
     let line = "";
-    if (j.status === "downloading") line = `${pct.toFixed(0)}% · ${j.speed || ""} · ETA ${j.eta || "?"}`;
-    else if (j.status === "done") line = '<span class="ok">✓ Saved</span>';
+    if (j.status === "downloading") {
+      // The same words as the manager: "42% · 1.2 MB/s · 12 s left"
+      const left = fmtDuration(etaSeconds(j.eta));
+      line = [`${pct.toFixed(0)}%`, fmtSpeed(bytesPerSec(j.speed)), left && `${left} left`].filter(Boolean).join(" · ");
+    }
+    else if (j.status === "done") line = '<span class="ok">Done</span>';
     else if (j.status === "error") line = `<span class="err">${escapeHtml(j.error || "Failed")}</span>`;
     else if (j.status === "ask") line = "Download with:";
-    else line = escapeHtml({ queued: "Queued", scheduled: "Scheduled", starting: "Starting…", paused: `Paused · ${pct.toFixed(0)}%`, cancelled: "Cancelled" }[j.status] || j.status);
-    li.innerHTML = `<div class="name">${escapeHtml(j.title || j.url)}</div>
-      ${["downloading", "starting", "merging", "converting", "queued", "paused"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
-      <div class="row small muted"><span>${line}</span><span class="act"></span></div>`;
+    else if (j.status === "paused") line = `<span class="stw">Paused</span> · ${pct.toFixed(0)}%`;
+    else line = escapeHtml({ queued: "Queued", scheduled: "Scheduled", starting: "Starting…", merging: "Saving…", converting: "Converting…", cancelled: "Cancelled" }[j.status] || j.status);
+    li.classList.toggle("paused", j.status === "paused");
+    li.classList.toggle("waiting", ["queued", "scheduled"].includes(j.status));
+    const cat = category(j);
+    const ext = extOf(j.fileName || j.file || (j.kind === "file" ? j.title : "")) || (j.audioOnly ? "mp3" : j.kind === "video" ? "mp4" : "");
+    li.innerHTML = `<div class="ficon t-${cat}">${escapeHtml((ext || "file").toUpperCase().slice(0, 4))}${j.status === "done" ? '<span class="tick">✓</span>' : ""}</div>
+      <div class="jb"><div class="name">${escapeHtml(j.title || j.url)}</div>
+      ${["downloading", "starting", "merging", "converting", "queued", "scheduled", "paused"].includes(j.status) ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ""}
+      <div class="row small muted"><span>${line}</span><span class="act"></span></div></div>`;
     const act = li.querySelector(".act");
     if (j.status === "ask") {
       const fast = Object.assign(document.createElement("button"), { className: "link small", textContent: "AnySave (Fast)" });
