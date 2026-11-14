@@ -5,7 +5,7 @@
 #  - ~/Library/Application Support/AnySave   (helper, yt-dlp, ffmpeg, speech models, settings, logs)
 #  - ~/AnySave/extension                      (the extension folder Chrome loads)
 #  - the browser registrations of the helper  (Chrome, Edge, Brave, Chromium)
-#  - AnySave.app in Applications
+#  - AnySave.app in Applications, and its "Start at Login" entry (~/Library/LaunchAgents)
 #  - the `anysave` Terminal command and the PATH line the installer may have added to ~/.zprofile
 #
 # Options: --yes  don't ask first.
@@ -68,7 +68,9 @@ for d in \
   remove_file "$d/$HOST_NAME.json"
 done
 
-# 5. The app.
+# 5. The app, and its "Start at Login" entry.
+[ "$NO_KILL" != "1" ] && { launchctl bootout "gui/$(id -u)/com.anysave.desktop" >/dev/null 2>&1 || true; }
+remove_file "$HOME/Library/LaunchAgents/com.anysave.desktop.plist"
 for a in "$ROOT/Applications/AnySave.app" "$HOME/Applications/AnySave.app"; do
   remove_dir "$a"
 done

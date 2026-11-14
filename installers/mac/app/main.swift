@@ -196,18 +196,80 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Already running (e.g. started at login, then opened from Applications): show that one.
+        let me = NSRunningApplication.current
+        if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .first(where: { $0.processIdentifier != me.processIdentifier }) {
+            other.activate(options: [])
+            NSApp.terminate(nil)
+            return
+        }
         setupMainMenu()
         setupStatusBar()
         setupGlobalShortcut()
+        setupLoginItem()
 
+        // Started at login: stay in the menu bar, no window (like other background helpers).
+        let background = CommandLine.arguments.contains("--background")
         DispatchQueue.global(qos: .userInitiated).async {
             let info = self.ensureDaemonRunning()
             DispatchQueue.main.async {
                 self.daemonInfo = info
-                self.showMainWindow()
+                if !background { self.showMainWindow() }
                 self.startStatusPolling()
             }
         }
+    }
+
+    // MARK: - Start at login
+    // A LaunchAgent in ~/Library/LaunchAgents starts AnySave in the background when you log in.
+    // On by default the first time; "Start at Login" in the menu bar turns it off and on.
+
+    var loginItem: NSMenuItem?
+
+    func loginAgentPath() -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent("Library/LaunchAgents/com.anysave.desktop.plist")
+    }
+
+    func loginEnabled() -> Bool {
+        return FileManager.default.fileExists(atPath: loginAgentPath())
+    }
+
+    func setLogin(_ on: Bool) {
+        let path = loginAgentPath()
+        if on {
+            guard let exe = Bundle.main.executablePath else { return }
+            let plist: [String: Any] = [
+                "Label": "com.anysave.desktop",
+                "ProgramArguments": [exe, "--background"],
+                "RunAtLoad": true,
+                "LimitLoadToSessionType": "Aqua",
+                "ProcessType": "Interactive",
+            ]
+            try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        } else {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        loginItem?.state = loginEnabled() ? .on : .off
+    }
+
+    func setupLoginItem() {
+        let d = UserDefaults.standard
+        if !d.bool(forKey: "loginItemDefaultSet") {
+            d.set(true, forKey: "loginItemDefaultSet")
+            setLogin(true)
+        } else if loginEnabled() {
+            setLogin(true) // keeps the app's location up to date if it was moved
+        }
+        loginItem?.state = loginEnabled() ? .on : .off
+    }
+
+    @objc func onToggleLogin() {
+        setLogin(!loginEnabled())
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -360,6 +422,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Pause All Downloads", action: #selector(onPauseAll), keyEquivalent: "")
         menu.addItem(withTitle: "Resume All Downloads", action: #selector(onResumeAll), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
+        loginItem = menu.addItem(withTitle: "Start at Login", action: #selector(onToggleLogin), keyEquivalent: "")
         menu.addItem(withTitle: "Quit AnySave", action: #selector(onQuitAll), keyEquivalent: "q")
         statusItem.menu = menu
     }
@@ -485,14 +548,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             mainWindow = w
             mainWebView = wv
         }
+        NSApp.setActivationPolicy(.regular) // Dock icon while the window is open
         NSApp.activate(ignoringOtherApps: true)
         mainWindow?.makeKeyAndOrderFront(nil)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender == mainWindow {
-            // Hide main window so downloads continue in the Menu Bar.
+            // Hide the window: AnySave keeps working from the menu bar, without a Dock icon.
             sender.orderOut(nil)
+            NSApp.setActivationPolicy(.accessory)
             return false
         }
         return true
@@ -616,6 +681,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(clipItem)
         appMenu.addItem(withTitle: "Toggle Floating Drop Box", action: #selector(onToggleDropBox), keyEquivalent: "d")
         appMenu.addItem(NSMenuItem.separator())
+        // ⌘W hides the window; AnySave keeps working from the menu bar.
+        appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Quit AnySave", action: #selector(onQuitAll), keyEquivalent: "q")
         appItem.submenu = appMenu
 
@@ -635,5 +702,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.regular)
+app.setActivationPolicy(.accessory)
 app.run()

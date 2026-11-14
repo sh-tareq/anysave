@@ -163,6 +163,8 @@ new installer once so the browser finds the helper under its new name. These are
 **CI:** the GitHub workflow (Windows, macOS, Ubuntu) has passed on every push of 13 November, so the Windows
 installer and helper do install and run on real Windows there. Nobody has used the Windows app by hand.
 
+**Mac menu-bar mode (tested on the owner's Mac, 2026-11-14):** closing the window (or ⌘W) removes the Dock icon and AnySave keeps running from the menu bar; reopening brings both back; the login entry (`~/Library/LaunchAgents/com.anysave.desktop.plist`, run through `launchctl bootstrap`) starts it with `--background`, no window, no Dock icon; "Start at Login" in the menu bar removes and re-adds it. Not tried: a real log-out/log-in.
+
 **Still not tested:** anything on real Windows; how the Mac app window, menu-bar item, drop box, global shortcut,
 clipboard watch and notifications look and behave (the test session could not take screenshots of the Mac);
 the `.dmg`/`.exe` installers; self-update; Safari; refresh-expired-link; aria2c; cancel cleanup on Android;
