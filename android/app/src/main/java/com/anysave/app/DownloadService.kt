@@ -141,7 +141,7 @@ class DownloadService : Service() {
     }
 
     private suspend fun runJob(id: String) {
-        val job = Downloads.get(id) ?: return
+        var job = Downloads.get(id) ?: return
         if (job.status != JobStatus.QUEUED) return // paused or cancelled while waiting
         lastNotify[id] = 0L // from now on this job may show its notification
 
@@ -153,6 +153,20 @@ class DownloadService : Service() {
             while (isMetered()) {
                 delay(5000)
                 if (Downloads.get(id)?.status != JobStatus.WAITING_WIFI) return
+            }
+        }
+
+        // A link from an unknown site that was added without a check (import, several links at once)
+        // may be a plain file, e.g. download.php?id=7 or /attach: download it as a file, with its own name.
+        if (job.kind == JobKind.VIDEO && Engine.siteOf(job.url) == null && job.thumbnail.isNullOrBlank()) {
+            val probe = kotlinx.coroutines.withContext(Dispatchers.IO) { FileKinds.probe(job.url) }
+            if (probe?.isFile == true && stillWanted(id)) {
+                Downloads.update(id) {
+                    it.copy(kind = JobKind.FILE, fileName = probe.name, mime = probe.mime,
+                        title = probe.name ?: it.url.substringAfterLast('/').substringBefore('?').ifBlank { it.url },
+                        site = Engine.siteLabel(it.url), qualityLabel = "File", format = "", sort = null, audioOnly = false)
+                }
+                job = Downloads.get(id) ?: return
             }
         }
 

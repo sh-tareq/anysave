@@ -42,13 +42,27 @@ object Backup {
         return Engine.extractUrls(text)
     }
 
+    /** The items an exported list marks as files: url to the file name it had (if it had one). */
+    private fun fileItems(text: String): Map<String, String?> = runCatching {
+        val arr = JSONObject(text.trim()).optJSONArray("items") ?: return emptyMap()
+        buildMap {
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optString("kind") == "file") put(o.optString("url"), o.optString("title").takeIf { it.contains('.') })
+            }
+        }
+    }.getOrDefault(emptyMap())
+
     /** Adds the links; ones already waiting or downloading are skipped. Returns added to skipped. */
     fun import(ctx: Context, text: String): Pair<Int, Int> {
         var added = 0
         var skipped = 0
+        val files = fileItems(text)
         for (url in parse(text).take(500)) {
             if (Downloads.isActive(url)) { skipped++; continue }
-            if (DownloadService.startLink(ctx, url)) added++ else skipped++
+            // Items the list marks as files download as files, like the desktop app does.
+            val ok = if (url in files) DownloadService.startFile(ctx, url, files[url]) else DownloadService.startLink(ctx, url)
+            if (ok) added++ else skipped++
         }
         return added to skipped
     }
