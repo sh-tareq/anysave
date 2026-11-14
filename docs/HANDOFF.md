@@ -189,7 +189,16 @@ extension/      Chrome MV3 extension
                   toolbar icon (animated progress ring + % badge + ✓ for unseen finished)
   popup.*         per-page UI: single video (live progress button), playlists/channels/Mixes picker,
                   Meta/TikTok ad lists (checkboxes, Select all, live progress pills), recent downloads
-  manager.*       full download manager + converter page (Open, drag-out, multi-link paste, queue states)
+  manager.*       full download manager (IDM-style since 15 Nov 2026): top add-link box, sidebar (status,
+                  file types, queues, tools, each with a count), labelled toolbar acting on the selected rows,
+                  sortable table (Name/Size/Status/Speed/Time left), details panel for the selected row
+                  (all per-file actions: Verify, Transcribe, Subtitles, Convert, new link, queue), status bar
+                  (speed graph, speed limit, "when done"), Settings on its own page, and the
+                  "before you download" window (`#addDlg`: helper `probe` for files, `info` for videos with
+                  sizes per quality; setting `askBeforeAdd`). Views: downloads, convert, transcripts, grab,
+                  settings (`showTab(name)`, also from the URL hash). Same file runs in the desktop app
+                  window; `desktop-bridge.js` puts its "Desktop app" card into `#desktopSettings`.
+                  Tested by pt/t13.js (plus t1–t12).
   capture.js      TikTok Creative Center: remembers ads that played on hover
   video-overlay.js  AnySave icon button on videos (any site, also embedded players): click → quality
                   menu from the helper's `info` for the video's own page (found from the post/thumbnail
@@ -277,6 +286,9 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026: manager page redesigned in an IDM style (see Architecture); helper `info` gives an estimated size
+  per quality; "Use my Chrome login & retry" on video login errors; a late update for a removed download no longer
+  brings it back as an empty row (extension and helper); Mac window remembers its size, minimum 720×480.
 - v1.0.5 / Android 1.0.3: playlists and channels with batch selection and one quality for the batch; YouTube Mixes
   (watch URL, first 50); Watch later / Liked use the login; clear errors; video download queue (3 at once,
   "Queued"); live progress on the single-video Download button, on every ad/playlist row and the batch button;
@@ -308,7 +320,8 @@ Still open:
 - Desktop: no code signing, by the owner's decision (14 Nov 2026: no Apple, Microsoft or Google developer accounts
   for now); the install instructions explain the first-open warnings on Mac, Windows and Android; the Mac file
   picker fix is unconfirmed by a person; no automatic update of the helper itself.
-- Extension: no `_locales`/i18n (Bangla UI); manager tabs/chips/progress bars lack ARIA roles; no `:focus-visible`.
+- Extension: no `_locales`/i18n (Bangla UI). The popup and the video button menu still use the older look
+  (to be restyled to match the new manager).
 - Android: `targetSdk` 34 (only matters for Google Play); no predictive back; no themed icon; no localization;
   dark-mode launch flash; no transcription.
 - Not tested by a person: everything on Windows (CI installs, transcribes a sample and uninstalls there), the Mac

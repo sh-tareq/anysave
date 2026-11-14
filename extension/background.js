@@ -14,6 +14,8 @@ function updateJob(id, patch) {
   // Serialise writes so fast progress updates don't overwrite each other.
   writeChain = writeChain.then(async () => {
     const jobs = await getJobs();
+    // A late progress/finish update for a download the user already removed must not bring it back.
+    if (!jobs[id] && !patch.kind) return;
     const before = jobs[id]?.status;
     jobs[id] = { ...(jobs[id] || { id, createdAt: Date.now() }), ...patch };
     const now = jobs[id].status;
@@ -538,7 +540,7 @@ chrome.notifications.onClicked.addListener(async (nid) => {
 const POWER_ID = "anysave-power";
 async function schedulePower(act) {
   await chrome.storage.session.set({ pendingPower: { act, at: Date.now() } });
-  chrome.notifications.create(POWER_ID, {
+  await chrome.notifications.create(POWER_ID, { // wait, so a quick Cancel can really clear it
     type: "basic", iconUrl: chrome.runtime.getURL("icons/icon128.png"), priority: 2, requireInteraction: true,
     title: "All downloads finished",
     message: `This computer will ${act === "sleep" ? "go to sleep" : "shut down"} in 60 seconds.`,
@@ -551,7 +553,7 @@ async function cancelPower() {
   if (!pendingPower) return;
   await chrome.storage.session.remove("pendingPower");
   chrome.alarms.clear(POWER_ID);
-  chrome.notifications.clear(POWER_ID);
+  await chrome.notifications.clear(POWER_ID);
 }
 // Runs when the minute is over: only if nothing changed in the meantime.
 async function runPendingPower() {
@@ -864,7 +866,7 @@ async function agreed() {
   const { acceptedTermsVersion = 0 } = await chrome.storage.local.get("acceptedTermsVersion");
   return acceptedTermsVersion >= 2; // keep in sync with TERMS_VERSION in popup.js
 }
-const GATED = new Set(["info", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe", "subs"]);
+const GATED = new Set(["info", "probe", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe", "subs"]);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -876,6 +878,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
         return native({ action: "info", url: msg.url, cookies, proxy: (await getSettings()).proxy || "" });
       }
+      case "probe": // what a link is (a file? its name and size?), for the "before you download" window
+        return native({ action: "probe", url: msg.url, proxy: (await getSettings()).proxy || "" });
       case "playlist": {
         const cookies = msg.useCookies ? await cookiesFor(msg.url) : null;
         return native({ action: "playlist", url: msg.url, cookies, proxy: (await getSettings()).proxy || "" });
@@ -903,7 +907,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await scheduleTick();
         return { ok: true };
       case "cancel": await cancel(msg.id); return { ok: true };
-      case "retry": await retry(msg.id); return { ok: true };
+      case "retry":
+        if (msg.useCookies) await updateJob(msg.id, { useCookies: true }); // "Use my Chrome login & retry"
+        await retry(msg.id);
+        return { ok: true };
       case "refreshUrl": {
         const u = String(msg.url || "").trim();
         if (!/^https?:\/\//i.test(u)) return { ok: false, error: "Please enter a valid http(s) link." };

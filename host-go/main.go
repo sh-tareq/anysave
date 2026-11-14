@@ -233,9 +233,22 @@ func friendlyError(msg string) string {
 // ---------- info ----------
 
 type format struct {
-	Height *float64 `json:"height"`
-	Vcodec string   `json:"vcodec"`
-	Acodec string   `json:"acodec"`
+	Height         *float64 `json:"height"`
+	Vcodec         string   `json:"vcodec"`
+	Acodec         string   `json:"acodec"`
+	Filesize       *float64 `json:"filesize"`
+	FilesizeApprox *float64 `json:"filesize_approx"`
+}
+
+// bytes is the format's size as the site reports it (exact or estimated), or 0.
+func (f format) bytes() int64 {
+	if f.Filesize != nil && *f.Filesize > 0 {
+		return int64(*f.Filesize)
+	}
+	if f.FilesizeApprox != nil && *f.FilesizeApprox > 0 {
+		return int64(*f.FilesizeApprox)
+	}
+	return 0
 }
 
 type videoInfo struct {
@@ -255,6 +268,7 @@ type option struct {
 	Format    string `json:"format"`
 	Sort      string `json:"sort,omitempty"`
 	AudioOnly bool   `json:"audioOnly,omitempty"`
+	Size      int64  `json:"size,omitempty"` // estimated bytes, 0 when the site doesn't say
 }
 
 func hasV(f format) bool { return f.Vcodec != "" && f.Vcodec != "none" && f.Height != nil }
@@ -269,12 +283,44 @@ func sortedHeights(set map[int]bool) []int {
 	return hs
 }
 
+// sizeFor estimates the download size of a height (video part + best audio part).
+// Exact sizes aren't always given; the result is a guide, 0 when unknown.
+func sizeFor(formats []format, h int, preferAvc bool) int64 {
+	var videoOnly, mixed int64
+	for _, f := range formats {
+		if !hasV(f) || int(*f.Height) != h || (preferAvc && !strings.HasPrefix(f.Vcodec, "avc")) {
+			continue
+		}
+		b := f.bytes()
+		if hasA(f) {
+			if b > mixed {
+				mixed = b
+			}
+		} else if b > videoOnly {
+			videoOnly = b
+		}
+	}
+	if videoOnly > 0 {
+		return videoOnly + audioSize(formats)
+	}
+	return mixed
+}
+
+func audioSize(formats []format) int64 {
+	var best int64
+	for _, f := range formats {
+		if hasA(f) && !hasV(f) && f.bytes() > best {
+			best = f.bytes()
+		}
+	}
+	return best
+}
+
 func buildOptions(formats []format, hasFfmpeg bool) []option {
 	var opts []option
 	if hasFfmpeg {
 		// Highest resolution first; at equal resolution prefer H.264 + AAC so the
 		// MP4 plays everywhere. YouTube only has H.264 up to 1080p.
-		opts = append(opts, option{Label: "Best quality (MP4)", Format: "bv*+ba/b", Sort: h264Sort})
 		all, avc := map[int]bool{}, map[int]bool{}
 		for _, f := range formats {
 			if hasV(f) {
@@ -285,7 +331,13 @@ func buildOptions(formats []format, hasFfmpeg bool) []option {
 				}
 			}
 		}
-		for _, h := range sortedHeights(all) {
+		heights := sortedHeights(all)
+		best := option{Label: "Best quality (MP4)", Format: "bv*+ba/b", Sort: h264Sort}
+		if len(heights) > 0 {
+			best.Size = sizeFor(formats, heights[0], avc[heights[0]])
+		}
+		opts = append(opts, best)
+		for _, h := range heights {
 			if h < 144 {
 				continue
 			}
@@ -297,9 +349,10 @@ func buildOptions(formats []format, hasFfmpeg bool) []option {
 				Label:  fmt.Sprintf("%dp MP4%s", h, suffix),
 				Format: fmt.Sprintf("bv*[height<=%d]+ba/b[height<=%d]", h, h),
 				Sort:   h264Sort,
+				Size:   sizeFor(formats, h, avc[h]),
 			})
 		}
-		return append(opts, option{Label: "Audio only (MP3)", Format: "ba/b", AudioOnly: true})
+		return append(opts, option{Label: "Audio only (MP3)", Format: "ba/b", AudioOnly: true, Size: audioSize(formats)})
 	}
 	// No ffmpeg: only formats that already contain video+audio in one file.
 	single := map[int]bool{}
@@ -310,12 +363,12 @@ func buildOptions(formats []format, hasFfmpeg bool) []option {
 	}
 	hs := sortedHeights(single)
 	if len(hs) > 0 {
-		opts = append(opts, option{Label: "Best single-file quality", Format: "b"})
+		opts = append(opts, option{Label: "Best single-file quality", Format: "b", Size: sizeFor(formats, hs[0], false)})
 	}
 	for _, h := range hs {
-		opts = append(opts, option{Label: fmt.Sprintf("%dp", h), Format: fmt.Sprintf("b[height<=%d]", h)})
+		opts = append(opts, option{Label: fmt.Sprintf("%dp", h), Format: fmt.Sprintf("b[height<=%d]", h), Size: sizeFor(formats, h, false)})
 	}
-	return append(opts, option{Label: "Audio only (M4A)", Format: "ba[ext=m4a]/ba/b", AudioOnly: true})
+	return append(opts, option{Label: "Audio only (M4A)", Format: "ba[ext=m4a]/ba/b", AudioOnly: true, Size: audioSize(formats)})
 }
 
 func actionInfo(msg map[string]any) map[string]any {

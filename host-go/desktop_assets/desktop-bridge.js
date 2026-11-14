@@ -20,6 +20,7 @@
   });
 
   const listeners = new Set();
+  let appVersion = ""; // the helper's version, from the first state message
   const store = {
     jobs: {},
     settings: {
@@ -100,7 +101,7 @@
 
   window.chrome = {
     runtime: {
-      getManifest: () => ({ version: "1.1.0" }),
+      getManifest: () => ({ version: appVersion }),
       getURL: (p) => "/" + String(p).replace(/^\//, ""),
       sendMessage: (msg) => apiAction(msg),
     },
@@ -156,6 +157,11 @@
     if (nt) nt.checked = settings.notifications !== false;
     const ch = document.getElementById("deskChannel");
     if (ch) ch.value = settings.releaseChannel || "stable";
+    if (appVer) {
+      appVersion = appVer;
+      const about = document.getElementById("aboutVersion");
+      if (about) about.textContent = "version " + appVer;
+    }
     const verEl = document.getElementById("deskVerInfo");
     if (verEl && (appVer || ytdlpVer)) {
       verEl.textContent = [appVer && `App v${appVer}`, ytdlpVer && `yt-dlp ${ytdlpVer}`].filter(Boolean).join(" · ");
@@ -167,48 +173,34 @@
     const isMac = /Mac/i.test(navigator.platform);
     const shortcutLabel = isMac ? "⌘+Shift+Y" : "Ctrl+Shift+Y";
 
-    // Hide the extension-only "Catch downloads from websites" pin hint, replace with Desktop App bar
-    const panel = document.getElementById("downloads");
+    // Desktop-only settings: a card at the top of Settings (older pages: above the download rules).
+    const host = document.getElementById("desktopSettings");
     const engineBar = document.querySelector(".engine-bar");
-    if (panel && engineBar) {
+    if (host || engineBar) {
       const deskCard = document.createElement("div");
-      deskCard.className = "engine-bar desktop-bar";
+      deskCard.className = host ? "card set desktop-bar" : "engine-bar desktop-bar";
       deskCard.innerHTML = `
-        <div class="engine-top">
-          <div>
-            <b>AnySave Desktop App</b>
-            <span class="muted small">Runs in your ${isMac ? "Menu Bar" : "System Tray"} — downloads continue even when all browsers and windows are closed</span>
-          </div>
-          <div class="chips">
-            <button type="button" id="deskPasteClipboard" class="chip active" title="Download link currently on your clipboard (${shortcutLabel})">⬇︎ Download copied link (${shortcutLabel})</button>
-            <button type="button" id="deskUpdateBtn" class="chip">Update yt-dlp &amp; check updates</button>
-          </div>
+        <h3>Desktop app</h3>
+        <div class="setrow">
+          <div><b>Runs in your ${isMac ? "menu bar" : "system tray"}</b><span>Downloads keep going when every browser and window is closed.</span></div>
+          <button type="button" id="deskPasteClipboard" class="btn" title="Download the link that's on your clipboard">Download copied link (${shortcutLabel})</button>
         </div>
-        <div class="rules-grid" style="margin-top:8px">
-          <label class="check small">
-            <input type="checkbox" id="deskClipboardWatch" />
-            <span><b>Clipboard watch</b> · auto-download copied video &amp; file links from Safari, Firefox, Chrome, or any app</span>
-          </label>
-          <label class="check small">
-            <input type="checkbox" id="deskDropBox" />
-            <span><b>Floating Drop Box</b> · keep an always-on-top mini target to drag links onto</span>
-          </label>
-          <label class="check small">
-            <input type="checkbox" id="deskNotifications" checked />
-            <span><b>Sound &amp; notifications</b> · alert when downloads finish</span>
-          </label>
-        </div>
-        <div class="row small muted" style="margin-top:6px;justify-content:space-between;display:flex;align-items:center">
-          <span id="deskVerInfo">AnySave Desktop</span>
-          <label class="small">Update channel:
-            <select id="deskChannel" style="margin-left:4px">
-              <option value="stable">Stable</option>
-              <option value="beta">Beta</option>
-            </select>
-          </label>
+        <label class="setrow switch-row"><div><b>Watch the clipboard</b><span>Copy a video or file link in any app and AnySave downloads it.</span></div>
+          <input type="checkbox" class="switch" id="deskClipboardWatch" /></label>
+        <label class="setrow switch-row"><div><b>Floating drop box</b><span>A small always-on-top target to drag links onto.</span></div>
+          <input type="checkbox" class="switch" id="deskDropBox" /></label>
+        <label class="setrow switch-row"><div><b>Sound and notification when a download finishes</b></div>
+          <input type="checkbox" class="switch" id="deskNotifications" checked /></label>
+        <div class="setrow">
+          <div><b>Updates</b><span id="deskVerInfo">AnySave Desktop</span></div>
+          <div class="row">
+            <label class="small">Channel <select id="deskChannel"><option value="stable">Stable</option><option value="beta">Beta</option></select></label>
+            <button type="button" id="deskUpdateBtn" class="btn">Check for updates</button>
+          </div>
         </div>
       `;
-      panel.insertBefore(deskCard, engineBar);
+      if (host) host.appendChild(deskCard);
+      else engineBar.parentNode.insertBefore(deskCard, engineBar);
 
       document.getElementById("deskClipboardWatch")?.addEventListener("change", (e) => {
         apiAction({ type: "setSettings", patch: { clipboardWatch: e.target.checked } });
@@ -247,6 +239,7 @@
     // Drag and drop any link or text onto the Desktop window to download
     window.addEventListener("dragover", (e) => { e.preventDefault(); });
     window.addEventListener("drop", async (e) => {
+      if (e.defaultPrevented) return; // the page already took this link
       e.preventDefault();
       const uri = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "";
       if (/^https?:\/\//i.test(uri.trim())) {

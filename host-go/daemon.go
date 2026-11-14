@@ -311,6 +311,11 @@ func (d *daemonServer) updateJob(id string, patch map[string]any) map[string]any
 	d.mu.Lock()
 	cur, ok := d.jobs[id]
 	if !ok {
+		// A late update for a removed download must not bring it back as an empty row.
+		if _, creates := patch["kind"]; !creates {
+			d.mu.Unlock()
+			return nil
+		}
 		cur = map[string]any{
 			"id":        id,
 			"createdAt": float64(time.Now().UnixMilli()),
@@ -445,6 +450,7 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/desktop-bridge.js", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := desktopAssets.ReadFile("desktop_assets/desktop-bridge.js")
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(b)
 	})
 
@@ -472,6 +478,7 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 			inject := fmt.Sprintf(`<script>window.__ANYSAVE_TOKEN=%q;</script><script src="/desktop-bridge.js"></script><script src="manager.js"></script>`, d.token)
 			html := strings.Replace(string(b), `<script src="manager.js"></script>`, inject, 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
 			_, _ = w.Write([]byte(html))
 			return
 		}
@@ -484,6 +491,8 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 		if ct := mime.TypeByExtension(filepath.Ext(full)); ct != "" {
 			w.Header().Set("Content-Type", ct)
 		}
+		// Always check for a newer copy, so the window never runs an old page after an update.
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, full)
 	})
 }

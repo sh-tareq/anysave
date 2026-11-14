@@ -521,7 +521,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.daemonInfo = info
 
         if mainWindow == nil {
-            let rect = NSRect(x: 0, y: 0, width: 1020, height: 700)
+            // Wide enough for the toolbar labels and every column; the user's own size is remembered.
+            let screen = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+            let rect = NSRect(x: 0, y: 0, width: min(1200, screen.width - 80), height: min(780, screen.height - 60))
             let w = NSWindow(
                 contentRect: rect,
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -529,10 +531,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 defer: false
             )
             w.title = "AnySave"
+            w.minSize = NSSize(width: 720, height: 480)
             w.center()
+            w.setFrameAutosaveName("AnySaveMainWindow")
             w.delegate = self
             w.isReleasedWhenClosed = false
-            w.backgroundColor = NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.09, alpha: 1.0)
+            w.backgroundColor = .windowBackgroundColor // follows light/dark mode, like the page
 
             let cfg = WKWebViewConfiguration()
             let wv = WKWebView(frame: rect, configuration: cfg)
