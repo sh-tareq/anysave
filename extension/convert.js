@@ -1108,6 +1108,8 @@
     dropFiles(e.dataTransfer.files);
   });
   window.addEventListener("resize", () => { if (st.tool) applyVideoLook(); });
+  // The Captions page (captions.js) uses the same helper connection.
+  window.AnySaveCv = { session, op, upload, fileURL, thumbURL };
   // Start the helper's preview server as soon as the page is opened, so the first preview is quick.
   if (location.hash === "#convert") { session().catch(() => {}); window.fillDownloadsPicker(); }
 })();

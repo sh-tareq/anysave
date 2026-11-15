@@ -47,7 +47,11 @@ func TestChooseModel(t *testing.T) {
 	if banglaModelURL != "-" || isFile(filepath.Join(modelsDir(), modelBangla.Name)) {
 		wantBn = modelBangla
 	}
-	if chooseModel("en", "") != modelStandard || chooseModel("bn", "") != wantBn || chooseModel("hi", "") != modelBest || chooseModel("auto", "") != modelBest {
+	wantEn := modelStandard // unless only the better model is already here
+	if !isFile(filepath.Join(modelsDir(), modelStandard.Name)) && isFile(filepath.Join(modelsDir(), modelBest.Name)) {
+		wantEn = modelBest
+	}
+	if chooseModel("en", "") != wantEn || chooseModel("bn", "") != wantBn || chooseModel("hi", "") != modelBest || chooseModel("auto", "") != modelBest {
 		t.Errorf("wrong default model choice")
 	}
 	if chooseModel("bn", "standard") != modelStandard {

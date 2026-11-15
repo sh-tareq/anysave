@@ -294,6 +294,23 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026 (evening): **Captions page** (Chrome extension + Mac app, `extension/captions.js`, helper
+  `host-go/cv_captions.go`). Drop/choose a video (or "Edit captions" on a finished video or transcript) → Make captions
+  (the offline speech engine; `transcribe` now also asks whisper for `-ojf` and keeps per-word times in
+  `<app data>/AnySave/captions/<hash of the .srt path>.json`, not next to the video) → edit lines (Enter splits,
+  ⌫ joins, times, find/replace, move all, words per line, undo) → six looks (Clean, Bold pop, Headline, Boxed,
+  Word by word, Bangla) with font/size/colours/outline/box/position and word highlight (light up, pop, appear) →
+  save SRT/VTT/ASS/text or "Make video with captions" (converter tool `captions`: the page writes an ASS file, FFmpeg
+  burns it with `fontsdir` = the bundled fonts). Fonts are built into the helper (`host-go/fonts`, OFL) and served to
+  the page at `/cv/font`, so preview and result use the same letters; sizes convert with each font's win line height
+  (measured: FFmpeg's font size = win ascent+descent). Bangla runs switch to Noto Sans Bengali / Hind Siliguri; other
+  scripts fall back to system fonts in both. Boxed uses libass BorderStyle 4 (one box per caption). The page keeps
+  each video's edits in localStorage (name+size). Tested: helper transcription + word timings, preview vs burned frame
+  side by side (Bold pop, Bangla, Boxed match), the whole page in Chrome for Testing and through the daemon, and in the
+  real Mac window (WKWebView) up to transcription + fonts (the screen was locked, so its look and burn weren't
+  checked there). Also: preview temp folders of a closed AnySave are swept on start; English uses the bigger speech
+  model when only that one is downloaded.
+
 - 15 Nov 2026 (later): Android app redesigned to match the manager (see Architecture); popup and video button
   menu restyled with the manager colours; Android/helper show an IP address as the site name. Tested on the Mi 8
   (release build): YouTube download, before-download window + rename, speed limit, pause/resume, multi-select +

@@ -159,6 +159,8 @@ func (s *cvServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveThumb(w, r)
 	case "upload":
 		s.serveUpload(w, r)
+	case "font":
+		serveFont(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -284,6 +286,8 @@ func (s *cvServer) op(ctx context.Context, req map[string]any) map[string]any {
 		return fail("That file isn't there any more, or AnySave may not read it.")
 	}
 	switch str(req, "op") {
+	case "captionsFind", "captionsLoad", "captionsSave":
+		return s.captionOp(req, path)
 	case "info":
 		return s.info(path)
 	case "sample":

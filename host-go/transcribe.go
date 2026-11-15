@@ -89,6 +89,10 @@ func chooseModel(lang, quality string) speechModel {
 	}
 	switch lang {
 	case "en":
+		// The better model works for English too: don't download a second one if it's already here.
+		if !isFile(filepath.Join(modelsDir(), modelStandard.Name)) && isFile(filepath.Join(modelsDir(), modelBest.Name)) {
+			return modelBest
+		}
 		return modelStandard
 	case "bn":
 		// Until the converted model is hosted, use it only if it is already on this computer.
@@ -401,7 +405,7 @@ func actionTranscribe(msg map[string]any) {
 	if threads > 8 {
 		threads = 8
 	}
-	args := []string{"-m", modelPath, "-l", lang, "-osrt", "-t", strconv.Itoa(threads), "-pp"} // not -sns: it made the text repeat itself in tests
+	args := []string{"-m", modelPath, "-l", lang, "-osrt", "-ojf", "-t", strconv.Itoa(threads), "-pp"} // not -sns: it made the text repeat itself in tests
 	if len(inputs) == 1 {
 		args = append(args, "-ml", "60", "-sow") // subtitle lines of a readable length
 	}
@@ -463,7 +467,9 @@ func actionTranscribe(msg map[string]any) {
 
 	// 5. Put the pieces together and save next to the file.
 	var subs []subtitle
+	var words []capWord // when each word was said, for the Captions page
 	for i, p := range inputs {
+		words = append(words, whisperWords(p+".json", starts[i])...)
 		b, err := os.ReadFile(p + ".srt")
 		if err != nil {
 			continue
@@ -510,6 +516,7 @@ func actionTranscribe(msg map[string]any) {
 		fail("Couldn't save the text: " + err.Error())
 		return
 	}
+	saveCaptionWords(srtPath, words)
 	send(map[string]any{"type": "done", "file": srtPath, "srt": srtPath, "txt": txtPath, "lang": lang,
 		"seconds": int(time.Since(began).Seconds())})
 }

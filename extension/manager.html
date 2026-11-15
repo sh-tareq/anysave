@@ -44,6 +44,7 @@
     <button class="nav add" id="newQueue" type="button">+ New queue</button>
     <div class="sh">Tools</div>
     <button class="nav" data-view="convert"><span class="ni" data-i="convert"></span>Convert</button>
+    <button class="nav" data-view="captions"><span class="ni" data-i="captions"></span>Captions</button>
     <button class="nav" data-view="transcripts"><span class="ni" data-i="transcripts"></span>Transcripts</button>
     <button class="nav" data-view="grab"><span class="ni" data-i="grab"></span>Grab files from a site</button>
     <button class="nav" data-view="settings"><span class="ni" data-i="settings"></span>Settings</button>
@@ -140,6 +141,68 @@
           <div id="cvResult" class="cv-result" hidden></div>
           <div id="cvMsg" class="msg" hidden></div>
           <p class="hint">Saved in Downloads/AnySave/Converted. It also shows in your downloads list.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Captions ================= -->
+  <section id="captions" class="view page cv cap" hidden>
+    <h2>Captions</h2>
+    <p class="lead">Make captions for a video, fix the words, pick a look, then save subtitles or a video with the captions on it. Everything happens on this computer.</p>
+    <div id="capDrop" class="cv-drop">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V6h14v12zM7 15h4v-2H7v2zm6 0h4v-2h-4v2zm-6-4h10V9H7v2z"/></svg>
+      <div><b>Drop a video here</b> <span class="muted">or</span></div>
+      <div class="row">
+        <button id="capPick" class="btn primary">Choose a video…</button>
+        <select id="capFromDl" aria-label="Pick one of your downloaded videos"><option value="">…or one of your downloaded videos</option></select>
+      </div>
+      <div class="muted small">You can also drop a subtitle file (SRT, VTT, ASS) on an open video to restyle it.</div>
+    </div>
+    <div id="capMsg" class="msg" hidden></div>
+    <div id="capMain" class="cap-main" hidden>
+      <div class="cap-left">
+        <div class="card cap-video-card">
+          <div class="cv-head"><h3 id="capName" class="cap-name"></h3><button id="capClose" class="btn small">Close video</button></div>
+          <div id="capStage" class="cap-stage">
+            <video id="capVideo" playsinline preload="metadata"></video>
+            <div id="capOverlay" class="cap-overlay" aria-live="off"></div>
+          </div>
+          <div class="cap-transport">
+            <button id="capPlayBtn" class="btn small cap-playbtn" aria-label="Play or pause">▶</button>
+            <div id="capTimeline" class="cap-timeline" title="Click to jump there"></div>
+            <span id="capTime" class="muted small cap-time"></span>
+          </div>
+        </div>
+        <div id="capEditor" class="card" hidden>
+          <h3>Look</h3>
+          <div id="capStyle"></div>
+        </div>
+      </div>
+      <div class="cap-right">
+        <div id="capMake" class="card" hidden></div>
+        <div id="capExport" class="card cap-export" hidden>
+          <button id="capBurn" class="btn primary big">Make video with captions</button>
+          <div id="capProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div class="cap-saveas"><span class="muted small">Or save the captions as</span>
+            <button class="btn small" data-capsave="srt" title="Works almost everywhere: YouTube, Facebook, players">SRT</button>
+            <button class="btn small" data-capsave="vtt" title="For websites">VTT</button>
+            <button class="btn small" data-capsave="ass" title="With this look, for players such as VLC">ASS (with look)</button>
+            <button class="btn small" data-capsave="txt" title="Just the words">Text</button></div>
+          <div id="capResult" class="cv-result" hidden></div>
+          <p class="hint">Saved in Downloads/AnySave/Converted.</p>
+        </div>
+        <div class="card cap-lines">
+          <div class="cv-head"><h3>Lines <span id="capCount" class="muted small"></span></h3>
+            <label class="small chk"><input type="checkbox" id="capFollow" checked /> Follow the video</label></div>
+          <div class="cap-tools">
+            <label class="small">Words per line <select id="capChunk"></select></label>
+            <span class="cap-tool"><input id="capFind" type="text" class="cv-input" placeholder="Find" /><input id="capReplace" type="text" class="cv-input" placeholder="Replace with" /><button id="capReplaceGo" class="btn small">Replace all</button></span>
+            <span class="cap-tool"><input id="capShift" type="text" class="cv-input cap-shift" placeholder="+0.5" aria-label="Seconds to move all captions" /><button id="capShiftGo" class="btn small" title="Move every caption later (+) or earlier (−) by this many seconds">Move all</button></span>
+            <button id="capRemake" class="btn small">Make again…</button>
+          </div>
+          <div id="capList" class="cap-list"></div>
+          <p class="hint">Click a line to jump there. <kbd>Enter</kbd> splits a line where the cursor is, <kbd>⌫</kbd> at the start joins it to the line above, <kbd>Space</kbd> plays (outside the text), <kbd>⌘Z</kbd>/<kbd>Ctrl+Z</kbd> undoes.</p>
         </div>
       </div>
     </div>
@@ -381,5 +444,6 @@
 
 <script src="manager.js"></script>
 <script src="convert.js"></script>
+<script src="captions.js"></script>
 </body>
 </html>

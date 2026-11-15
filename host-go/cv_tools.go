@@ -271,6 +271,20 @@ func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, prog
 		}
 		out := file(baseNoExt(video)+" (subtitles)", ext)
 		return out, j.addSubs(video, subs, out, burn)
+	case cvCaptions:
+		var video, ass string
+		for _, p := range paths {
+			if extOf(p) == "ass" {
+				ass = p
+			} else {
+				video = p
+			}
+		}
+		if video == "" || ass == "" {
+			return "", cvError("Choose a video and make captions first.")
+		}
+		out := file(baseNoExt(video)+" (captions)", "mp4")
+		return out, j.burnCaptions(video, ass, out)
 	case cvImage:
 		if format == "" {
 			format = "jpg"

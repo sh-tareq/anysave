@@ -76,6 +76,11 @@ AnySave is built on these open-source projects:
 | Jetpack Compose, AndroidX, Kotlin | Apache-2.0 | Android app |
 | Coil | Apache-2.0 | Android app |
 | Go standard library | BSD-3-Clause | desktop helper |
+| pdfcpu | Apache-2.0 | desktop helper (PDF tools) |
+| bodgit/sevenzip | BSD-3-Clause | desktop helper (7z) |
+| PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
+| whisper.cpp and the Whisper models | MIT | desktop (transcription, captions) |
+| Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper (caption fonts; licences in `host-go/fonts/licences`) |
 
 Because the Android app includes youtubedl-android (GPL-3.0), **the AnySave Android app is distributed under the
 GNU General Public License v3.0**. You may get its complete source code from the author, and you may use, study,
