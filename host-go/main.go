@@ -105,6 +105,9 @@ func isFile(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// exists is true for a file or a folder (convert results can be folders).
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
+
 func findTool(name string) string {
 	bin := filepath.Join(appDir, "bin")
 	candidates := []string{filepath.Join(bin, exe(name))}
@@ -778,7 +781,7 @@ func actionPlaylist(msg map[string]any) map[string]any {
 func actionOpen(msg map[string]any) map[string]any {
 	p, err := filepath.Abs(str(msg, "file"))
 	base, _ := filepath.Abs(downloadDir)
-	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) || !isFile(p) {
+	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) || !exists(p) {
 		return map[string]any{"ok": false, "error": "File not found. It may have been moved or deleted."}
 	}
 	if err := openWithDefaultApp(p); err != nil {
@@ -790,7 +793,7 @@ func actionOpen(msg map[string]any) map[string]any {
 func actionReveal(msg map[string]any) map[string]any {
 	p, err := filepath.Abs(str(msg, "file"))
 	base, _ := filepath.Abs(downloadDir)
-	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) || !isFile(p) {
+	if err != nil || !strings.HasPrefix(p, base+string(filepath.Separator)) || !exists(p) {
 		return map[string]any{"ok": false, "error": "File not found"}
 	}
 	revealInFileManager(p)
@@ -983,7 +986,9 @@ func main() {
 	case "searchTranscripts":
 		send(actionSearchTranscripts(msg))
 	case "convert":
-		actionConvert(msg)
+		actionConvertAny(msg)
+	case "cvSession":
+		actionCvSession(msg)
 	case "diagnostics":
 		send(actionDiagnostics(msg))
 	case "version":

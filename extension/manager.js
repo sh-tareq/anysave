@@ -140,7 +140,7 @@ function showTab(name) {
   view = name;
   for (const v of VIEWS) $(v).hidden = v !== name;
   history.replaceState(null, "", "#" + name);
-  if (name === "convert") fillDownloadsPicker();
+  if (name === "convert") window.fillDownloadsPicker?.(); // convert.js may still be loading
   if (name === "transcripts") searchTranscripts($("txQuery").value);
   highlightNav();
 }
@@ -384,7 +384,7 @@ async function act(j, a) {
     case "verify": return verifyChecksum(j);
     case "transcribe": openTranscribeJobId = openTranscribeJobId === j.id ? null : j.id; return renderDetail(true);
     case "refresh": openRefreshJobId = openRefreshJobId === j.id ? null : j.id; return renderDetail(true);
-    case "convert": showTab("convert"); return choose({ path: j.file, name: j.fileName || j.title });
+    case "convert": showTab("convert"); return window.choose?.({ path: j.file, name: j.fileName || j.title });
     case "embedSubs": case "burnSubs": {
       const name = String(j.url).split(/[\\/]/).pop();
       const r = await send({ type: "subs", video: j.url, srt: j.file, lang: j.lang, mode: a === "embedSubs" ? "embed" : "burn", name });
@@ -986,101 +986,7 @@ $("addDlg").addEventListener("keydown", (e) => {
   if (!$("dlgStart").disabled) $("addDlg").close("ok");
 });
 
-// ---------- converter ----------
-let picked = null; // { path, name, duration }
-const opts = { format: "mp4", height: "", targetMb: "" };
-
-function parseTime(s) {
-  s = String(s || "").trim();
-  if (!s || /^end$/i.test(s)) return null;
-  const parts = s.split(":").map(Number);
-  if (parts.some(isNaN)) return NaN;
-  return parts.reduce((acc, v) => acc * 60 + v, 0);
-}
-function fmt(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; }
-
-function choose(p) {
-  picked = p;
-  // Files from the download list don't carry their length; "Under N MB" needs it.
-  if (!p.duration && p.path) {
-    send({ type: "fileInfo", path: p.path }).then((r) => {
-      if (picked === p && r?.ok) { p.duration = r.duration || 0; p.size = p.size || r.size; choose(p); }
-    });
-  }
-  $("picked").classList.remove("muted");
-  $("picked").textContent = p.name + (p.size ? ` · ${size(p.size)}` : "") + (p.duration ? ` · ${fmt(p.duration)}` : "");
-  $("duration").textContent = p.duration ? `Length ${fmt(p.duration)}` : "";
-  $("convertOptions").hidden = false;
-  $("convertMsg").hidden = true;
-  const isAudio = /^(mp3|m4a|aac|wav|flac|ogg|opus)$/.test(extOf(p.name));
-  if (isAudio && !["mp3", "m4a", "wav", "opus"].includes(opts.format)) setOpt("format", "mp3");
-  updateLabel();
-}
-
-$("pickBtn").onclick = async () => {
-  $("pickBtn").disabled = true; $("pickBtn").textContent = "Choose in the window that opened…";
-  const res = await send({ type: "pickFile" });
-  $("pickBtn").disabled = false; $("pickBtn").textContent = "Choose from computer…";
-  if (res?.ok) choose({ path: res.path, name: res.name, size: res.size, duration: res.duration });
-  else if (!res?.cancelled) showConvertMsg(res?.hostMissing ? "Helper app not found. Re-run the AnySave installer." : (res?.error || "Couldn't open the file"), true);
-};
-
-function fillDownloadsPicker() {
-  const sel = $("fromDownloads");
-  const media = Object.values(jobs).filter((j) => j.status === "done" && j.file && ["Videos", "Music", "Converted"].includes(category(j)))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  sel.innerHTML = '<option value="">…or pick one of your downloads</option>' +
-    media.map((j) => `<option value="${esc(j.id)}">${esc(j.fileName || j.title)}</option>`).join("");
-}
-$("fromDownloads").onchange = (e) => {
-  const j = jobs[e.target.value];
-  if (j) choose({ path: j.file, name: j.fileName || j.title, size: j.totalBytes });
-};
-
-function setOpt(group, v) {
-  opts[group] = v;
-  document.querySelectorAll(`.chips[data-group="${group}"] .chip`).forEach((c) => c.classList.toggle("active", c.dataset.v === v));
-  const audio = ["mp3", "m4a", "wav", "opus"].includes(opts.format);
-  $("sizeCard").hidden = audio;
-  $("targetBox").hidden = opts.format === "gif";
-  updateLabel();
-}
-document.querySelectorAll(".chips[data-group] .chip").forEach((c) =>
-  c.addEventListener("click", () => setOpt(c.closest(".chips").dataset.group, c.dataset.v)));
-["trimStart", "trimEnd", "removeAudio"].forEach((id) => $(id).addEventListener("input", updateLabel));
-
-function spec() {
-  const audio = ["mp3", "m4a", "wav", "opus"].includes(opts.format);
-  const s = { format: opts.format };
-  if (!audio && opts.height) s.height = Number(opts.height);
-  if (!audio && opts.format !== "gif" && opts.targetMb) s.targetMb = Number(opts.targetMb);
-  const st = parseTime($("trimStart").value), en = parseTime($("trimEnd").value);
-  if (st) s.startSec = st;
-  if (en != null) s.endSec = en;
-  if (!audio && $("removeAudio").checked) s.removeAudio = true;
-  return s;
-}
-function updateLabel() {
-  const s = spec();
-  const parts = [s.format.toUpperCase(), s.height && `${s.height}p`, s.targetMb && `under ${s.targetMb} MB`,
-    (s.startSec || s.endSec != null) && `${fmt(s.startSec || 0)}–${s.endSec != null ? fmt(s.endSec) : "end"}`,
-    s.removeAudio && "no sound"].filter(Boolean);
-  $("convertBtn").textContent = "Convert · " + parts.join(" · ");
-}
-function showConvertMsg(text, err) {
-  const m = $("convertMsg"); m.hidden = false; m.className = "msg" + (err ? " err" : ""); m.textContent = text;
-}
-
-$("convertBtn").onclick = async () => {
-  if (!picked) return;
-  const s = spec();
-  if (Number.isNaN(s.startSec) || Number.isNaN(s.endSec)) return showConvertMsg("Trim times look wrong. Use minutes:seconds, e.g. 1:30.", true);
-  if (s.targetMb && !picked.duration) return showConvertMsg("Can't target a file size: the file's length is unknown.", true);
-  const res = await send({ type: "convert", path: picked.path, name: picked.name, spec: s });
-  if (!res?.ok) return showConvertMsg(res?.error || "Couldn't start the conversion", true);
-  showConvertMsg("Converting… Follow the progress in Downloads.");
-  setTimeout(() => { filter = "all"; showTab("downloads"); render(); }, 1200);
-};
+// The converter lives in convert.js.
 
 // ---------- live updates ----------
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1404,7 +1310,6 @@ document.addEventListener("drop", (e) => {
   jobs = (await chrome.storage.local.get("jobs")).jobs || {};
   applySettingsUI(settings);
   markSeen();
-  updateLabel();
   const h = location.hash.slice(1);
   if (h === "schedule") { showTab("settings"); $("scheduleCard").scrollIntoView(); }
   else showTab(VIEWS.includes(h) ? h : "downloads");

@@ -280,11 +280,13 @@ async function startSubs({ video, srt, lang, mode, name, id }) {
   return id;
 }
 
-async function startConvert({ path, name, spec, id }) {
+async function startConvert({ path, paths, name, spec, id, label }) {
   id = id || newId();
-  await updateJob(id, { kind: "convert", url: path, title: name, spec, status: "starting", percent: 0, error: null,
-    qualityLabel: specLabel(spec) });
-  runNative(id, { action: "convert", path, spec });
+  paths = Array.isArray(paths) ? paths.filter((p) => typeof p === "string").slice(0, 500) : [];
+  if (!path) path = paths[0];
+  await updateJob(id, { kind: "convert", url: path, paths, title: name, spec, status: "starting", percent: 0, error: null,
+    qualityLabel: String(label || specLabel(spec || {})).slice(0, 120) });
+  runNative(id, { action: "convert", path, paths, spec });
   return id;
 }
 function specLabel(s) {
@@ -836,7 +838,7 @@ async function retry(id) {
   if (!j) return;
   // Retry restarts the same row, so the failed one doesn't stay behind in "Failed".
   if (j.kind === "file") return startFile({ url: j.url, name: j.fileName, title: j.title, id, forceHandler: j.engine === "chrome" ? "chrome" : "anysave", referrer: j.referrer, sha256: j.expectedSha256 });
-  if (j.kind === "convert") return startConvert({ path: j.url, name: j.title, spec: j.spec, id });
+  if (j.kind === "convert") return startConvert({ path: j.url, paths: j.paths, name: j.title, spec: j.spec, id, label: j.qualityLabel });
   if (j.kind === "transcribe") return startTranscribe({ path: j.url, name: j.title, lang: j.lang, id });
   if (j.kind === "subs") return startSubs({ video: j.url, srt: j.srt, lang: j.lang, mode: j.mode, name: j.title, id });
   return startVideo({ ...j, id });

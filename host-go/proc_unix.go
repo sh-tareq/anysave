@@ -56,3 +56,38 @@ end try`
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// pickFiles shows the macOS "choose files" dialog for any kind of file. Returns nil if the user cancels.
+func pickFiles(multi bool) ([]string, error) {
+	many := ""
+	if multi {
+		many = " with multiple selections allowed"
+	}
+	script := `try
+	tell current application
+		activate
+		set picked to (choose file with prompt "Choose files to convert"` + many + `)
+		if class of picked is not list then set picked to {picked}
+		set out to ""
+		repeat with f in picked
+			set out to out & POSIX path of f & linefeed
+		end repeat
+		return out
+	end tell
+on error number -128
+	return ""
+end try`
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			paths = append(paths, l)
+		}
+	}
+	return paths, nil
+}
+
+func hideWindow(cmd *exec.Cmd) {}

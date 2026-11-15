@@ -363,6 +363,12 @@ func (d *daemonServer) checkAuth(r *http.Request) bool {
 }
 
 func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
+	// The Convert page's previews (cv_server.go), with the daemon's own token.
+	if cv, err := newCvServer(d.token); err == nil {
+		mux.Handle("/cv/", cv)
+	} else {
+		logf("convert previews off: %v", err)
+	}
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		if !d.checkAuth(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -488,7 +494,9 @@ func (d *daemonServer) registerRoutes(mux *http.ServeMux) {
 			http.NotFound(w, r)
 			return
 		}
-		if ct := mime.TypeByExtension(filepath.Ext(full)); ct != "" {
+		if strings.HasSuffix(full, ".mjs") { // pdf.js modules must be served as JavaScript
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		} else if ct := mime.TypeByExtension(filepath.Ext(full)); ct != "" {
 			w.Header().Set("Content-Type", ct)
 		}
 		// Always check for a newer copy, so the window never runs an old page after an update.
@@ -1059,6 +1067,13 @@ func (d *daemonServer) startConvertJob(req map[string]any) string {
 	if fmtName == "" {
 		fmtName = "MP4"
 	}
+	label := "→ " + fmtName
+	if l := str(req, "label"); l != "" {
+		label = l
+		if len(label) > 120 {
+			label = label[:120]
+		}
+	}
 
 	d.updateJob(id, map[string]any{
 		"kind":         "convert",
@@ -1066,7 +1081,8 @@ func (d *daemonServer) startConvertJob(req map[string]any) string {
 		"title":        name,
 		"spec":         spec,
 		"site":         "Local file",
-		"qualityLabel": "→ " + fmtName,
+		"qualityLabel": label,
+		"paths":        req["paths"],
 		"status":       "starting",
 		"percent":      0.0,
 		"speed":        "",
@@ -1077,6 +1093,7 @@ func (d *daemonServer) startConvertJob(req map[string]any) string {
 	go d.startDaemonWorker(id, map[string]any{
 		"action": "convert",
 		"path":   path,
+		"paths":  req["paths"],
 		"spec":   spec,
 	})
 	return id
@@ -1330,8 +1347,10 @@ func (d *daemonServer) retryJob(id string) {
 		d.startConvertJob(map[string]any{
 			"id":   id,
 			"path": str(j, "url"),
-			"name": str(j, "title"),
-			"spec": j["spec"],
+			"name":  str(j, "title"),
+			"spec":  j["spec"],
+			"paths": j["paths"],
+			"label": str(j, "qualityLabel"),
 		})
 	case "transcribe":
 		d.startTranscribeJob(map[string]any{"id": id, "path": str(j, "url"), "name": str(j, "title"), "lang": str(j, "lang")})

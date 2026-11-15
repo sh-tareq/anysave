@@ -192,3 +192,39 @@ if ($d.ShowDialog($f) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::U
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// pickFiles shows the Windows "Open" dialog for any kind of file. Returns nil if the user cancels.
+func pickFiles(multi bool) ([]string, error) {
+	m := "$false"
+	if multi {
+		m = "$true"
+	}
+	script := `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = "Choose files to convert"
+$d.Multiselect = ` + m + `
+$d.Filter = "All files|*.*"
+$f = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+if ($d.ShowDialog($f) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; $d.FileNames | ForEach-Object { Write-Output $_ } }`
+	c := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	out, err := c.Output()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			paths = append(paths, l)
+		}
+	}
+	return paths, nil
+}
+
+func hideWindow(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= createNoWindow
+}

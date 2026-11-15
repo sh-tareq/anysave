@@ -101,63 +101,48 @@
   </section>
 
   <!-- ================= Convert ================= -->
-  <section id="convert" class="view page" hidden>
-    <h2>Convert a video or song</h2>
-    <p class="lead">Change the format, shrink it to a size, or cut out a part. Everything happens on this computer.</p>
-    <div class="card">
-      <h3>1. Choose a file</h3>
-      <div id="picked" class="picked muted">No file chosen</div>
+  <section id="convert" class="view page cv" hidden>
+    <h2>Convert anything</h2>
+    <p class="lead">Video, music, pictures, PDFs, documents, archives, subtitles and spreadsheets. Everything happens on this computer; nothing is uploaded.</p>
+    <div id="cvDrop" class="cv-drop">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+      <div><b>Drop files here</b> <span class="muted">or</span></div>
       <div class="row">
-        <button id="pickBtn" class="btn">Choose from computer…</button>
-        <select id="fromDownloads"><option value="">…or pick one of your downloads</option></select>
+        <button id="cvPick" class="btn primary">Choose files…</button>
+        <select id="cvFromDl" aria-label="Pick one of your downloads"><option value="">…or one of your downloads</option></select>
+      </div>
+      <div class="muted small">You can choose several files: to join them, merge PDFs, convert many pictures at once or pack them in a ZIP.</div>
+    </div>
+    <div id="cvMain" class="cv-main" hidden>
+      <div class="cv-left">
+        <div class="card">
+          <div class="cv-head"><h3>Files <span id="cvCount" class="muted small"></span></h3>
+            <span class="cv-head-actions"><button id="cvAdd" class="btn small">Add</button><button id="cvClear" class="btn small">Clear all</button></span></div>
+          <ul id="cvFiles" class="cv-files"></ul>
+        </div>
+        <div class="card">
+          <h3>What do you want to do?</h3>
+          <div id="cvTools" class="cv-tools"></div>
+        </div>
+        <div id="cvSettings"></div>
+      </div>
+      <div class="cv-right">
+        <div class="card cv-preview-card">
+          <div class="cv-head"><h3>Preview</h3><span id="cvPrevTabs" class="chips seg" hidden></span></div>
+          <div id="cvPreview" class="cv-preview"></div>
+          <div id="cvPrevNote" class="muted small"></div>
+        </div>
+        <div class="card cv-bar">
+          <div id="cvSummary" class="cv-summary"></div>
+          <div id="cvEstimate" class="muted small"></div>
+          <button id="cvGo" class="btn primary big">Convert</button>
+          <div id="cvProgress" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="cvResult" class="cv-result" hidden></div>
+          <div id="cvMsg" class="msg" hidden></div>
+          <p class="hint">Saved in Downloads/AnySave/Converted. It also shows in your downloads list.</p>
+        </div>
       </div>
     </div>
-
-    <div id="convertOptions" hidden>
-      <div class="card">
-        <h3>2. Convert to</h3>
-        <div class="label">Video</div>
-        <div class="chips" data-group="format">
-          <button class="chip active" data-v="mp4">MP4</button><button class="chip" data-v="webm">WebM</button>
-          <button class="chip" data-v="mkv">MKV</button><button class="chip" data-v="mov">MOV</button><button class="chip" data-v="gif">GIF</button>
-        </div>
-        <div class="label">Audio</div>
-        <div class="chips" data-group="format">
-          <button class="chip" data-v="mp3">MP3</button><button class="chip" data-v="m4a">M4A</button>
-          <button class="chip" data-v="wav">WAV</button><button class="chip" data-v="opus">Opus</button>
-        </div>
-      </div>
-
-      <div class="card" id="sizeCard">
-        <h3>3. Size</h3>
-        <div class="label">Resolution</div>
-        <div class="chips" data-group="height">
-          <button class="chip active" data-v="">Original</button><button class="chip" data-v="1080">1080p</button>
-          <button class="chip" data-v="720">720p</button><button class="chip" data-v="480">480p</button><button class="chip" data-v="360">360p</button>
-        </div>
-        <div id="targetBox">
-          <div class="label">File size</div>
-          <div class="chips" data-group="targetMb">
-            <button class="chip active" data-v="">Normal</button><button class="chip" data-v="10">Under 10 MB</button>
-            <button class="chip" data-v="25">Under 25 MB</button><button class="chip" data-v="50">Under 50 MB</button><button class="chip" data-v="100">Under 100 MB</button>
-          </div>
-          <label class="check"><input type="checkbox" id="removeAudio" /> Remove sound</label>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>4. Trim <span class="muted small">(optional)</span></h3>
-        <div class="row trim">
-          <label>Start <input id="trimStart" placeholder="0:00" /></label>
-          <label>End <input id="trimEnd" placeholder="end" /></label>
-          <span id="duration" class="muted small"></span>
-        </div>
-      </div>
-
-      <button id="convertBtn" class="btn primary big">Convert</button>
-      <p class="hint">Saved in Downloads/AnySave/Converted. Progress shows in Downloads.</p>
-    </div>
-    <div id="convertMsg" class="msg" hidden></div>
   </section>
 
   <!-- ================= Transcripts ================= -->
@@ -395,5 +380,6 @@
 </dialog>
 
 <script src="manager.js"></script>
+<script src="convert.js"></script>
 </body>
 </html>
