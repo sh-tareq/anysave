@@ -181,6 +181,7 @@ class DownloadService : Service() {
             }
             if (!stillWanted(id)) throw Stopped()
             Downloads.update(id) { it.copy(status = JobStatus.SAVING, percent = 100f) }
+            if (file.isDirectory) { saveFolder(id, job, file); return }
             val current = Downloads.get(id) ?: job
             val mime = current.mime?.takeIf { it.contains('/') && it != "application/octet-stream" }
                 ?: FileKinds.mimeFromName(file.name) ?: "application/octet-stream"
@@ -392,25 +393,79 @@ class DownloadService : Service() {
 
     private fun convert(job: Job, dir: File): File {
         val spec = ConvertSpec.fromJson(job.spec)
-        val src = Uri.parse(job.url)
-        val inName = displayName(src) ?: job.title
-        val input = File(dir, "input.${FileKinds.extOf(inName).ifBlank { "mp4" }}")
+        val sources = spec.inputs.ifEmpty { listOf(job.url) }.map { Uri.parse(it) }
         Downloads.update(job.id) { it.copy(eta = "Preparing…") }
-        contentResolver.openInputStream(src)?.use { inp -> input.outputStream().use { inp.copyTo(it) } }
-            ?: throw Exception("Couldn't open the file")
-        val base = safeName(inName.substringBeforeLast('.'))
-        val suffix = listOfNotNull(spec.height?.let { "${it}p" }, spec.targetMb?.let { "${it}MB" },
-            if (spec.startSec != null || spec.endSec != null) "trim" else null).joinToString(" ")
-        val output = File(dir, "$base${if (suffix.isNotEmpty()) " ($suffix)" else ""}.${spec.format}")
+        // Local copies with their real names (tools use the names for the results and to tell file kinds apart).
+        val inDir = File(dir, "in").apply { mkdirs() }
+        val used = mutableSetOf<String>()
+        val inputs = sources.mapIndexed { i, src ->
+            val name = safeName(displayName(src) ?: if (i == 0) job.title else "file ${i + 1}")
+            var n = name; var k = 1
+            while (!used.add(n.lowercase())) n = "${name.substringBeforeLast('.')} (${k++}).${name.substringAfterLast('.', "bin")}"
+            File(inDir, n).also { f ->
+                contentResolver.openInputStream(src)?.use { inp -> f.outputStream().use { inp.copyTo(it) } }
+                    ?: throw ConvertError("Couldn't open ${displayName(src) ?: "the file"}. It may have been moved or deleted.")
+            }
+        }
+        // Passwords are only needed once: don't keep them in the history.
+        if (spec.opts.containsKey("password")) Downloads.update(job.id) { it.copy(spec = spec.copy(opts = spec.opts - "password").toJson()) }
         val started = System.currentTimeMillis()
-        Converter.convert(this, job.id, input, output, spec) { pct ->
+        val progress: (Float) -> Unit = { pct ->
             val secs = (System.currentTimeMillis() - started) / 1000.0
             val eta = if (pct > 2) humanEta((secs / pct * (100 - pct)).toString()) else "?"
             Downloads.update(job.id) { it.copy(percent = pct, eta = eta, speed = "") }
             Downloads.get(job.id)?.let { notifyProgress(it, "Converting · ${pct.toInt()}%", pct, false) }
         }
+        if (spec.tool != ConvertTools.MEDIA) {
+            PdfTools.setup(this)
+            return ConvertTools.run(this, job.id, spec, inputs, dir, progress)
+        }
+        val input = inputs.first()
+        val base = safeName(input.nameWithoutExtension)
+        val suffix = listOfNotNull(spec.height?.let { "${it}p" }, spec.targetMb?.takeIf { it > 0 }?.let { "${it}MB" },
+            spec.opt("aspect")?.let { ConvertSpec.ASPECT_LABELS[it] },
+            spec.opt("speed")?.takeIf { it != "1" }?.let { "${it}x" },
+            if (spec.startSec != null || spec.endSec != null) "trim" else null).joinToString(" ")
+        var output = File(dir, "$base${if (suffix.isNotEmpty()) " ($suffix)" else ""}.${spec.format}")
+        if (output.name.equals(input.name, ignoreCase = true)) output = File(dir, "$base (converted).${spec.format}")
+        // The phone's video chip first (much faster); FFmpeg when it can't.
+        val fast = FastVideo.canDo(spec) && FastVideo.convert(this, job.id, input, output, spec, progress)
+        if (!fast) Converter.convert(this, job.id, input, output, spec, progress)
         input.delete()
         return output
+    }
+
+    /** Several results (pages, pictures, an unpacked archive): saved in their own folder, sub-folders kept. */
+    private suspend fun saveFolder(id: String, job: Job, folder: File) {
+        val files = folder.walkTopDown().filter { it.isFile }.sortedBy { it.path }.toList()
+        val base = (if (Settings.sortIntoFolders.value) FileKinds.Category.CONVERTED.folder + "/" else "") + safeName(folder.name)
+        // Never mix two results in one folder: "bundle", then "bundle (2)"...
+        val root = (sequenceOf(base) + (2..99).asSequence().map { "$base ($it)" }).firstOrNull { !folderTaken(it) } ?: "$base ${System.currentTimeMillis()}"
+        var first: Uri? = null; var firstMime: String? = null
+        files.forEachIndexed { i, f ->
+            if (!stillWanted(id)) throw Stopped()
+            val sub = f.parentFile!!.relativeTo(folder).path.takeIf { it.isNotEmpty() }?.let { "$root/$it" } ?: root
+            val mime = FileKinds.mimeFromName(f.name) ?: "application/octet-stream"
+            val uri = saveToDownloads(f, mime, sub)
+            if (first == null) { first = uri; firstMime = mime }
+            Downloads.update(id) { it.copy(eta = "Saving ${i + 1} of ${files.size}") }
+        }
+        val total = files.sumOf { it.length() }
+        Downloads.update(id) {
+            it.copy(status = JobStatus.DONE, uri = first, mime = firstMime, fileName = "${folder.name} (${files.size} files)",
+                sizeBytes = total, percent = 100f, speed = "", eta = "")
+        }
+        doneNotification(Downloads.get(id) ?: job, first!!, firstMime ?: "application/octet-stream")
+    }
+
+    /** Is there already something in Downloads/AnySave/[rel]? */
+    private fun folderTaken(rel: String): Boolean {
+        if (File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AnySave/$rel").exists()) return true
+        if (Build.VERSION.SDK_INT < 29) return false
+        return runCatching {
+            contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.MediaColumns._ID),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?", arrayOf("${Environment.DIRECTORY_DOWNLOADS}/AnySave/$rel/%"), null)?.use { it.count > 0 } ?: false
+        }.getOrDefault(false)
     }
 
     private fun displayName(uri: Uri): String? = runCatching {
@@ -567,6 +622,7 @@ class DownloadService : Service() {
             code == 429 -> "The site is limiting downloads (error 429). Tap Retry in a few minutes."
             code != null && code >= 500 -> "The site isn't working right now (error $code). Tap Retry later."
             msg.startsWith("Connection closed before") -> "The connection kept dropping. Tap Retry to continue."
+            msg.contains("OutOfMemoryError") -> "The phone ran out of memory. Try fewer or smaller files."
             else -> msg
         }
     }
@@ -729,10 +785,15 @@ class DownloadService : Service() {
             return true
         }
 
-        fun startConvert(ctx: Context, input: Uri, name: String, spec: ConvertSpec) {
+        fun startConvert(ctx: Context, input: Uri, name: String, spec: ConvertSpec) =
+            startConvert(ctx, listOf(input), name, spec)
+
+        /** One conversion job for [inputs] (several files for merging, packing, pictures to PDF…). */
+        fun startConvert(ctx: Context, inputs: List<Uri>, name: String, spec: ConvertSpec) {
+            val full = spec.copy(inputs = inputs.map { it.toString() })
             start(ctx, Job(
-                id = newId(), url = input.toString(), title = name, kind = JobKind.CONVERT,
-                spec = spec.toJson(), qualityLabel = spec.label(), audioOnly = spec.isAudio,
+                id = newId(), url = inputs.first().toString(), title = name, kind = JobKind.CONVERT,
+                spec = full.toJson(), qualityLabel = full.label(), audioOnly = full.isAudio,
             ))
         }
 

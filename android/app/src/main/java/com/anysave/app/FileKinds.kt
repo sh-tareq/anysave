@@ -91,8 +91,21 @@ object FileKinds {
         return Regex("""filename="?([^";]+)"?""", RegexOption.IGNORE_CASE).find(d)?.groupValues?.get(1)
     }
 
-    fun mimeFromName(name: String?): String? =
-        MimeTypeMap.getSingleton().getMimeTypeFromExtension(extOf(name))
+    fun mimeFromName(name: String?): String? = extOf(name).let { ext ->
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: extraMimes[ext]
+            ?: if (name.orEmpty().lowercase().endsWith(".tar.gz")) "application/gzip" else null
+    }
+
+    /** Types older phones don't know (results of the converter). */
+    private val extraMimes = mapOf(
+        "avif" to "image/avif", "heic" to "image/heic", "ico" to "image/x-icon", "tif" to "image/tiff", "tiff" to "image/tiff",
+        "srt" to "application/x-subrip", "vtt" to "text/vtt", "ass" to "text/x-ssa", "lrc" to "text/plain",
+        "md" to "text/markdown", "epub" to "application/epub+zip", "7z" to "application/x-7z-compressed",
+        "gz" to "application/gzip", "xz" to "application/x-xz", "bz2" to "application/x-bzip2",
+        "xlsx" to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv" to "text/csv", "tsv" to "text/tab-separated-values", "json" to "application/json",
+        "opus" to "audio/opus", "flac" to "audio/flac", "mkv" to "video/x-matroska",
+    )
 
     /** Honest name for direct file downloads; some servers block fake browser names. */
     const val FILE_USER_AGENT = "AnySave/1.0 (Android; +https://github.com/sh-tareq/anysave)"

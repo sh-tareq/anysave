@@ -14,7 +14,7 @@ val keyProps = Properties().apply {
 
 android {
     namespace = "com.anysave.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.anysave.app"
@@ -98,4 +98,17 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
+
+    // Converter: fast video with the phone's hardware encoder (Media3), PDF tools (PDFBox port, Apache 2.0),
+    // archives (7z/TAR/GZ/BZ2/XZ with Commons Compress + XZ for Java, public domain).
+    val media3 = "1.8.0"
+    implementation("androidx.media3:media3-transformer:$media3")
+    implementation("androidx.media3:media3-effect:$media3")
+    implementation("androidx.media3:media3-common:$media3")
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.10")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }
