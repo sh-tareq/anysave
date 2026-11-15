@@ -63,6 +63,10 @@ function categoryOf(name, kind, audioOnly) {
   if (/^(apk|xapk|exe|msi|pkg|deb|rpm|appimage)$/.test(e)) return "Apps";
   return "Other";
 }
+// decodeURIComponent throws on a broken "%" code (e.g. "report%ZZ.pdf"); keep the raw text then.
+function decodeName(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
 function safeFile(s) {
   return String(s || "download").replace(/[\\/:*?"<>|\n\r\t~]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || "download";
 }
@@ -390,7 +394,7 @@ async function chromeDownloadSettled(downloadId, ms = 20000) {
 
 async function startChromeFile({ url, name, title, id, qualityLabel = "Chrome" }) {
   id = id || newId();
-  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const fileName = safeFile(name || decodeName(new URL(url).pathname.split("/").pop() || "") || "download");
   const folder = categoryOf(fileName, "file");
   await updateJob(id, { kind: "file", engine: "chrome", url, title: title || fileName, fileName, site: siteLabel(url),
     status: "starting", percent: 0, qualityLabel, error: null, downloadId: null, doneBytes: 0, totalBytes: 0 });
@@ -407,7 +411,7 @@ async function startChromeFile({ url, name, title, id, qualityLabel = "Chrome" }
 
 async function startFastFile({ url, name, title, id, referrer, sha256 }) {
   id = id || newId();
-  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const fileName = safeFile(name || decodeName(new URL(url).pathname.split("/").pop() || "") || "download");
   const folder = categoryOf(fileName, "file");
   const settings = await getSettings();
   const cookies = settings.loginFastSites ? await cookiesFor(url) : "";
@@ -597,7 +601,7 @@ async function checkAfterDoneAction(completedId) {
 
 async function startFile({ url, name, title, id, forceHandler, referrer, sha256, queue }) {
   id = id || newId();
-  const fileName = safeFile(name || decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || "download");
+  const fileName = safeFile(name || decodeName(new URL(url).pathname.split("/").pop() || "") || "download");
   const settings = await getSettings();
   const clickChoice = consumeClickModifier(url);
   let handler = forceHandler || clickChoice || settings.downloadHandler || "anysave";
@@ -870,8 +874,15 @@ async function agreed() {
 }
 const GATED = new Set(["info", "probe", "playlist", "download", "directDownload", "file", "addLink", "convert", "crawl", "transcribe", "subs"]);
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+// Scripts running inside web pages (video button, click keys) may only ask for these; everything else
+// (opening files, settings, the job list…) is for AnySave's own pages.
+const FROM_PAGES = new Set(["info", "download", "directDownload", "clickModifier"]);
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
+    const ownPage = !sender.tab || String(sender.url || "").startsWith(chrome.runtime.getURL(""));
+    if (!msg || typeof msg !== "object") return { ok: false, error: "Bad request" };
+    if (!ownPage && !FROM_PAGES.has(msg.type)) return { ok: false, error: "Not allowed from a web page" };
     if (GATED.has(msg.type) && !(await agreed())) {
       return { ok: false, error: "Please accept the legal notice in the AnySave popup first." };
     }
@@ -1101,7 +1112,7 @@ async function adoptDownload(item) {
   if (clickChoice === "chrome") return; // Alt-click: leave this one untouched to Chrome
 
   const settings = await getSettings();
-  const name = (item.filename || "").split(/[\\/]/).pop() || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
+  const name = (item.filename || "").split(/[\\/]/).pop() || decodeName(url.split(/[?#]/)[0].split("/").pop() || "") || "download";
 
   if (clickChoice !== "anysave") {
     if (isHostExcluded(url, settings.excludedSites)) return;

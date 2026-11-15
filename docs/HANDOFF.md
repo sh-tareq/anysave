@@ -294,6 +294,22 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 16 Nov 2026 (audit of the Mac app + extension): all helper Go tests and `go vet` (Mac + Windows) pass; all 13
+  Puppeteer test files pass (74 checks, 1 skipped: YouTube hover previews don't play headless); real YouTube info,
+  playlist and downloads through the helper; the desktop page (manager served by `--daemon`) loads, refuses requests
+  without the key, and downloads a pasted link. Checked and fine: daemon only on 127.0.0.1 with a random key;
+  open/reveal limited to Downloads/AnySave; `--` before every link given to yt-dlp; archive unpacking refuses `../`
+  and symlinks; text from websites is escaped everywhere it's shown. Fixed: (1) scripts inside web pages may only
+  send `info`, `download`, `directDownload`, `clickModifier` to the background (`FROM_PAGES` in background.js);
+  (2) a link with a broken `%` code in its name (`report%ZZ.pdf`) crashed the start (`decodeName`); (3) vertical
+  videos were labelled by their long side ("1920p" for a Full-HD Short; the "1080p" entry was really 608×1080): now
+  named by the short side (`shortSide`), and the saved file's ` 640p` tag is renamed to match (`shortSideName`);
+  (4) an empty hidden `.anysave-parts` folder stayed after every download (`dropParts`); (5) switching "Watch the
+  clipboard" on downloaded a link copied while it was off; the clipboard is no longer read at startup or while off;
+  (6) Mac app window: outside links loaded inside the app and `target=_blank` links (Settings → Legal) did nothing;
+  both now open in the default browser (`main.swift`). Tests: `host-go/options_test.go`; scratch `pt/t14.js`,
+  `pt/desk.js`. **Not tested:** the Mac app window itself by a person (only compiled; its page was tested in Chrome),
+  the clipboard change (would touch the real clipboard), the page-script restriction from a real web page.
 - 16 Nov 2026 (later): **Voice Lab on Android.** The "Captions" bottom tab is now **"Studio"** with three tabs:
   Captions, **Clean up** and **Read aloud**. Clean up: choose a video or audio (or pick from downloads), strength
   Strong (DPDFNet 48 kHz) / Light (GTCRN 16 kHz) / Basic (FFmpeg only), "Even out the loudness", a 10-second

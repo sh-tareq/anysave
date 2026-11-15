@@ -571,7 +571,7 @@ func actionFastDownload(msg map[string]any) {
 
 	if handover {
 		if liveServed.Load() {
-			_ = os.RemoveAll(destDir)
+			dropParts(destDir)
 			send(map[string]any{
 				"type":       "done",
 				"file":       filepath.Join(outDir, res.FileName),
@@ -598,7 +598,7 @@ func actionFastDownload(msg map[string]any) {
 			served := <-h.Done
 			h.Close()
 			if served {
-				_ = os.RemoveAll(destDir)
+				dropParts(destDir)
 				send(map[string]any{
 					"type":       "done",
 					"file":       filepath.Join(outDir, res.FileName),
@@ -618,7 +618,7 @@ func actionFastDownload(msg map[string]any) {
 			finalPath = filepath.Join(outDir, res.FileName)
 		}
 		_ = os.Rename(res.FilePath, finalPath)
-		_ = os.RemoveAll(destDir)
+		dropParts(destDir)
 		res.FilePath = finalPath
 	}
 

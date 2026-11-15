@@ -902,7 +902,7 @@ async function askAndAdd(url, forceHandler) {
   if (seq !== dlgSeq) return;
   if (p?.hostMissing || p?.helperOutdated) { $("addDlg").close(); return startChoice(fallback()); }
   if (p?.ok && p.isFile) {
-    const name = p.name || decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "download");
+    const name = p.name || ((x) => { try { return decodeURIComponent(x); } catch { return x; } })(url.split(/[?#]/)[0].split("/").pop() || "download");
     const cat = category({ fileName: name });
     $("dlgLoading").hidden = true;
     $("dlgTitle").textContent = name;

@@ -1363,14 +1363,11 @@ func (d *daemonServer) retryJob(id string) {
 }
 
 func (d *daemonServer) watchClipboardLoop() {
-	// Initialize lastClip with current clipboard so we don't immediately download whatever was already on the clipboard at startup.
-	if initClip := strings.TrimSpace(readClipboardText()); initClip != "" {
-		d.mu.Lock()
-		d.lastClip = initClip
-		d.mu.Unlock()
-	}
 	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
+	// The first look after starting (or after switching it on) only notes what's already there,
+	// so a link copied earlier is never downloaded. The clipboard isn't read while this is off.
+	wasOn := false
 	for {
 		select {
 		case <-d.quitCh:
@@ -1381,9 +1378,18 @@ func (d *daemonServer) watchClipboardLoop() {
 			prev := d.lastClip
 			d.mu.Unlock()
 			if !watchOn {
+				wasOn = false // not read while off
 				continue
 			}
 			clip := strings.TrimSpace(readClipboardText())
+			if !wasOn {
+				// Just switched on: a link copied while it was off isn't downloaded, only new copies are.
+				wasOn = true
+				d.mu.Lock()
+				d.lastClip = clip
+				d.mu.Unlock()
+				continue
+			}
 			if clip == "" || clip == prev {
 				continue
 			}

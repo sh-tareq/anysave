@@ -237,6 +237,7 @@ func friendlyError(msg string) string {
 
 type format struct {
 	Height         *float64 `json:"height"`
+	Width          *float64 `json:"width"`
 	Vcodec         string   `json:"vcodec"`
 	Acodec         string   `json:"acodec"`
 	Filesize       *float64 `json:"filesize"`
@@ -319,6 +320,20 @@ func audioSize(formats []format) int64 {
 	return best
 }
 
+// shortSide names a height the usual way: a vertical 1080×1920 video is "1080p", not "1920p".
+func shortSide(formats []format, h int) int {
+	w := 0
+	for _, f := range formats {
+		if hasV(f) && int(*f.Height) == h && f.Width != nil && int(*f.Width) > w {
+			w = int(*f.Width)
+		}
+	}
+	if w > 0 && w < h {
+		return w
+	}
+	return h
+}
+
 func buildOptions(formats []format, hasFfmpeg bool) []option {
 	var opts []option
 	if hasFfmpeg {
@@ -349,7 +364,7 @@ func buildOptions(formats []format, hasFfmpeg bool) []option {
 				suffix = " (VP9/AV1)"
 			}
 			opts = append(opts, option{
-				Label:  fmt.Sprintf("%dp MP4%s", h, suffix),
+				Label:  fmt.Sprintf("%dp MP4%s", shortSide(formats, h), suffix),
 				Format: fmt.Sprintf("bv*[height<=%d]+ba/b[height<=%d]", h, h),
 				Sort:   h264Sort,
 				Size:   sizeFor(formats, h, avc[h]),
@@ -369,7 +384,7 @@ func buildOptions(formats []format, hasFfmpeg bool) []option {
 		opts = append(opts, option{Label: "Best single-file quality", Format: "b", Size: sizeFor(formats, hs[0], false)})
 	}
 	for _, h := range hs {
-		opts = append(opts, option{Label: fmt.Sprintf("%dp", h), Format: fmt.Sprintf("b[height<=%d]", h), Size: sizeFor(formats, h, false)})
+		opts = append(opts, option{Label: fmt.Sprintf("%dp", shortSide(formats, h)), Format: fmt.Sprintf("b[height<=%d]", h), Size: sizeFor(formats, h, false)})
 	}
 	return append(opts, option{Label: "Audio only (M4A)", Format: "ba[ext=m4a]/ba/b", AudioOnly: true, Size: audioSize(formats)})
 }
@@ -627,20 +642,21 @@ func actionDownload(msg map[string]any) {
 	case paused.Load() && err != nil:
 		send(map[string]any{"type": "paused"})
 	case cancelled.Load() && err != nil:
-		os.RemoveAll(partsDir)
+		dropParts(partsDir)
 		fail("Cancelled")
 	case err == nil:
-		os.RemoveAll(partsDir)
+		dropParts(partsDir)
 		var file any
 		if finalFile != "" {
+			finalFile = shortSideName(finalFile)
 			file = finalFile
 		}
 		send(map[string]any{"type": "done", "file": file})
 	case finalFile != "" && isFile(finalFile):
 		// The video itself was saved; only an extra (subtitles, cover art) failed.
 		logf("download finished with a non-fatal error: %v", err)
-		os.RemoveAll(partsDir)
-		send(map[string]any{"type": "done", "file": finalFile})
+		dropParts(partsDir)
+		send(map[string]any{"type": "done", "file": shortSideName(finalFile)})
 	default:
 		fail(lastError(errText))
 	}
@@ -657,6 +673,41 @@ func jobKey(msg map[string]any) string {
 }
 
 // pruneParts removes pieces of downloads that were left unfinished for over a week.
+var videoDimsRe = regexp.MustCompile(`Video: .*?, (\d{2,5})x(\d{2,5})`)
+var heightTagRe = regexp.MustCompile(` (\d{3,4})p(\.[A-Za-z0-9]+)$`)
+
+// shortSideName renames "… 640p.mp4" to "… 360p.mp4" when the video is vertical (360×640), so the
+// name matches the quality list, which names vertical videos by their short side.
+func shortSideName(path string) string {
+	m := heightTagRe.FindStringSubmatch(path)
+	ff := findTool("ffmpeg")
+	if m == nil || ff == "" {
+		return path
+	}
+	out, _ := command(ff, "-hide_banner", "-i", path).CombinedOutput()
+	d := videoDimsRe.FindStringSubmatch(string(out))
+	if d == nil {
+		return path
+	}
+	w, _ := strconv.Atoi(d[1])
+	h, _ := strconv.Atoi(d[2])
+	if w <= 0 || w >= h || strconv.Itoa(h) != m[1] {
+		return path
+	}
+	renamed := strings.TrimSuffix(path, m[0]) + fmt.Sprintf(" %dp%s", w, m[2])
+	if exists(renamed) || os.Rename(path, renamed) != nil {
+		return path
+	}
+	return renamed
+}
+
+// dropParts removes one download's unfinished pieces, and the hidden .anysave-parts folder too
+// once nothing else is in it (os.Remove leaves a folder that still has files).
+func dropParts(partsDir string) {
+	_ = os.RemoveAll(partsDir)
+	_ = os.Remove(filepath.Dir(partsDir))
+}
+
 func pruneParts(dir string) {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {

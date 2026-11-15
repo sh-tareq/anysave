@@ -65,9 +65,31 @@ extension AppDelegate: WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
     }
 
     // A link the page wants saved (Export list) becomes a download with a Save dialog.
+    // Anything that isn't AnySave's own page (a website, a file) opens in the user's browser or app,
+    // so the window always stays AnySave.
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+        if navigationAction.shouldPerformDownload { decisionHandler(.download); return }
+        if let u = navigationAction.request.url, navigationAction.targetFrame?.isMainFrame != false, !isOwnPage(u) {
+            if ["http", "https", "mailto"].contains(u.scheme ?? "") { NSWorkspace.shared.open(u) }
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    // A link meant for a new window (target="_blank", e.g. Legal) opens in the browser.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let u = navigationAction.request.url, ["http", "https", "mailto"].contains(u.scheme ?? "") {
+            NSWorkspace.shared.open(u)
+        }
+        return nil
+    }
+
+    private func isOwnPage(_ u: URL) -> Bool {
+        if u.scheme == "about" || u.scheme == "blob" || u.scheme == "data" { return true }
+        return u.scheme == "http" && u.host == "127.0.0.1"
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

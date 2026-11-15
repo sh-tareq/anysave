@@ -555,7 +555,7 @@ function collectPageDownloadLinks() {
     if (!/^https?:$/i.test(u.protocol)) return;
     const href = u.href;
     if (seen.has(href)) return;
-    const pathName = decodeURIComponent(u.pathname.split("/").pop() || "");
+    const pathName = ((x) => { try { return decodeURIComponent(x); } catch { return x; } })(u.pathname.split("/").pop() || "");
     const extMatch = pathName.match(/\.([a-z0-9]{1,6})$/i);
     const ext = extMatch ? extMatch[1].toUpperCase() : (badge || "");
     if (!ext && !badge) return;
