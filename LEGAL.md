@@ -54,6 +54,8 @@ All trademarks belong to their owners.
 - If you log in to a site (Android) or tick "Use my Chrome login" (desktop), the login cookies stay **on your device**.
   They are sent only to that same website. On desktop they are written to a temporary file that is deleted as soon as
   the download finishes.
+- Voice Lab downloads its engine and voices once, when first used (from GitHub and Hugging Face). Your recordings
+  and text never leave your computer.
 - AnySave connects to GitHub to download and update yt-dlp. The desktop installer also downloads ffmpeg
   (Mac: ffmpeg.martin-riedl.de, Windows: GitHub).
 
@@ -81,6 +83,12 @@ AnySave is built on these open-source projects:
 | PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
 | whisper.cpp and the Whisper models | MIT | desktop (transcription, captions) |
 | Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper (caption fonts; licences in `host-go/fonts/licences`) |
+| sherpa-onnx (k2-fsa) and ONNX Runtime (Microsoft) | Apache-2.0 / MIT | desktop Voice Lab (downloaded on first use) |
+| Kokoro-82M v1.0 voices (hexgrad), sherpa-onnx int8 build | Apache-2.0 | desktop Voice Lab, read aloud |
+| Piper voice bn_BD "google" medium (rhasspy) | MIT (Piper); trained on Google's Bengali speech data, OpenSLR 37, CC BY-SA 4.0, and the CMU Indic voices (Carnegie Mellon University, Language Technologies Institute, © 2009-2017) | desktop Voice Lab, Bangla read aloud |
+| eSpeak NG pronunciation data | GPL-3.0 | desktop Voice Lab (read aloud) |
+| DPDFNet (Ceva) | Apache-2.0 | desktop Voice Lab, strong clean-up |
+| GTCRN | MIT | desktop Voice Lab, light clean-up |
 
 Because the Android app includes youtubedl-android (GPL-3.0), **the AnySave Android app is distributed under the
 GNU General Public License v3.0**. You may get its complete source code from the author, and you may use, study,

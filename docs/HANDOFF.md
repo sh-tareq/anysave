@@ -294,6 +294,26 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026 (night): **Voice Lab** (Chrome extension + Mac app, `extension/voice.js`, helper `host-go/voice.go`).
+  Two tabs. *Clean up a recording*: Strong (DPDFNet-2 48 kHz), Light (GTCRN 16 kHz) or Basic (FFmpeg afftdn, no
+  download), plus "Even out the loudness" (loudnorm −16 LUFS); a 12-second before/after preview from any point; saves
+  the video with clean sound or just the audio (converter tool `voiceclean`). *Read text aloud*: Kokoro v1.0 (English
+  US/UK, Spanish, French, Hindi, Italian, Brazilian Portuguese, Chinese; Japanese left out because it came back as
+  nonsense) and Piper Bangla (16 voices, only fair); speed, Listen (first 400 chars or the selection), open/drop a
+  TXT/SRT/VTT, save MP3/M4A/WAV (converter tool `speak`, no input file). The engine is sherpa-onnx 1.13.8's two CLI tools,
+  **not bundled**: engine and each model "pack" download on first use into `<models>/voice/<pack>/` with pinned
+  SHA-256s, a 60-second stall limit, and a `.ready` marker; Piper's model is turned into a sherpa-onnx one in Go
+  (ONNX metadata appended as protobuf field 14, tokens.txt from `phoneme_id_map`). Long text is read in ~600-character
+  pieces (sentence ends; pauses between paragraphs); long recordings are cleaned in 5-minute pieces.
+  Windows uses the win-x64 MT build (no VC++ runtime needed) but is **untested**; Intel Mac uses osx-x64 (untested).
+  Voice cloning and dubbing are not built (cloning only ever with a consent step).
+  Tested: `TestVoiceLabForReal` (`ANYSAVE_VOICE_TEST=1`, real downloads into a scratch HOME): every pack downloaded,
+  checked and unpacked; English/Spanish/Bangla saved as MP3/M4A/WAV; a noisy video cleaned three ways (noise floor
+  −32 dB → −83 strong, −64 light, −53 basic; whisper heard the cleaned speech word for word; length kept). The whole page
+  in Chrome for Testing and through the daemon (app mode): in-page download, previews (0.3–1.8 s), saves, Listen,
+  SRT→text, reload keeps text. Hugging Face's CDN dropped Go connections for a few minutes during testing, hence the
+  retries and stall limit. Not tested: the real Mac app window, Windows, an Intel Mac.
+
 - 15 Nov 2026 (evening): **Captions page** (Chrome extension + Mac app, `extension/captions.js`, helper
   `host-go/cv_captions.go`). Drop/choose a video (or "Edit captions" on a finished video or transcript) → Make captions
   (the offline speech engine; `transcribe` now also asks whisper for `-ojf` and keeps per-word times in

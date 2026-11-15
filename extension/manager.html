@@ -45,6 +45,7 @@
     <div class="sh">Tools</div>
     <button class="nav" data-view="convert"><span class="ni" data-i="convert"></span>Convert</button>
     <button class="nav" data-view="captions"><span class="ni" data-i="captions"></span>Captions</button>
+    <button class="nav" data-view="voice"><span class="ni" data-i="voice"></span>Voice Lab</button>
     <button class="nav" data-view="transcripts"><span class="ni" data-i="transcripts"></span>Transcripts</button>
     <button class="nav" data-view="grab"><span class="ni" data-i="grab"></span>Grab files from a site</button>
     <button class="nav" data-view="settings"><span class="ni" data-i="settings"></span>Settings</button>
@@ -203,6 +204,82 @@
           </div>
           <div id="capList" class="cap-list"></div>
           <p class="hint">Click a line to jump there. <kbd>Enter</kbd> splits a line where the cursor is, <kbd>⌫</kbd> at the start joins it to the line above, <kbd>Space</kbd> plays (outside the text), <kbd>⌘Z</kbd>/<kbd>Ctrl+Z</kbd> undoes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="voice" class="view page cv vl" hidden>
+    <h2>Voice Lab</h2>
+    <p class="lead">Clean up a voice recording, or have text read aloud and saved as audio. Everything happens on this computer; nothing is uploaded.</p>
+    <div class="chips seg vl-tabs" role="tablist">
+      <button class="chip active" data-vltab="clean" role="tab">Clean up a recording</button>
+      <button class="chip" data-vltab="speak" role="tab">Read text aloud</button>
+    </div>
+    <div id="vlMsg" class="msg" hidden></div>
+
+    <div id="vlClean" class="vl-pane">
+      <div id="vlDrop" class="cv-drop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5.3-3a5.3 5.3 0 0 1-10.6 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-1.7z"/></svg>
+        <div><b>Drop a recording or video here</b> <span class="muted">or</span></div>
+        <div class="row">
+          <button id="vlPick" class="btn primary">Choose a file…</button>
+          <select id="vlFromDl" aria-label="Pick one of your downloads"><option value="">…or one of your downloads</option></select>
+        </div>
+        <div class="muted small">Takes out background noise such as hiss, hum, fans and traffic, and evens out the loudness.</div>
+      </div>
+      <div id="vlFile" class="vl-main" hidden>
+        <div class="card">
+          <div class="cv-head"><h3 id="vlName" class="cap-name"></h3><button id="vlClose" class="btn small">Close</button></div>
+          <div class="vl-row"><span class="vl-label">How much</span><div id="vlStrength" class="vl-options"></div></div>
+          <label class="small chk"><input type="checkbox" id="vlLevel" checked /> Even out the loudness</label>
+          <div id="vlNeed" class="vl-need" hidden></div>
+        </div>
+        <div class="card">
+          <h3>Listen before you save</h3>
+          <div class="vl-row"><span class="vl-label">From</span><input id="vlAt" type="range" min="0" max="0" step="1" value="0" aria-label="Where the preview starts" /><span id="vlAtText" class="muted small vl-at"></span>
+            <button id="vlTry" class="btn">Make a 12-second preview</button></div>
+          <div id="vlAB" class="vl-ab" hidden>
+            <div><span class="vl-label">Before</span><audio id="vlBefore" controls preload="auto"></audio></div>
+            <div><span class="vl-label">After</span><audio id="vlAfter" controls preload="auto"></audio></div>
+          </div>
+          <div id="vlTryProg" class="muted small" hidden><span class="spin"></span> Making the preview…</div>
+        </div>
+        <div class="card">
+          <div class="vl-row"><span class="vl-label">Save as</span><select id="vlFormat"></select>
+            <button id="vlGo" class="btn primary big">Clean and save</button></div>
+          <div id="vlProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="vlResult" class="cv-result" hidden></div>
+          <p class="hint">Saved in Downloads/AnySave/Converted. The original file is not changed.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="vlSpeak" class="vl-pane" hidden>
+      <div class="vl-main">
+        <div class="card">
+          <div class="vl-row">
+            <label class="small">Language <select id="vlLang"></select></label>
+            <label class="small">Voice <select id="vlVoice"></select></label>
+            <label class="small vl-speed">Speed <input id="vlSpeed" type="range" min="0.7" max="1.5" step="0.05" value="1" /><span id="vlSpeedText">1.0×</span></label>
+          </div>
+          <div id="vlVoiceNeed" class="vl-need" hidden></div>
+        </div>
+        <div class="card">
+          <div class="cv-head"><h3>Text</h3>
+            <div class="cv-head-actions"><button id="vlOpenText" class="btn small" title="A text or subtitle file (TXT, SRT, VTT)">Open a text file…</button><button id="vlClear" class="btn small">Clear</button></div></div>
+          <textarea id="vlText" class="vl-text" placeholder="Type or paste text here, or drop a text or subtitle file." spellcheck="true"></textarea>
+          <div class="vl-row"><span id="vlCount" class="muted small"></span>
+            <button id="vlListen" class="btn" title="Hear the start (or the selected words) in this voice">▶ Listen</button>
+            <audio id="vlSay" hidden></audio></div>
+        </div>
+        <div class="card">
+          <div class="vl-row"><span class="vl-label">Save as</span><select id="vlSpeakFormat">
+              <option value="mp3">MP3 (plays everywhere)</option><option value="m4a">M4A</option><option value="wav">WAV (for editing)</option></select>
+            <button id="vlSpeakGo" class="btn primary big">Save as audio</button></div>
+          <div id="vlSpeakProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="vlSpeakResult" class="cv-result" hidden></div>
+          <p class="hint">Saved in Downloads/AnySave/Converted. Voices come from free, open models; the Bangla voices are still basic.</p>
         </div>
       </div>
     </div>
@@ -445,5 +522,6 @@
 <script src="manager.js"></script>
 <script src="convert.js"></script>
 <script src="captions.js"></script>
+<script src="voice.js"></script>
 </body>
 </html>

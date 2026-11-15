@@ -168,7 +168,12 @@ func andMore(paths []string) string {
 // cvRun runs spec on paths and puts the result (a file, or a folder when there are several) in outDir.
 // progress gets 0–100. A cancelled ctx stops the work and removes what was half made.
 func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, progress func(float64)) (result string, err error) {
-	if len(paths) == 0 {
+	return cvRunStaged(ctx, paths, spec, outDir, progress, nil)
+}
+
+// cvRunStaged is cvRun that also says what it's doing now ("Downloading…", "Removing noise"…).
+func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string, progress func(float64), stage func(string)) (result string, err error) {
+	if len(paths) == 0 && spec.Tool != cvSpeak {
 		return "", cvError("Choose a file first.")
 	}
 	for _, p := range paths {
@@ -192,8 +197,11 @@ func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, prog
 	}
 	defer os.RemoveAll(work)
 
-	j := &cvJob{ctx: ctx, spec: spec, work: work, progress: progress}
-	first := paths[0]
+	j := &cvJob{ctx: ctx, spec: spec, work: work, progress: progress, stageFn: stage}
+	first := ""
+	if len(paths) > 0 {
+		first = paths[0]
+	}
 	base := baseNoExt(first)
 	format := strings.ToLower(spec.Format)
 	var made string // what to delete if it fails
@@ -285,6 +293,27 @@ func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, prog
 		}
 		out := file(baseNoExt(video)+" (captions)", "mp4")
 		return out, j.burnCaptions(video, ass, out)
+	case cvSpeak:
+		if format != "wav" && format != "m4a" {
+			format = "mp3"
+		}
+		out := file(speakName(spec.Opts["text"]), format)
+		return out, j.speakJob(out, format)
+	case cvVoiceClean:
+		if len(paths) > 1 {
+			dir := folder(andMore(paths) + " (clean voice)")
+			for i, p := range paths {
+				sub := j.sub(float64(i)/float64(len(paths))*100, 100/float64(len(paths)))
+				f := cleanOutput(p, format)
+				if err := sub.voiceCleanJob(p, uniquePath(dir, baseNoExt(p)+" (clean voice)", f), f); err != nil {
+					return "", err
+				}
+			}
+			return dir, nil
+		}
+		f := cleanOutput(first, format)
+		out := file(base+" (clean voice)", f)
+		return out, j.voiceCleanJob(first, out, f)
 	case cvImage:
 		if format == "" {
 			format = "jpg"
@@ -407,6 +436,14 @@ type cvJob struct {
 	spec     cvSpec
 	work     string
 	progress func(float64)
+	stageFn  func(string)
+}
+
+// stage says what the job is doing now, for the progress line.
+func (j *cvJob) stage(s string) {
+	if j.stageFn != nil {
+		j.stageFn(s)
+	}
 }
 
 func (j *cvJob) check() error {
@@ -1058,6 +1095,9 @@ func actionConvertAny(msg map[string]any) {
 	}()
 	began := time.Now()
 	last := time.Time{}
+	label := "Converting"
+	var labelMu sync.Mutex
+	stage := func(s string) { labelMu.Lock(); label = s; labelMu.Unlock(); last = time.Time{} }
 	progress := func(p float64) {
 		if time.Since(last) < 250*time.Millisecond && p < 100 {
 			return
@@ -1067,9 +1107,12 @@ func actionConvertAny(msg map[string]any) {
 		if p > 2 && p < 100 {
 			eta = humanETA(strconv.FormatFloat(time.Since(began).Seconds()/p*(100-p), 'f', 0, 64))
 		}
-		send(map[string]any{"type": "progress", "percent": math.Min(99, float64(int(p*10))/10), "speed": "Converting", "eta": eta})
+		labelMu.Lock()
+		l := label
+		labelMu.Unlock()
+		send(map[string]any{"type": "progress", "percent": math.Min(99, float64(int(p*10))/10), "speed": l, "eta": eta})
 	}
-	res, err := cvRun(ctx, paths, spec, filepath.Join(downloadDir, "Converted"), progress)
+	res, err := cvRunStaged(ctx, paths, spec, filepath.Join(downloadDir, "Converted"), progress, stage)
 	if err != nil {
 		var ce cvError
 		msg := err.Error()

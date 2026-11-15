@@ -500,3 +500,32 @@ select, .trim input, .crawl-form input, .crawl-bar input[type="text"], .grid3 in
   .cap-main { grid-template-columns: minmax(0, 1fr); }
   .cap-left { position: static; }
 }
+
+/* ---------- Voice Lab ---------- */
+.vl-tabs { display: inline-flex; margin: 0 0 14px; }
+.vl-main { max-width: 860px; }
+.vl-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 6px 0; }
+.vl-row label { display: inline-flex; align-items: center; gap: 6px; }
+.vl-label { font-size: 12px; font-weight: 600; color: var(--muted); min-width: 64px; }
+.vl-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.vl-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 12px; min-width: 150px; cursor: pointer; color: var(--fg); }
+.vl-opt small { color: var(--muted); font-size: 11.5px; }
+.vl-opt:hover { background: var(--hover); }
+.vl-opt.on { border-color: var(--brand); background: var(--brand-soft); }
+.vl-opt.on b { color: var(--brand); }
+.vl-need { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.vl-need .cv-progress { margin: 0; flex: 1; min-width: 220px; }
+.vl-need .err { color: var(--err); }
+#vlAt { flex: 1; min-width: 160px; }
+.vl-at { min-width: 92px; }
+.vl-ab { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.vl-ab > div { display: flex; flex-direction: column; gap: 4px; }
+.vl-ab audio, .vl-result-audio { width: 100%; }
+.vl-result-audio { margin: 8px 0; }
+.vl-text { width: 100%; box-sizing: border-box; min-height: 220px; resize: vertical; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.55; background: var(--bg); color: var(--fg); }
+.vl-text:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+.vl-row #vlCount { flex: 1; }
+.vl-speed input { width: 120px; }
+#vlSpeedText { min-width: 40px; font-variant-numeric: tabular-nums; }
+.vl.dragging { outline: 2px dashed var(--brand); outline-offset: -6px; border-radius: 14px; }
+@media (max-width: 640px) { .vl-ab { grid-template-columns: 1fr; } .vl-opt { min-width: 0; flex: 1; } }

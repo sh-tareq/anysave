@@ -272,6 +272,8 @@ func (s *cvServer) op(ctx context.Context, req map[string]any) map[string]any {
 			}
 		}
 		return map[string]any{"ok": true, "files": files}
+	case "voices", "voiceGet", "voiceSay", "voiceClean":
+		return s.voiceOp(ctx, req)
 	case "allow":
 		// Files from AnySave's own downloads list (they're inside its folder anyway).
 		p, ok := s.readable(str(req, "path"))

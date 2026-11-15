@@ -49,6 +49,7 @@ const P = {
   open: "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+  voice: "M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5.3-3a5.3 5.3 0 0 1-10.6 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-1.7z",
   captions: "M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V6h14v12zM7 15h4v-2H7v2zm6 0h4v-2h-4v2zm-6-4h10V9H7v2z",
   text: "M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z",
   cc: "M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z",
@@ -135,7 +136,7 @@ const needsLogin = (j) => j.status === "error" && j.kind === "video" && IN_EXTEN
   /log ?in|sign ?in|cookies|private|members|age|confirm your|not available|unavailable|registered users/i.test(j.error || "");
 
 // ---------- views ----------
-const VIEWS = ["downloads", "convert", "captions", "transcripts", "grab", "settings"];
+const VIEWS = ["downloads", "convert", "captions", "voice", "transcripts", "grab", "settings"];
 function showTab(name) {
   if (!VIEWS.includes(name)) name = "downloads";
   view = name;
@@ -143,6 +144,7 @@ function showTab(name) {
   history.replaceState(null, "", "#" + name);
   if (name === "convert") window.fillDownloadsPicker?.(); // convert.js may still be loading
   if (name === "captions") { window.fillCaptionsPicker?.(); window.AnySaveCv?.session().catch(() => {}); }
+  if (name === "voice") window.showVoiceLab?.();
   if (name === "transcripts") searchTranscripts($("txQuery").value);
   highlightNav();
 }
@@ -388,6 +390,7 @@ async function act(j, a) {
     case "refresh": openRefreshJobId = openRefreshJobId === j.id ? null : j.id; return renderDetail(true);
     case "convert": showTab("convert"); return window.choose?.({ path: j.file, name: j.fileName || j.title });
     case "captions": return window.openCaptions?.(j.kind === "transcribe" && j.url ? j.url : j.file);
+    case "voice": return window.openVoiceLab?.(j.file);
     case "embedSubs": case "burnSubs": {
       const name = String(j.url).split(/[\\/]/).pop();
       const r = await send({ type: "subs", video: j.url, srt: j.file, lang: j.lang, mode: a === "embedSubs" ? "embed" : "burn", name });
@@ -508,6 +511,7 @@ function renderDetail(force) {
       buttons += B("transcribe", "text", "Transcribe", "Transcribe: turn the speech into text and subtitles");
       buttons += B("convert", "convert", "Convert");
       if (cat === "Videos") buttons += B("captions", "captions", "Edit captions", "Make, fix and style captions, then save them or draw them on the video");
+      buttons += B("voice", "voice", "Clean up voice", "Take out background noise and even out the loudness (Voice Lab)");
     }
     if (j.kind !== "transcribe") buttons += B("verify", "verify", "Check SHA-256", "Check against a SHA-256 checksum");
   }
