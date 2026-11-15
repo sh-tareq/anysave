@@ -40,6 +40,7 @@
     lang: "", cues: [], orig: null, chunk: "",
     style: loadJSON("anysave.cap.style") || { ...STYLE0 },
     job: null, burnJob: null, sel: -1, follow: true,
+    dub: null, // {from, to, model, voice, keep, lines: [{s, e, src, t}]}
   };
   let undo = [], redo = [];
 
@@ -51,7 +52,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveJSON("anysave.cap.style", st.style);
-      if (st.video && st.cues.length) saveJSON(projectKey(), { lang: st.lang, cues: st.cues, orig: st.orig, chunk: st.chunk, style: st.style, at: Date.now() });
+      if (st.video && st.cues.length) saveJSON(projectKey(), { lang: st.lang, cues: st.cues, orig: st.orig, chunk: st.chunk, style: st.style, dub: st.dub, at: Date.now() });
     }, 400);
   }
 
@@ -151,11 +152,11 @@
     if (!VIDEO_EXT.test(file.name || file.path)) return msg("Captions need a video. For the words of a song or recording, use Transcribe in the downloads list.", true);
     stopJobWatch();
     st.video = { path: file.path, name: file.name || file.path.split(/[\\/]/).pop(), size: file.size || 0 };
-    st.cues = []; st.orig = null; st.chunk = ""; st.lang = ""; st.sel = -1; undo = []; redo = [];
+    st.cues = []; st.orig = null; st.chunk = ""; st.lang = ""; st.sel = -1; st.dub = null; undo = []; redo = [];
     $("capResult").hidden = true;
     const saved = loadJSON(projectKey());
     if (saved?.cues?.length) {
-      Object.assign(st, { lang: saved.lang, cues: saved.cues, orig: saved.orig, chunk: saved.chunk || "" });
+      Object.assign(st, { lang: saved.lang, cues: saved.cues, orig: saved.orig, chunk: saved.chunk || "", dub: saved.dub || null });
       if (saved.style) st.style = { ...STYLE0, ...saved.style };
       msg("Your edits from last time were brought back.");
     }
@@ -294,6 +295,7 @@
     drawMake();
     $("capEditor").hidden = !st.cues.length;
     $("capExport").hidden = !st.cues.length;
+    drawDub();
     drawStyle();
     drawList();
     drawTimeline();
@@ -682,6 +684,216 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     };
   }
 
+  // ---------- dubbing: translate the captions, then speak them over the video (dub.go) ----------
+  // Languages the voices speak, as the helper's voice list names them.
+  let vstate = null;
+  async function voiceState() {
+    try { const r = await cv().op("voices"); if (r.ok) vstate = r; } catch { /* drawn again later */ }
+    return vstate;
+  }
+  // Whole sentences with their times, from the words (the lines may be cut into a few words each).
+  function sentences() {
+    const all = st.cues.flatMap((c) => words(c).map((w) => ({ ...w })));
+    const out = [];
+    let cur = [];
+    const flush = () => { if (cur.length) out.push({ s: cur[0].s, e: cur[cur.length - 1].e, src: cur.map((w) => w.t).join(" ") }); cur = []; };
+    for (const w of all) {
+      const prev = cur[cur.length - 1];
+      if (prev && (w.s - prev.e > 1.0 || /[.?!।。？！]["'”’)]*$/.test(prev.t) || cur.map((x) => x.t).join(" ").length > 220)) flush();
+      cur.push(w);
+    }
+    flush();
+    return out;
+  }
+  const langLabel = (c) => (vstate?.langs?.[c]) || c;
+  function dubNeed(ids) {
+    const p = vstate?.packs || {};
+    const missing = ids.filter((id) => p[id] && !p[id].ready);
+    return missing.reduce((n, id) => n + (p[id].size || 0), 0);
+  }
+  const gb = (n) => n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GB" : Math.max(1, Math.round(n / (1 << 20))) + " MB";
+  async function drawDub() {
+    const box = $("capDub");
+    box.hidden = !st.cues.length;
+    if (box.hidden) return;
+    if (!vstate) { box.innerHTML = "<h3>Dub into another language</h3><p class=\"muted small\">Loading…</p>"; await voiceState(); }
+    if (!vstate) { box.innerHTML = "<h3>Dub into another language</h3><p class=\"muted small\">The AnySave helper isn't answering.</p>"; return; }
+    const d = st.dub || {};
+    const langs = Object.entries(vstate.langs).filter(([c]) => c !== "no").sort((a, b) => a[1].localeCompare(b[1]));
+    const voiced = new Set(vstate.voices.map((v) => v.code));
+    const from = d.from || (st.lang && vstate.langs[st.lang] ? st.lang : "en");
+    const to = d.to || (from === "bn" ? "en" : from === "en" ? "bn" : "en");
+    const model = d.model || "large";
+    const opt = (c, n, sel) => `<option value="${h(c)}"${c === sel ? " selected" : ""}>${h(n)}${voiced.has(c) ? "" : " (subtitles only)"}</option>`;
+    const need = dubNeed(["llama", model === "small" ? "mt-small" : "mt-large"]);
+    const busy = st.dubJob && jobs[st.dubJob] && !["done", "error", "cancelled"].includes(jobs[st.dubJob].status);
+    let html = `<h3>Dub into another language</h3>
+      <div class="row cap-dub-row">
+        <label class="small">From <select id="dubFrom">${langs.map(([c, n]) => `<option value="${h(c)}"${c === from ? " selected" : ""}>${h(n)}</option>`).join("")}</select></label>
+        <label class="small">Into <select id="dubTo">${langs.map(([c, n]) => opt(c, n, to)).join("")}</select></label>
+        <label class="small">Translation <select id="dubModel"><option value="large"${model === "large" ? " selected" : ""}>Better</option><option value="small"${model === "small" ? " selected" : ""}>Smaller download</option></select></label>
+        <button id="dubGo" class="btn${d.lines ? "" : " primary"}"${busy ? " disabled" : ""}>${d.lines ? "Translate again" : "Translate"}</button>
+      </div>
+      <div class="cv-progress" id="dubTrProg" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+      <p class="hint">${need ? `The first time, the translation engine and model are downloaded once (${gb(need)}). ` : ""}Runs on this computer; nothing is uploaded. Check the translation before you make the video: machines make mistakes.</p>`;
+    if (d.lines) {
+      const vs = vstate.voices.filter((v) => v.code === d.to);
+      const voice = vs.find((v) => v.id === d.voice) || vs[0];
+      html += `<div class="cap-dub-lines" id="dubLines">${d.lines.map((l, i) => `<div class="cap-dub-line" data-i="${i}">
+          <div class="cap-dub-src"><button class="btn small cap-dub-time" data-seek="${i}" title="Jump there">${clock(l.s, false)}</button><span class="muted small">${h(l.src)}</span></div>
+          <div class="cap-dub-tr"><textarea class="cv-input" data-tr="${i}" rows="1" dir="auto">${h(l.t)}</textarea>${vs.length ? `<button class="btn small" data-say="${i}" title="Hear this line">▶</button>` : ""}</div></div>`).join("")}</div>`;
+      if (vs.length) {
+        const vneed = dubNeed(["engine", voice.pack]);
+        html += `<div class="row cap-dub-row">
+          <label class="small">Voice <select id="dubVoice">${vs.map((v) => `<option value="${h(v.id)}"${v.id === voice.id ? " selected" : ""}>${h(v.name)}${v.gender ? ` (${v.gender})` : ""}${vs.some((x) => x.lang !== v.lang) ? ` · ${h(v.lang)}` : ""}</option>`).join("")}</select></label>
+          <label class="small">Original sound <select id="dubKeep"><option value="quiet"${d.keep !== "half" && d.keep !== "off" ? " selected" : ""}>Quietly underneath</option><option value="half"${d.keep === "half" ? " selected" : ""}>Half</option><option value="off"${d.keep === "off" ? " selected" : ""}>Off</option></select></label>
+        </div>
+        <button id="dubMake" class="btn primary big"${busy ? " disabled" : ""}>Make dubbed video</button>
+        ${vneed ? `<p class="hint">The voice is downloaded once first (${gb(vneed)}).</p>` : ""}`;
+      } else {
+        html += `<p class="hint">There's no voice for ${h(langLabel(d.to))} yet, so this can't be spoken. You can still save the translated subtitles.</p>`;
+      }
+      html += `<div class="cv-progress" id="dubProg" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+        <div class="cap-saveas"><button class="btn small" id="dubSrt">Save translated subtitles (SRT)</button></div>
+        <div id="dubResult" class="cv-result" hidden></div>
+        <audio id="dubSay" hidden></audio>`;
+    }
+    box.innerHTML = html;
+    box.querySelectorAll("textarea[data-tr]").forEach(fit);
+    if (busy) watchDub(st.dubJob, st.dubKind);
+  }
+  const fit = (t) => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
+  function dubSettings() {
+    const d = st.dub || (st.dub = {});
+    d.from = $("dubFrom").value; d.to = d.lines ? d.to : $("dubTo").value; d.model = $("dubModel").value;
+    if ($("dubVoice")) d.voice = $("dubVoice").value;
+    if ($("dubKeep")) d.keep = $("dubKeep").value;
+    persist();
+  }
+  async function translate() {
+    msg("");
+    const from = $("dubFrom").value, to = $("dubTo").value;
+    if (from === to) return msg("Pick a different language to translate into.", true);
+    const lines = sentences();
+    if (!lines.length) return msg("There are no captions to translate.", true);
+    st.dub = { ...(st.dub || {}), from, to, model: $("dubModel").value, lines: null };
+    const base = st.video.name.replace(/\.[^.]+$/, "");
+    try {
+      const r = await send({ type: "convert", paths: [], name: `${base} → ${langLabel(to)}`, label: `Translate · ${langLabel(from)} → ${langLabel(to)}`,
+        spec: { tool: "translate", format: "srt", opts: { lines: JSON.stringify(lines.map((l) => ({ s: l.s, e: l.e, t: l.src }))), from, to, model: st.dub.model, name: base } } });
+      if (!r?.ok) throw new Error(r?.error || "Couldn't start.");
+      st.dubJob = r.id; st.dubKind = "translate"; st.dubSrc = lines;
+      $("dubGo").disabled = true;
+      watchDub(r.id, "translate");
+    } catch (e) { msg(e.message, true); }
+  }
+  // A small SRT reader for the translated file (same order as the sentences sent).
+  function parseSrt(text) {
+    return text.replace(/^﻿/, "").replace(/\r/g, "").split(/\n\s*\n/).map((b) => b.split("\n"))
+      .filter((l) => l.some((x) => x.includes("-->"))).map((l) => l.slice(l.findIndex((x) => x.includes("-->")) + 1).join(" ").trim());
+  }
+  let dubTimer = null;
+  function watchDub(id, kind) {
+    clearInterval(dubTimer);
+    const prog = () => $(kind === "translate" ? "dubTrProg" : "dubProg");
+    dubTimer = setInterval(async () => {
+      const j = jobs[id], p = prog();
+      if (!j || !p) return;
+      p.hidden = false;
+      if (j.status === "done") {
+        clearInterval(dubTimer); st.dubJob = null; p.hidden = true;
+        if (kind === "translate") {
+          try {
+            const a = await cv().op("allow", { path: j.file });
+            const text = await fetch(cv().fileURL(a.file.path)).then((x) => x.text());
+            const tr = parseSrt(text), src = st.dubSrc || sentences();
+            st.dub.lines = src.map((l, i) => ({ s: l.s, e: l.e, src: l.src, t: tr[i] || "" }));
+            persist(); await voiceState(); drawDub();
+            msg(`Translated into ${langLabel(st.dub.to)}. Check the lines, then make the dubbed video.`);
+          } catch (e) { msg(e.message, true); drawDub(); }
+        } else {
+          drawDub();
+          const r = $("dubResult");
+          r.hidden = false;
+          r.innerHTML = `<div class="cv-done">✓ Saved: <b>${h(String(j.file).split(/[\\/]/).pop())}</b></div><div class="row">
+            <button class="btn" data-a="open">Open</button><button class="btn" data-a="reveal">Show in folder</button></div>`;
+          r.onclick = (e) => {
+            const a = e.target.closest("[data-a]")?.dataset.a;
+            if (a === "open") send({ type: "open", id: j.id }).then((x) => { if (x && !x.ok) toast(x.error || "Couldn't open it.", true); });
+            if (a === "reveal") send({ type: "reveal", id: j.id });
+          };
+        }
+      } else if (j.status === "error" || j.status === "cancelled") {
+        clearInterval(dubTimer); st.dubJob = null; p.hidden = true; drawDub();
+        msg(j.status === "cancelled" ? "Stopped." : (j.error || "Something went wrong."), j.status === "error");
+      } else {
+        p.querySelector("i").style.width = Math.max(2, j.percent || 0) + "%";
+        p.querySelector("span").textContent = `${j.speed || "Working"} · ${Math.round(j.percent || 0)}%${j.eta && j.eta !== "?" ? ` · ${j.eta} left` : ""}`;
+      }
+    }, 400);
+  }
+  const dubSrt = () => st.dub.lines.map((l, i) => `${i + 1}\n${srtTime(l.s)} --> ${srtTime(l.e)}\n${l.t.replace(/\s*\n\s*/g, " ").trim()}\n`).join("\n");
+  async function makeDub() {
+    msg("");
+    dubSettings();
+    if (!st.dub.lines.some((l) => l.t.trim())) return msg("There are no translated lines to speak.", true);
+    try {
+      const a = await cv().op("captionsSave", { path: st.video.path, format: "srt", text: dubSrt(), temp: true });
+      if (!a.ok) throw new Error(a.error);
+      const r = await send({ type: "convert", path: st.video.path, paths: [st.video.path, a.file], name: st.video.name,
+        label: `${langLabel(st.dub.to)} dub`, spec: { tool: "dub", format: "", opts: { voice: st.dub.voice, keep: st.dub.keep || "quiet", lang: st.dub.to } } });
+      if (!r?.ok) throw new Error(r?.error || "Couldn't start.");
+      st.dubJob = r.id; st.dubKind = "dub";
+      $("dubMake").disabled = true; $("dubResult").hidden = true;
+      watchDub(r.id, "dub");
+    } catch (e) { msg(e.message, true); }
+  }
+  async function sayLine(i, btn) {
+    dubSettings();
+    const l = st.dub.lines[i];
+    if (!l.t.trim()) return;
+    btn.disabled = true;
+    try {
+      const r = await cv().op("voiceSay", { voice: st.dub.voice || $("dubVoice")?.value, text: l.t, speed: 1 });
+      if (!r.ok) {
+        if (r.need) { await cv().op("voiceGet", { pack: r.need }); return msg("Downloading the voice first. Try ▶ again in a minute.", false); }
+        return msg(r.error, true);
+      }
+      const au = $("dubSay");
+      au.src = (await cv().session()).base + r.url;
+      au.play().catch(() => {});
+    } catch (e) { msg(e.message, true); }
+    finally { btn.disabled = false; }
+  }
+  const dubBox = $("capDub");
+  dubBox.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.id === "dubGo") return translate();
+    if (t.id === "dubMake") return makeDub();
+    if (t.id === "dubSrt") {
+      dubSettings();
+      return cv().op("captionsSave", { path: st.video.path, format: "srt", text: dubSrt(), lang: st.dub.to })
+        .then((r) => r.ok ? result(r.file, null) : msg(r.error, true)).catch((x) => msg(x.message, true));
+    }
+    const say = t.closest("[data-say]");
+    if (say) return sayLine(+say.dataset.say, say);
+    const sk = t.closest("[data-seek]");
+    if (sk) seek(st.dub.lines[+sk.dataset.seek].s);
+  });
+  dubBox.addEventListener("change", (e) => {
+    if (e.target.id === "dubTo" && st.dub?.lines && e.target.value !== st.dub.to) {
+      st.dub = { ...st.dub, to: e.target.value, lines: null }; // a new language needs a new translation
+      persist(); return drawDub();
+    }
+    if (["dubFrom", "dubModel", "dubVoice", "dubKeep", "dubTo"].includes(e.target.id)) { dubSettings(); if (e.target.id === "dubModel") drawDub(); }
+  });
+  dubBox.addEventListener("input", (e) => {
+    const t = e.target.closest("textarea[data-tr]");
+    if (!t) return;
+    st.dub.lines[+t.dataset.tr].t = t.value;
+    fit(t); persist();
+  });
+
   // ---------- wiring ----------
   const v = $("capVideo");
   v.addEventListener("loadedmetadata", () => {
@@ -776,7 +988,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   });
 
   // For tests and the desktop app: the current captions as files.
-  window.__captions = { st, toAss, toSrt, toVtt };
+  window.__captions = { st, toAss, toSrt, toVtt, sentences, dubSrt };
   requestAnimationFrame(loop);
   if (location.hash === "#captions") { cv()?.session().catch(() => {}); window.fillCaptionsPicker(); }
 })();

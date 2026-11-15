@@ -173,7 +173,7 @@ func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, prog
 
 // cvRunStaged is cvRun that also says what it's doing now ("Downloading…", "Removing noise"…).
 func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string, progress func(float64), stage func(string)) (result string, err error) {
-	if len(paths) == 0 && spec.Tool != cvSpeak {
+	if len(paths) == 0 && spec.Tool != cvSpeak && spec.Tool != cvTranslate {
 		return "", cvError("Choose a file first.")
 	}
 	for _, p := range paths {
@@ -299,6 +299,27 @@ func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string
 		}
 		out := file(speakName(spec.Opts["text"]), format)
 		return out, j.speakJob(out, format)
+	case cvTranslate:
+		name := strings.TrimSpace(spec.opt("name"))
+		if name == "" {
+			name = "Translated"
+		}
+		out := file(name+"."+spec.opt("to"), "srt")
+		return out, j.translateJob(out)
+	case cvDub:
+		var video, srt string
+		for _, p := range paths {
+			if extOf(p) == "srt" {
+				srt = p
+			} else {
+				video = p
+			}
+		}
+		if video == "" || srt == "" {
+			return "", cvError("Choose a video and translate its captions first.")
+		}
+		out := file(baseNoExt(video)+" ("+langName(spec.opt("lang"))+" dub)", dubOutput(video))
+		return out, j.dubJob(video, srt, out)
 	case cvVoiceClean:
 		if len(paths) > 1 {
 			dir := folder(andMore(paths) + " (clean voice)")
@@ -1112,7 +1133,11 @@ func actionConvertAny(msg map[string]any) {
 		labelMu.Unlock()
 		send(map[string]any{"type": "progress", "percent": math.Min(99, float64(int(p*10))/10), "speed": l, "eta": eta})
 	}
-	res, err := cvRunStaged(ctx, paths, spec, filepath.Join(downloadDir, "Converted"), progress, stage)
+	outDir := filepath.Join(downloadDir, "Converted")
+	if spec.Tool == cvTranslate { // the page reads it back; "Save translated subtitles" makes the real file
+		outDir = translateDir()
+	}
+	res, err := cvRunStaged(ctx, paths, spec, outDir, progress, stage)
 	if err != nil {
 		var ce cvError
 		msg := err.Error()

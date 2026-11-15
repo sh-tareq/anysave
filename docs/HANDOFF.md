@@ -294,6 +294,24 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026 (late night): **Dubbing** — a "Dub into another language" card on the Captions page (`extension/captions.js`,
+  helper `host-go/dub.go`). Captions are grouped into sentences (sentence ends, pauses over 1 s, or 220 chars), then
+  **translated offline** by LMT-60 (NiuTrans, Apache-2.0, 60 languages) through llama.cpp's `llama-server` (MIT, build
+  b12413) on 127.0.0.1 with a random port and API key. Two model packs: Better (4B Q4_K_M, 2.7 GB) and Smaller
+  (1.7B Q4_K_M, 1.3 GB); llama.cpp itself is a 12–25 MB pack. All pinned by SHA-256 like the voice packs (`unpack()`
+  now reads .tar.bz2/.tar.gz/.zip). MADLAD was tried and dropped (it skipped words). The owner then edits the lines,
+  hears any line, picks a voice and how loud the original sound stays (quietly underneath / half / off), and makes the
+  dubbed video (converter tool `dub`: each line spoken, sped up to 1.4× if it doesn't fit its slot, placed on one track,
+  mixed with FFmpeg, video copied) or saves the translated SRT. Languages with no voice (e.g. German) say "subtitles
+  only". The translation is written to `$TMPDIR/anysave-translate` (the page may read that folder), so only files the
+  owner asks for land in Converted. Edits are kept with the video's caption project.
+  Tested: `TestDubForReal` (English→Bangla with Piper, English→Spanish with Kokoro; 17 s for both incl. engine start);
+  whisper heard the Spanish dub word for word, the Bangla dub recognisably. The whole card in Chrome for Testing and in
+  app mode: translate (5 s), edit a line, ▶ a line, make the dub (6 s), save SRT (edit kept), reload keeps the lines,
+  German = subtitles only, no page errors. **Not tested:** the in-app *download* of llama.cpp/LMT (this Mac's LuLu
+  firewall blocks every fresh test build, so packs were placed by hand from the same pinned files and unpacked with
+  AnySave's own `unpack`); the Smaller model in the app (tested only in research); the real Mac app window; Windows;
+  an Intel Mac.
 - 15 Nov 2026 (night): **Voice Lab** (Chrome extension + Mac app, `extension/voice.js`, helper `host-go/voice.go`).
   Two tabs. *Clean up a recording*: Strong (DPDFNet-2 48 kHz), Light (GTCRN 16 kHz) or Basic (FFmpeg afftdn, no
   download), plus "Even out the loudness" (loudnorm −16 LUFS); a 12-second before/after preview from any point; saves

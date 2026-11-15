@@ -127,3 +127,91 @@ func TestVoiceLabForReal(t *testing.T) {
 		t.Logf("%s -> %s (%.1fs)", s, filepath.Base(res), probeMedia(res).Duration)
 	}
 }
+
+func TestCleanTranslation(t *testing.T) {
+	for in, want := range map[string]string{
+		" দেখার জন্য ধন্যবাদ। [end of text]": "দেখার জন্য ধন্যবাদ।",
+		"Bengali: হ্যালো":                    "হ্যালো",
+		"Hola.\n\nEnglish: extra":            "Hola.",
+		"line one\nline two":                 "line one line two",
+	} {
+		if got := cleanTranslation(in, "Bengali"); got != want {
+			t.Errorf("%q -> %q, want %q", in, got, want)
+		}
+	}
+	if langName("bn") != "Bengali" || langName("xx") != "XX" {
+		t.Error("langName")
+	}
+}
+
+// TestDubForReal translates and dubs a video with the real engine and models (downloads ~2.8 GB once):
+// ANYSAVE_DUB_TEST=/path/video.mp4 HOME=/scratch/home go test -run DubForReal -v
+func TestDubForReal(t *testing.T) {
+	video := os.Getenv("ANYSAVE_DUB_TEST")
+	if video == "" {
+		t.Skip("set ANYSAVE_DUB_TEST to a short English video")
+	}
+	out := os.Getenv("ANYSAVE_VOICE_OUT")
+	if out == "" {
+		out = t.TempDir()
+	}
+	ctx := context.Background()
+	stage := func(s string) { t.Log(s) }
+	lines := `[{"s":0.05,"e":1.19,"t":"Hello and welcome."},{"s":1.22,"e":3.9,"t":"This short video shows how AnySave makes captions."},{"s":3.9,"e":6.56,"t":"Every word lights up as it is spoken."},{"s":6.56,"e":7.96,"t":"You can fix any mistake."}]`
+	for _, c := range []struct{ to, voice string }{{"bn", "bn0"}, {"es", "k28"}} {
+		srt, err := cvRunStaged(ctx, nil, cvSpec{Tool: cvTranslate, Opts: map[string]string{"lines": lines, "from": "en", "to": c.to, "name": "talk"}}, out, nil, stage)
+		if err != nil {
+			t.Fatalf("translate %s: %v", c.to, err)
+		}
+		b, _ := os.ReadFile(srt)
+		t.Logf("%s:\n%s", filepath.Base(srt), b)
+		res, err := cvRunStaged(ctx, []string{video, srt}, cvSpec{Tool: cvDub, Opts: map[string]string{"voice": c.voice, "lang": c.to}}, out, nil, stage)
+		if err != nil {
+			t.Fatalf("dub %s: %v", c.to, err)
+		}
+		mi := probeMedia(res)
+		t.Logf("%s (%.1fs, video=%v audio=%v)", filepath.Base(res), mi.Duration, mi.HasVideo, mi.HasAudio)
+		if !mi.HasVideo || !mi.HasAudio {
+			t.Error("dubbed video lacks picture or sound")
+		}
+	}
+}
+
+// TestUnpackLlama unpacks a real llama.cpp archive the way the "llama" pack does:
+// ANYSAVE_UNPACK_TEST=/path/llama-bXXXX-bin-macos-arm64.tar.gz ANYSAVE_UNPACK_DEST=/dir go test -run UnpackLlama
+func TestUnpackLlama(t *testing.T) {
+	src := os.Getenv("ANYSAVE_UNPACK_TEST")
+	if src == "" {
+		t.Skip("set ANYSAVE_UNPACK_TEST")
+	}
+	dest := os.Getenv("ANYSAVE_UNPACK_DEST")
+	if dest == "" {
+		dest = t.TempDir()
+	}
+	p := llamaPack()
+	if err := unpack(src, p.Files[0].URL, dest, p.Files[0].Keep); err != nil {
+		t.Fatal(err)
+	}
+	if !isFile(filepath.Join(dest, exe("llama-server"))) {
+		t.Fatal("llama-server missing")
+	}
+	if l, err := os.Readlink(filepath.Join(dest, "libllama.1.dylib")); err != nil || l != "libllama.1.0.0.dylib" {
+		t.Errorf("symlink: %q %v", l, err)
+	}
+	ents, _ := os.ReadDir(dest)
+	t.Logf("%d files", len(ents))
+}
+
+// TestPackDownload fetches one pack for real: ANYSAVE_PACK_TEST=llama HOME=/scratch go test -run PackDownload
+func TestPackDownload(t *testing.T) {
+	id := os.Getenv("ANYSAVE_PACK_TEST")
+	if id == "" {
+		t.Skip("set ANYSAVE_PACK_TEST")
+	}
+	dir, err := ensurePack(context.Background(), id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(dir)
+	t.Logf("%s: %d files", dir, len(ents))
+}

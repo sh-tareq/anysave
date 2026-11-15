@@ -54,8 +54,8 @@ All trademarks belong to their owners.
 - If you log in to a site (Android) or tick "Use my Chrome login" (desktop), the login cookies stay **on your device**.
   They are sent only to that same website. On desktop they are written to a temporary file that is deleted as soon as
   the download finishes.
-- Voice Lab downloads its engine and voices once, when first used (from GitHub and Hugging Face). Your recordings
-  and text never leave your computer.
+- Voice Lab and dubbing download their engines, voices and translation model once, when first used (from GitHub and
+  Hugging Face). Your recordings, text and translations never leave your computer.
 - AnySave connects to GitHub to download and update yt-dlp. The desktop installer also downloads ffmpeg
   (Mac: ffmpeg.martin-riedl.de, Windows: GitHub).
 
@@ -89,6 +89,8 @@ AnySave is built on these open-source projects:
 | eSpeak NG pronunciation data | GPL-3.0 | desktop Voice Lab (read aloud) |
 | DPDFNet (Ceva) | Apache-2.0 | desktop Voice Lab, strong clean-up |
 | GTCRN | MIT | desktop Voice Lab, light clean-up |
+| llama.cpp (ggml-org) | MIT | desktop dubbing, translation (downloaded on first use) |
+| LMT-60 4B / 1.7B translation models (NiuTrans, built on Qwen3 by Alibaba Cloud) | Apache-2.0 | desktop dubbing, translation |
 
 Because the Android app includes youtubedl-android (GPL-3.0), **the AnySave Android app is distributed under the
 GNU General Public License v3.0**. You may get its complete source code from the author, and you may use, study,

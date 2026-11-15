@@ -110,7 +110,8 @@ func (s *cvServer) readable(p string) (string, bool) {
 	if !ok {
 		tmpReal, _ := filepath.EvalSymlinks(s.tmp)
 		dl, _ := filepath.EvalSymlinks(downloadDir)
-		ok = within(abs, tmpReal) || within(abs, s.tmp) || within(abs, dl) || within(abs, downloadDir)
+		trReal, _ := filepath.EvalSymlinks(translateDir())
+		ok = within(abs, tmpReal) || within(abs, s.tmp) || within(abs, dl) || within(abs, downloadDir) || within(abs, trReal)
 	}
 	if !ok || !isFile(abs) {
 		return "", false

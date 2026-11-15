@@ -21,8 +21,10 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/bzip2"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -56,7 +58,7 @@ type voiceFile struct {
 	SHA256 string
 	Size   int64
 	Name   string                    // saved as this inside the pack folder (single files)
-	Keep   func(entry string) string // archives (.tar.bz2): where an entry goes, "" = skip it
+	Keep   func(entry string) string // archives (.tar.bz2, .tar.gz, .zip): where an entry goes, "" = skip it
 }
 
 type voicePack struct {
@@ -264,7 +266,7 @@ func installPack(ctx context.Context, p voicePack, progress func(done int64)) er
 		}
 		before += f.Size
 		if f.Keep != nil {
-			err := untarBz2(dl, tmp, f.Keep)
+			err := unpack(dl, f.URL, tmp, f.Keep)
 			os.Remove(dl)
 			if err != nil {
 				return cvError("Couldn't unpack the " + p.Label + ": " + err.Error())
@@ -307,17 +309,17 @@ func fetchChecked(parent context.Context, client *http.Client, f voiceFile, dest
 	resp, err := client.Do(req)
 	if err != nil {
 		if stalled() {
-			return cvError("The download of the voice files got stuck. Check the internet connection and try again.")
+			return cvError("The download got stuck. Check the internet connection and try again.")
 		}
 		if parent.Err() != nil {
 			return errCancelled
 		}
 		logf("voice: download %s: %v", f.URL, err)
-		return cvError("Couldn't download the voice files. Check the internet connection and try again.")
+		return cvError("Couldn't download the files this needs. Check the internet connection and try again.")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return cvError(fmt.Sprintf("Couldn't download the voice files (the server said %d). Try again later.", resp.StatusCode))
+		return cvError(fmt.Sprintf("Couldn't download the files this needs (the server said %d). Try again later.", resp.StatusCode))
 	}
 	out, err := os.Create(dest)
 	if err != nil {
@@ -350,30 +352,66 @@ func fetchChecked(parent context.Context, client *http.Client, f voiceFile, dest
 		}
 		if rerr != nil {
 			if stalled() {
-				return cvError("The download of the voice files got stuck. Check the internet connection and try again.")
+				return cvError("The download got stuck. Check the internet connection and try again.")
 			}
 			if parent.Err() != nil {
 				return errCancelled
 			}
-			return cvError("The download of the voice files stopped halfway. Try again.")
+			return cvError("The download stopped halfway. Try again.")
 		}
 	}
 	progress(done)
 	if hex.EncodeToString(h.Sum(nil)) != f.SHA256 {
 		logf("voice: checksum mismatch for %s (%d bytes)", f.URL, done)
-		return cvError("The downloaded voice files were damaged or changed, so AnySave didn't use them. Try again.")
+		return cvError("The downloaded files were damaged or changed, so AnySave didn't use them. Try again.")
 	}
 	return nil
 }
 
 // untarBz2 unpacks the entries keep() wants into dir. Nothing can land outside dir.
-func untarBz2(path, dir string, keep func(string) string) error {
+// unpack unpacks the entries keep() wants from a .tar.bz2, .tar.gz or .zip into dir. Nothing can land
+// outside dir; a symbolic link is kept only when it points at a file beside it (libfoo.dylib -> libfoo.1.dylib).
+func unpack(path, url, dir string, keep func(string) string) error {
 	fh, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer fh.Close()
-	tr := tar.NewReader(bzip2.NewReader(fh))
+	if strings.HasSuffix(url, ".zip") {
+		st, err := fh.Stat()
+		if err != nil {
+			return err
+		}
+		zr, err := zip.NewReader(fh, st.Size())
+		if err != nil {
+			return err
+		}
+		for _, zf := range zr.File {
+			if zf.FileInfo().IsDir() {
+				continue
+			}
+			rc, err := zf.Open()
+			if err != nil {
+				return err
+			}
+			err = writePackFile(dir, keep(zf.Name), zf.Mode(), rc)
+			rc.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var r io.Reader = bzip2.NewReader(fh)
+	if strings.HasSuffix(url, ".tar.gz") || strings.HasSuffix(url, ".tgz") {
+		gz, err := gzip.NewReader(fh)
+		if err != nil {
+			return err
+		}
+		defer gz.Close()
+		r = gz
+	}
+	tr := tar.NewReader(r)
 	for {
 		hd, err := tr.Next()
 		if err == io.EOF {
@@ -382,36 +420,55 @@ func untarBz2(path, dir string, keep func(string) string) error {
 		if err != nil {
 			return err
 		}
-		if hd.Typeflag != tar.TypeReg && hd.Typeflag != tar.TypeDir {
-			continue
-		}
 		rel := keep(strings.TrimPrefix(hd.Name, "./"))
-		if rel == "" {
-			continue
-		}
-		dst := filepath.Join(dir, filepath.FromSlash(rel))
-		if !within(dst, dir) {
-			continue
-		}
-		if hd.Typeflag == tar.TypeDir {
-			os.MkdirAll(dst, 0o755)
-			continue
-		}
-		os.MkdirAll(filepath.Dir(dst), 0o755)
-		mode := os.FileMode(0o644)
-		if hd.Mode&0o111 != 0 {
-			mode = 0o755
-		}
-		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(out, tr)
-		out.Close()
-		if err != nil {
-			return err
+		switch hd.Typeflag {
+		case tar.TypeReg:
+			if err := writePackFile(dir, rel, os.FileMode(hd.Mode), tr); err != nil {
+				return err
+			}
+		case tar.TypeDir:
+			if rel != "" && within(filepath.Join(dir, filepath.FromSlash(rel)), dir) {
+				os.MkdirAll(filepath.Join(dir, filepath.FromSlash(rel)), 0o755)
+			}
+		case tar.TypeSymlink:
+			if rel == "" || strings.ContainsAny(hd.Linkname, `/\`) || runtime.GOOS == "windows" {
+				continue
+			}
+			dst := filepath.Join(dir, filepath.FromSlash(rel))
+			if !within(dst, dir) {
+				continue
+			}
+			os.MkdirAll(filepath.Dir(dst), 0o755)
+			os.Remove(dst)
+			if err := os.Symlink(hd.Linkname, dst); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+func writePackFile(dir, rel string, mode os.FileMode, r io.Reader) error {
+	if rel == "" {
+		return nil
+	}
+	dst := filepath.Join(dir, filepath.FromSlash(rel))
+	if !within(dst, dir) {
+		return nil
+	}
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+	perm := os.FileMode(0o644)
+	if mode&0o111 != 0 {
+		perm = 0o755
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, r)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // preparePiper turns a Piper voice into what sherpa-onnx reads: the settings sherpa-onnx wants are
@@ -489,6 +546,7 @@ type ttsVoice struct {
 	Lang   string `json:"lang"`   // shown as a group: "English (US)", "Bangla"...
 	Gender string `json:"gender"` // "woman", "man" or ""
 	Pack   string `json:"pack"`
+	Code   string `json:"code"` // language code: en, es, bn…
 	sid    int
 	code   string // kokoro language
 }
@@ -521,10 +579,10 @@ func ttsVoices() []ttsVoice {
 		}
 		name := n[3:]
 		name = strings.ToUpper(name[:1]) + name[1:]
-		vs = append(vs, ttsVoice{ID: "k" + strconv.Itoa(sid), Name: name, Lang: l[0], Gender: g, Pack: "kokoro", sid: sid, code: l[1]})
+		vs = append(vs, ttsVoice{ID: "k" + strconv.Itoa(sid), Name: name, Lang: l[0], Gender: g, Pack: "kokoro", Code: l[1][:2], sid: sid, code: l[1]})
 	}
 	for i, sid := range banglaSpeakers {
-		vs = append(vs, ttsVoice{ID: "bn" + strconv.Itoa(sid), Name: "Voice " + strconv.Itoa(i+1), Lang: "Bangla", Pack: "bangla", sid: sid})
+		vs = append(vs, ttsVoice{ID: "bn" + strconv.Itoa(sid), Name: "Voice " + strconv.Itoa(i+1), Lang: "Bangla", Pack: "bangla", Code: "bn", sid: sid})
 	}
 	return vs
 }
@@ -541,7 +599,7 @@ func voiceByID(id string) (ttsVoice, bool) {
 // voiceState is what the Voice Lab page shows: which packs are here and the voices.
 func voiceState() map[string]any {
 	packs := map[string]any{}
-	ids := []string{"engine", "clean-strong", "clean-light", "kokoro", "bangla"}
+	ids := []string{"engine", "clean-strong", "clean-light", "kokoro", "bangla", "llama", "mt-large", "mt-small"}
 	voiceMu.Lock()
 	defer voiceMu.Unlock()
 	for _, id := range ids {
@@ -556,7 +614,7 @@ func voiceState() map[string]any {
 		}
 		packs[id] = e
 	}
-	return map[string]any{"ok": true, "packs": packs, "voices": ttsVoices()}
+	return map[string]any{"ok": true, "packs": packs, "voices": ttsVoices(), "langs": lmtLangs}
 }
 
 // ---------- reading aloud ----------

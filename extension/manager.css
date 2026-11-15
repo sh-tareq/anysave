@@ -529,3 +529,14 @@ select, .trim input, .crawl-form input, .crawl-bar input[type="text"], .grid3 in
 #vlSpeedText { min-width: 40px; font-variant-numeric: tabular-nums; }
 .vl.dragging { outline: 2px dashed var(--brand); outline-offset: -6px; border-radius: 14px; }
 @media (max-width: 640px) { .vl-ab { grid-template-columns: 1fr; } .vl-opt { min-width: 0; flex: 1; } }
+
+/* ---------- Captions: dubbing ---------- */
+.cap-dub-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0 10px; }
+.cap-dub-row label { display: inline-flex; align-items: center; gap: 6px; }
+.cap-dub-lines { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; margin: 8px 0 10px; }
+.cap-dub-line { padding: 8px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 5px; }
+.cap-dub-line:last-child { border-bottom: 0; }
+.cap-dub-src { display: flex; align-items: baseline; gap: 8px; }
+.cap-dub-time { font-variant-numeric: tabular-nums; flex: none; }
+.cap-dub-tr { display: flex; gap: 6px; align-items: flex-start; }
+.cap-dub-tr textarea { flex: 1; resize: none; overflow: hidden; min-height: 32px; font: inherit; font-size: 13.5px; line-height: 1.45; padding: 6px 8px; }
