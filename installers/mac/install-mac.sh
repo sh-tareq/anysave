@@ -21,6 +21,15 @@ if [ ! -f "$SRC/helper/anysave-host" ] || [ ! -d "$SRC/extension" ]; then
 fi
 mkdir -p "$BIN" "$(dirname "$EXT_DEST")"
 
+# 0. Stop the AnySave window and helper that may still be running from an older version; otherwise the
+#    app keeps talking to the old helper and shows the old pages until the Mac restarts.
+if pgrep -f "AnySave.app/Contents/MacOS/AnySave" >/dev/null 2>&1; then
+  osascript -e 'tell application id "com.anysave.desktop" to quit' >/dev/null 2>&1 || true
+  sleep 1
+fi
+pkill -f "$APP/anysave-host --daemon" 2>/dev/null || true
+rm -f "$APP/daemon.json"
+
 # 1. Helper app. Remove the old copy first: overwriting a signed program in place makes
 #    macOS kill it on launch ("Killed: 9"), mostly on Apple Silicon.
 rm -f "$APP/anysave-host"
