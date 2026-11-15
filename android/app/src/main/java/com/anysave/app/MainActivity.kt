@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material.icons.outlined.Transform
+import androidx.compose.material.icons.outlined.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Home
@@ -353,10 +355,11 @@ class MainActivity : ComponentActivity() {
         const val TAB_DOWNLOADS = 1
         const val TAB_CONVERT = 2
         const val TAB_SETTINGS = 3
+        const val TAB_CAPTIONS = 4
     }
 }
 
-private data class NavItem(val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
+private data class NavItem(val tab: Int, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
 @Composable
 fun AppShell(vm: MainViewModel) {
@@ -394,21 +397,23 @@ fun AppShell(vm: MainViewModel) {
     }
 
     val items = listOf(
-        NavItem("Home", Icons.Outlined.Home, Icons.Filled.Home),
-        NavItem("Downloads", Icons.Outlined.Download, Icons.Filled.Download),
-        NavItem("Convert", Icons.Outlined.Transform, Icons.Filled.Transform),
-        NavItem("Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
+        NavItem(MainActivity.TAB_HOME, "Home", Icons.Outlined.Home, Icons.Filled.Home),
+        NavItem(MainActivity.TAB_DOWNLOADS, "Downloads", Icons.Outlined.Download, Icons.Filled.Download),
+        NavItem(MainActivity.TAB_CONVERT, "Convert", Icons.Outlined.Transform, Icons.Filled.Transform),
+        NavItem(MainActivity.TAB_CAPTIONS, "Captions", Icons.Outlined.ClosedCaption, Icons.Filled.ClosedCaption),
+        NavItem(MainActivity.TAB_SETTINGS, "Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
     )
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar {
-                items.forEachIndexed { i, item ->
+                items.forEach { item ->
+                    val i = item.tab
                     NavigationBarItem(
                         selected = vm.tab == i,
                         onClick = { vm.tab = i },
-                        label = { Text(item.label) },
+                        label = { Text(item.label, maxLines = 1, softWrap = false) },
                         icon = {
                             BadgedBox(badge = {
                                 if (i == MainActivity.TAB_DOWNLOADS && activeCount > 0) Badge { Text("$activeCount") }
@@ -426,6 +431,7 @@ fun AppShell(vm: MainViewModel) {
                 MainActivity.TAB_HOME -> HomeScreen(vm, jobs)
                 MainActivity.TAB_DOWNLOADS -> DownloadsScreen(jobs) { vm.lookUp(it) }
                 MainActivity.TAB_CONVERT -> ConvertScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
+                MainActivity.TAB_CAPTIONS -> CaptionsScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
                 else -> SettingsScreen(vm)
             }
         }

@@ -18,6 +18,8 @@ data class ConvertTool(
     val maxInputs: Int = Int.MAX_VALUE,
     /** Output formats the user picks from (empty = the tool decides). */
     val formats: List<String> = emptyList(),
+    /** Run from another screen (Captions), not offered on the Convert screen. */
+    val hidden: Boolean = false,
 )
 
 /**
@@ -44,6 +46,11 @@ object ConvertTools {
     const val PACK = "pack"
     const val SUBS = "subs"
     const val DATA = "data"
+    const val CAPTIONS_MAKE = "captions-make"
+    const val CAPTIONS_BURN = "captions-burn"
+    const val CAPTIONS_FILE = "captions-file"
+    /** A result with this name stays in the app: nothing is saved to Downloads. */
+    const val IN_APP = ".in-app"
 
     private val media = setOf(InKind.VIDEO, InKind.AUDIO)
     private val anyKind = InKind.values().toSet()
@@ -78,6 +85,9 @@ object ConvertTools {
             setOf(InKind.SUBS), maxInputs = 1, formats = listOf("srt", "vtt", "ass", "lrc")),
         ConvertTool(DATA, "Convert a spreadsheet", "Spreadsheet", "CSV, TSV, JSON and Excel (first sheet).",
             setOf(InKind.DATA), maxInputs = 1, formats = listOf("xlsx", "csv", "tsv", "json")),
+        ConvertTool(CAPTIONS_MAKE, "Make captions", "Captions", "Speech to text, offline.", media, maxInputs = 1, hidden = true),
+        ConvertTool(CAPTIONS_BURN, "Video with captions", "With captions", "Captions drawn onto the video.", anyKind, hidden = true),
+        ConvertTool(CAPTIONS_FILE, "Save captions", "Captions file", "Captions as a file.", anyKind, hidden = true),
     )
 
     fun byId(id: String) = all.firstOrNull { it.id == id }
@@ -112,7 +122,7 @@ object ConvertTools {
     fun toolsFor(kinds: List<InKind>): List<ConvertTool> {
         if (kinds.isEmpty()) return emptyList()
         return all.filter { t ->
-            kinds.size >= t.minInputs && kinds.size <= t.maxInputs && kinds.all { it in t.accepts } &&
+            !t.hidden && kinds.size >= t.minInputs && kinds.size <= t.maxInputs && kinds.all { it in t.accepts } &&
                 (t.id != ADD_SUBS || (kinds.count { it == InKind.VIDEO } == 1 && kinds.count { it == InKind.SUBS } == 1)) &&
                 (t.id != JOIN || kinds.toSet().size == 1) // all videos or all audio
         }.sortedBy { if (it.id == PACK) 1 else 0 } // packing works for anything, so it goes last
@@ -175,6 +185,11 @@ object ConvertTools {
                     Converter.subtitles(ctx, id, first, it, spec.opt("shift")?.replace(',', '.')?.toDoubleOrNull() ?: 0.0, onProgress)
                 }
                 DATA -> out("$base.$fmt").also { DataTools.convert(first, it) }
+                CAPTIONS_MAKE -> CaptionJobs.make(ctx, id, spec, first, work, onProgress)
+                CAPTIONS_BURN -> out("${safe(spec.opt("name") ?: base)} (captions).mp4").also {
+                    Converter.burnCaptions(ctx, id, first, inputs[1], Captions.fontsDir(ctx), it, onProgress)
+                }
+                CAPTIONS_FILE -> out("${safe(spec.opt("name") ?: base)}.$fmt").also { first.copyTo(it, overwrite = true) }
                 else -> throw ConvertError("This kind of conversion isn't available in this version.")
             }
         } finally {

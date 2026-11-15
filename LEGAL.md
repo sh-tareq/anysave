@@ -84,8 +84,8 @@ AnySave is built on these open-source projects:
 | pdfcpu | Apache-2.0 | desktop helper (PDF tools) |
 | bodgit/sevenzip | BSD-3-Clause | desktop helper (7z) |
 | PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
-| whisper.cpp and the Whisper models | MIT | desktop (transcription, captions) |
-| Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper (caption fonts; licences in `host-go/fonts/licences`) |
+| whisper.cpp and the Whisper models | MIT | desktop (transcription, captions); Android app (Captions: whisper.cpp bundled, model downloaded on first use) |
+| Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper and Android app (caption fonts; licences in `host-go/fonts/licences` and the app's `assets/fonts/licences`) |
 | sherpa-onnx (k2-fsa) and ONNX Runtime (Microsoft) | Apache-2.0 / MIT | desktop Voice Lab (downloaded on first use) |
 | Kokoro-82M v1.0 voices (hexgrad), sherpa-onnx int8 build | Apache-2.0 | desktop Voice Lab, read aloud |
 | Piper voice bn_BD "google" medium (rhasspy) | MIT (Piper); trained on Google's Bengali speech data, OpenSLR 37, CC BY-SA 4.0, and the CMU Indic voices (Carnegie Mellon University, Language Technologies Institute, © 2009-2017) | desktop Voice Lab, Bangla read aloud |

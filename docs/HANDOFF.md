@@ -294,6 +294,32 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 16 Nov 2026: **Captions on Android** (new bottom tab "Captions", between Convert and Settings). Choose a video or
+  audio (or pick from downloads) → language (remembered; Auto-detect too) → "Make captions". It runs as a normal job in
+  the download service (cancel from the screen or Downloads; keeps going with the app closed; "Captions are ready"
+  notification opens the Captions tab; nothing is saved to Downloads by this step). Then: live preview over the video
+  (Compose drawing the same font, size, outline, shadow, box and word highlight as the ASS file), Lines tab (tap a time
+  to jump, edit text, delete a line; the playing line is highlighted and followed), Style tab (the desktop's 6 looks,
+  words per caption, highlight mode, font, size, place, distance, ALL CAPS, box, outline, shadow, colours), "Save video"
+  (burns an ASS file with the bundled fonts: `<name> (captions).mp4`, H.264, MP4 sound copied) and "Save subtitles"
+  (SRT/VTT/text into Downloads/AnySave/Converted). A subtitle file can be brought in instead of listening. Projects are
+  JSON in the app's files (`files/captions/<id>.json`) and survive restarts. Code: `Captions.kt` (port of the desktop's
+  word timing, chunking, presets and `toAss`), `Speech.kt` (model download with resume + pinned SHA-256 into
+  `no_backup/models`, engine choice, speed estimate learned per phone), `CaptionJobs.kt`, `CaptionsScreen.kt`, hidden
+  converter tools `captions-make/-burn/-file` in `ConvertTools.kt` (`IN_APP` result = nothing saved).
+  Engine: whisper.cpp v1.9.5 command-line program as `libwhisper.so` for arm64, armeabi-v7a and x86_64, plus
+  `libwhisper_dot.so` (arm64 with dot-product instructions, picked only when `/proc/cpuinfo` lists `asimddp`, and
+  dropped for good if it ever dies with SIGILL). Build: `scripts/build-whisper-android.sh` (NDK + the SDK's CMake).
+  Models: English and others → ggml-small q8_0 (252 MB); Bangla, or "More accurate" → large-v3-turbo q5_0 (547 MB).
+  Speed measured on the Mi 8 (4 threads; 6–8 threads were slower or far slower): small ≈ 1.6–2.3× the clip's length
+  (60 s clip: ~2 min 20 s; 12 s: ~50 s with start-up); large-v3-turbo ≈ 5–8×+, so Bangla on older phones is impractical
+  (the screen says so). BanglaASR (MIT whisper-small fine-tune) was tried and rejected: it skipped most of real Bangla
+  news speech. Tested on the Mi 8 with the R8 release APK: first-run model download, listening (English and
+  Auto-detect), live preview, presets/word highlight/3 words per caption, editing kept after leaving, burned video
+  (frame matches the preview), SRT save, notification, delete, 16:9 and 9:16 videos. **Not tested:** Bangla and other
+  non-English languages on the phone, the accurate model on the phone, the faster `libwhisper_dot.so` (the Mi 8 lacks
+  the instructions), armeabi-v7a/x86_64 builds, MP4 sound copy when burning (tested build re-encoded to AAC), very long
+  videos, Android 8/9.
 - 15 Nov 2026 (late night): **Copy a voice** in Voice Lab's "Read text aloud" tab (`extension/voice.js`, helper
   `host-go/clone.go`). Record (up to 20 s, MediaRecorder), choose or drop a recording, name it, tick *"This is my own
   voice, or I have the person's clear permission to copy it"* (the helper refuses without it and stores that sentence

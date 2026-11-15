@@ -398,8 +398,27 @@ object Converter {
         onProgress(100f)
     }
 
+    /** The sound as 16 kHz mono WAV, what the speech engine reads. */
+    fun speechWav(ctx: Context, id: String, input: File, output: File, onProgress: (Float) -> Unit) {
+        runFfmpeg(ctx, id, listOf("-hide_banner", "-y", "-nostats", "-progress", "pipe:1", "-i", input.absolutePath, "-vn", "-map", "0:a:0",
+            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.absolutePath), durationSec(input), onProgress)
+    }
+
+    /** Draws styled captions (ASS, from the Captions screen) onto the video with the app's own fonts. */
+    fun burnCaptions(ctx: Context, id: String, video: File, ass: File, fontsDir: File, output: File, onProgress: (Float) -> Unit) {
+        fun esc(f: File) = f.absolutePath.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        val a = mutableListOf("-hide_banner", "-y", "-nostats", "-progress", "pipe:1", "-i", video.absolutePath,
+            "-vf", "ass='${esc(ass)}':fontsdir='${esc(fontsDir)}'", "-map", "0:v:0", "-map", "0:a?")
+        // MP4-family sound can be copied as it is; other sound (WebM's Opus/Vorbis…) becomes AAC.
+        val copy = video.extension.lowercase() in setOf("mp4", "m4v", "mov")
+        a += videoCodec(encoders(ctx), "h264", null, true, "mp4") +
+            (if (copy) listOf("-c:a", "copy") else listOf("-c:a", "aac", "-b:a", "192k")) + listOf("-movflags", "+faststart", output.absolutePath)
+        runFfmpeg(ctx, id, a, durationSec(video), onProgress)
+    }
+
     fun cancel(id: String) {
         processes.remove(id)?.destroy()
+        Speech.cancel(id)
         FastVideo.cancel(id)
         ConvertTools.cancel(id)
     }

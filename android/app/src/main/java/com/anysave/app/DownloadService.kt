@@ -180,6 +180,12 @@ class DownloadService : Service() {
                 JobKind.CONVERT -> convert(job, dir)
             }
             if (!stillWanted(id)) throw Stopped()
+            // Captions: the result stays in the app (the Captions tab), nothing goes to Downloads.
+            if (file.name == ConvertTools.IN_APP) {
+                Downloads.remove(id)
+                captionsNotification(job)
+                return
+            }
             Downloads.update(id) { it.copy(status = JobStatus.SAVING, percent = 100f) }
             if (file.isDirectory) { saveFolder(id, job, file); return }
             val current = Downloads.get(id) ?: job
@@ -612,6 +618,21 @@ class DownloadService : Service() {
         runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
     }
 
+    private fun captionsNotification(job: Job) {
+        val pi = PendingIntent.getActivity(this, job.id.hashCode(),
+            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_CAPTIONS)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(this, AnySaveApp.CH_DONE)
+            .setSmallIcon(R.drawable.ic_stat_download)
+            .setContentTitle("Captions are ready")
+            .setContentText(job.title)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
+    }
+
     /** The file engine's technical reasons ("HTTP 403") in words that say what to do. */
     private fun plainFileError(msg: String): String {
         val code = Regex("""^HTTP (\d{3})$""").find(msg.trim())?.groupValues?.get(1)?.toInt()
@@ -789,12 +810,17 @@ class DownloadService : Service() {
             startConvert(ctx, listOf(input), name, spec)
 
         /** One conversion job for [inputs] (several files for merging, packing, pictures to PDF…). */
-        fun startConvert(ctx: Context, inputs: List<Uri>, name: String, spec: ConvertSpec) {
+        fun startConvert(ctx: Context, inputs: List<Uri>, name: String, spec: ConvertSpec) { startConvertId(ctx, inputs, name, spec) }
+
+        /** Like [startConvert], and returns the job's id (to follow its progress). */
+        fun startConvertId(ctx: Context, inputs: List<Uri>, name: String, spec: ConvertSpec): String {
             val full = spec.copy(inputs = inputs.map { it.toString() })
+            val id = newId()
             start(ctx, Job(
-                id = newId(), url = inputs.first().toString(), title = name, kind = JobKind.CONVERT,
+                id = id, url = inputs.first().toString(), title = name, kind = JobKind.CONVERT,
                 spec = full.toJson(), qualityLabel = full.label(), audioOnly = full.isAudio,
             ))
+            return id
         }
 
         fun pause(ctx: Context, id: String) {
