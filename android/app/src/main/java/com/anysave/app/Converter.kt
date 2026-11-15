@@ -398,6 +398,19 @@ object Converter {
         onProgress(100f)
     }
 
+    /** Runs FFmpeg with [args] (inputs, filters, output), reporting progress against [outSeconds]. */
+    fun ffmpeg(ctx: Context, id: String, args: List<String>, outSeconds: Double?, onProgress: (Float) -> Unit) {
+        runFfmpeg(ctx, id, listOf("-hide_banner", "-y", "-nostats", "-progress", "pipe:1") + args, outSeconds, onProgress)
+    }
+
+    /** Sound settings for an audio result: mp3, m4a, flac or wav. */
+    fun audioCodec(ctx: Context, format: String): List<String> = when (format) {
+        "mp3" -> if ("libmp3lame" in encoders(ctx)) listOf("-c:a", "libmp3lame", "-q:a", "2") else listOf("-c:a", "mp3")
+        "m4a" -> listOf("-c:a", "aac", "-b:a", "192k")
+        "flac" -> listOf("-c:a", "flac")
+        else -> listOf("-c:a", "pcm_s16le")
+    }
+
     /** The sound as 16 kHz mono WAV, what the speech engine reads. */
     fun speechWav(ctx: Context, id: String, input: File, output: File, onProgress: (Float) -> Unit) {
         runFfmpeg(ctx, id, listOf("-hide_banner", "-y", "-nostats", "-progress", "pipe:1", "-i", input.absolutePath, "-vn", "-map", "0:a:0",
@@ -419,6 +432,7 @@ object Converter {
     fun cancel(id: String) {
         processes.remove(id)?.destroy()
         Speech.cancel(id)
+        Voice.cancel(id)
         FastVideo.cancel(id)
         ConvertTools.cancel(id)
     }

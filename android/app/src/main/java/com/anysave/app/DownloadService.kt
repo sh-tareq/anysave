@@ -183,7 +183,7 @@ class DownloadService : Service() {
             // Captions: the result stays in the app (the Captions tab), nothing goes to Downloads.
             if (file.name == ConvertTools.IN_APP) {
                 Downloads.remove(id)
-                captionsNotification(job)
+                inAppNotification(job)
                 return
             }
             Downloads.update(id) { it.copy(status = JobStatus.SAVING, percent = 100f) }
@@ -618,14 +618,16 @@ class DownloadService : Service() {
         runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
     }
 
-    private fun captionsNotification(job: Job) {
+    /** A result that stays in the app (captions, a copied voice): the notification opens Studio. */
+    private fun inAppNotification(job: Job) {
+        val title = if (ConvertSpec.fromJson(job.spec).tool == ConvertTools.VOICE_COPY) "Your voice is ready" else "Captions are ready"
         val pi = PendingIntent.getActivity(this, job.id.hashCode(),
-            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_CAPTIONS)
+            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_STUDIO)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(this, AnySaveApp.CH_DONE)
             .setSmallIcon(R.drawable.ic_stat_download)
-            .setContentTitle("Captions are ready")
+            .setContentTitle(title)
             .setContentText(job.title)
             .setAutoCancel(true)
             .setContentIntent(pi)

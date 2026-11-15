@@ -53,7 +53,14 @@ val LegalSections = listOf(
         "downloaded copies exist only on the user's own device.",
     "Open-source software" to
         "AnySave is built on yt-dlp (Unlicense), youtubedl-android (GPL-3.0), FFmpeg (LGPL/GPL), Python (PSF License), " +
-        "QuickJS (MIT), Jetpack Compose and AndroidX (Apache-2.0) and Coil (Apache-2.0).\n\nBecause it includes " +
+        "QuickJS (MIT), Jetpack Compose and AndroidX (Apache-2.0) and Coil (Apache-2.0).\n\nStudio uses whisper.cpp and " +
+        "the Whisper models (MIT); the caption fonts Noto Sans, Noto Sans Bengali, Montserrat, Anton and Hind Siliguri " +
+        "(SIL Open Font License 1.1); sherpa-onnx (Apache-2.0), ONNX Runtime (MIT) and LLVM libc++ (Apache-2.0 with LLVM " +
+        "exception); the voices Kitten TTS (Apache-2.0), Kokoro-82M (Apache-2.0) and Piper bn_BD \"google\" (MIT; trained " +
+        "on Google's Bengali speech data, CC BY-SA 4.0, and the CMU Indic voices) with eSpeak NG data (GPL-3.0); the " +
+        "noise removers DPDFNet (Apache-2.0) and GTCRN (MIT); and Pocket TTS by Kyutai (CC-BY-4.0, " +
+        "huggingface.co/kyutai/pocket-tts) for copying a voice. These models are downloaded once, when first used, " +
+        "and run on the phone.\n\nBecause it includes " +
         "youtubedl-android, the AnySave Android app is distributed under the GNU General Public License v3.0. You may get " +
         "its complete source code from the author, and you may use, study, change and share it under that licence.",
 )

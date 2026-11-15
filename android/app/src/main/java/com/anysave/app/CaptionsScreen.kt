@@ -107,7 +107,7 @@ private fun defaultLang(ctx: Context): String = prefs(ctx).getString("lang", nul
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CaptionsScreen(jobs: List<Job>, onOpenDownloads: () -> Unit) {
+fun CaptionsScreen(jobs: List<Job>, onOpenDownloads: () -> Unit, tabs: @Composable () -> Unit = {}) {
     val ctx = LocalContext.current
     var projects by remember { mutableStateOf(CapProjects.all(ctx)) }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -150,8 +150,8 @@ fun CaptionsScreen(jobs: List<Job>, onOpenDownloads: () -> Unit) {
                 openId = null
             }, onOpenDownloads = onOpenDownloads)
     } else {
-        ScreenScaffold("Captions", "Speech to captions, on your phone") { pad ->
-            LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        StudioFrame(tabs) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { CapHero(reading, onPick = { pick.launch(arrayOf("video/*", "audio/*")) }, onDownloads = { fromDownloads = true }) }
                 if (!Speech.available(ctx)) item {
                     Text("Making captions needs a newer phone processor (64-bit ARM). You can still bring in a subtitle file, style it and save it onto a video.",

@@ -26,8 +26,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material.icons.outlined.Transform
-import androidx.compose.material.icons.outlined.ClosedCaption
-import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Home
@@ -355,7 +355,7 @@ class MainActivity : ComponentActivity() {
         const val TAB_DOWNLOADS = 1
         const val TAB_CONVERT = 2
         const val TAB_SETTINGS = 3
-        const val TAB_CAPTIONS = 4
+        const val TAB_STUDIO = 4
     }
 }
 
@@ -400,7 +400,7 @@ fun AppShell(vm: MainViewModel) {
         NavItem(MainActivity.TAB_HOME, "Home", Icons.Outlined.Home, Icons.Filled.Home),
         NavItem(MainActivity.TAB_DOWNLOADS, "Downloads", Icons.Outlined.Download, Icons.Filled.Download),
         NavItem(MainActivity.TAB_CONVERT, "Convert", Icons.Outlined.Transform, Icons.Filled.Transform),
-        NavItem(MainActivity.TAB_CAPTIONS, "Captions", Icons.Outlined.ClosedCaption, Icons.Filled.ClosedCaption),
+        NavItem(MainActivity.TAB_STUDIO, "Studio", Icons.Outlined.GraphicEq, Icons.Filled.GraphicEq),
         NavItem(MainActivity.TAB_SETTINGS, "Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
     )
 
@@ -431,7 +431,7 @@ fun AppShell(vm: MainViewModel) {
                 MainActivity.TAB_HOME -> HomeScreen(vm, jobs)
                 MainActivity.TAB_DOWNLOADS -> DownloadsScreen(jobs) { vm.lookUp(it) }
                 MainActivity.TAB_CONVERT -> ConvertScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
-                MainActivity.TAB_CAPTIONS -> CaptionsScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
+                MainActivity.TAB_STUDIO -> StudioScreen(jobs) { vm.tab = MainActivity.TAB_DOWNLOADS }
                 else -> SettingsScreen(vm)
             }
         }

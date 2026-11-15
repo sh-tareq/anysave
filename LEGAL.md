@@ -86,13 +86,15 @@ AnySave is built on these open-source projects:
 | PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
 | whisper.cpp and the Whisper models | MIT | desktop (transcription, captions); Android app (Captions: whisper.cpp bundled, model downloaded on first use) |
 | Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper and Android app (caption fonts; licences in `host-go/fonts/licences` and the app's `assets/fonts/licences`) |
-| sherpa-onnx (k2-fsa) and ONNX Runtime (Microsoft) | Apache-2.0 / MIT | desktop Voice Lab (downloaded on first use) |
-| Kokoro-82M v1.0 voices (hexgrad), sherpa-onnx int8 build | Apache-2.0 | desktop Voice Lab, read aloud |
-| Piper voice bn_BD "google" medium (rhasspy) | MIT (Piper); trained on Google's Bengali speech data, OpenSLR 37, CC BY-SA 4.0, and the CMU Indic voices (Carnegie Mellon University, Language Technologies Institute, © 2009-2017) | desktop Voice Lab, Bangla read aloud |
-| eSpeak NG pronunciation data | GPL-3.0 | desktop Voice Lab (read aloud) |
-| DPDFNet (Ceva) | Apache-2.0 | desktop Voice Lab, strong clean-up |
-| GTCRN | MIT | desktop Voice Lab, light clean-up |
-| Pocket TTS (Kyutai), ONNX export by KevinAHM for sherpa-onnx | CC-BY-4.0 (model), MIT (code); © Kyutai, https://huggingface.co/kyutai/pocket-tts. Unchanged, except unneeded sample files are left out | desktop Voice Lab, copy a voice |
+| sherpa-onnx (k2-fsa) and ONNX Runtime (Microsoft) | Apache-2.0 / MIT | desktop Voice Lab (downloaded on first use); Android app (Studio: bundled) |
+| LLVM libc++ (from the Android NDK) | Apache-2.0 with LLVM exception | Android app (bundled, needed by the voice engine) |
+| Kitten TTS micro v0.8 (KittenML), sherpa-onnx build | Apache-2.0 | Android app, English read aloud (downloaded on first use) |
+| Kokoro-82M v1.0 voices (hexgrad), sherpa-onnx int8 build | Apache-2.0 | desktop Voice Lab, read aloud; Android app, read aloud in 6 more languages |
+| Piper voice bn_BD "google" medium (rhasspy) | MIT (Piper); trained on Google's Bengali speech data, OpenSLR 37, CC BY-SA 4.0, and the CMU Indic voices (Carnegie Mellon University, Language Technologies Institute, © 2009-2017) | desktop Voice Lab and Android app, Bangla read aloud |
+| eSpeak NG pronunciation data | GPL-3.0 | desktop Voice Lab and Android app (read aloud) |
+| DPDFNet (Ceva) | Apache-2.0 | desktop Voice Lab and Android app, strong clean-up |
+| GTCRN | MIT | desktop Voice Lab and Android app, light clean-up |
+| Pocket TTS (Kyutai), ONNX export by KevinAHM for sherpa-onnx | CC-BY-4.0 (model), MIT (code); © Kyutai, https://huggingface.co/kyutai/pocket-tts. Unchanged, except unneeded sample files are left out | desktop Voice Lab and Android app, copy a voice |
 | llama.cpp (ggml-org) | MIT | desktop dubbing, translation (downloaded on first use) |
 | LMT-60 4B / 1.7B translation models (NiuTrans, built on Qwen3 by Alibaba Cloud) | Apache-2.0 | desktop dubbing, translation |
 

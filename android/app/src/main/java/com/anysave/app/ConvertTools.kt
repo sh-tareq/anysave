@@ -49,6 +49,9 @@ object ConvertTools {
     const val CAPTIONS_MAKE = "captions-make"
     const val CAPTIONS_BURN = "captions-burn"
     const val CAPTIONS_FILE = "captions-file"
+    const val VOICE_CLEAN = "voice-clean"
+    const val VOICE_SAY = "voice-say"
+    const val VOICE_COPY = "voice-copy"
     /** A result with this name stays in the app: nothing is saved to Downloads. */
     const val IN_APP = ".in-app"
 
@@ -88,6 +91,9 @@ object ConvertTools {
         ConvertTool(CAPTIONS_MAKE, "Make captions", "Captions", "Speech to text, offline.", media, maxInputs = 1, hidden = true),
         ConvertTool(CAPTIONS_BURN, "Video with captions", "With captions", "Captions drawn onto the video.", anyKind, hidden = true),
         ConvertTool(CAPTIONS_FILE, "Save captions", "Captions file", "Captions as a file.", anyKind, hidden = true),
+        ConvertTool(VOICE_CLEAN, "Clean up a recording", "Clean up", "Background noise removed.", media, maxInputs = 1, hidden = true),
+        ConvertTool(VOICE_SAY, "Read text aloud", "Read aloud", "Text to speech.", anyKind, maxInputs = 1, hidden = true),
+        ConvertTool(VOICE_COPY, "Copy a voice", "Copy a voice", "A new voice from a recording.", media, maxInputs = 1, hidden = true),
     )
 
     fun byId(id: String) = all.firstOrNull { it.id == id }
@@ -189,6 +195,7 @@ object ConvertTools {
                 CAPTIONS_BURN -> out("${safe(spec.opt("name") ?: base)} (captions).mp4").also {
                     Converter.burnCaptions(ctx, id, first, inputs[1], Captions.fontsDir(ctx), it, onProgress)
                 }
+                VOICE_CLEAN, VOICE_SAY, VOICE_COPY -> VoiceJobs.run(ctx, id, spec, first, work, onProgress)
                 CAPTIONS_FILE -> out("${safe(spec.opt("name") ?: base)}.$fmt").also { first.copyTo(it, overwrite = true) }
                 else -> throw ConvertError("This kind of conversion isn't available in this version.")
             }

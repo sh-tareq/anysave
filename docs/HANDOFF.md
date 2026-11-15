@@ -32,7 +32,7 @@ with all of Internet Download Manager's (IDM) features plus AnySave's own. See R
 | Part | Version | Where |
 |---|---|---|
 | Desktop extension | 1.2.0 | `extension/manifest.json` → `"version"` |
-| Android app | 1.2.0 (versionCode 13), package `com.anysave.app` | `android/app/build.gradle.kts`. Not released; the last published APK is 1.0.3 under the old package. `dist-assets/r8-mapping-1.2.0.txt` already exists from an earlier, never-published build: replace it with the real 1.2.0 mapping when the release is built. |
+| Android app | 1.2.0 (versionCode 13), package `com.anysave.app` | `android/app/build.gradle.kts`. Not released; the last published APK is 1.0.3 under the old package. `dist-assets/r8-mapping-1.2.0.txt` is the mapping of the latest local 1.2.0 build (16 Nov, Voice Lab); rebuild and replace it when the release is actually built. |
 | Helper & Desktop App | 1.2.0 | `host-go/main.go` → `helperVersion` (also `installers/mac/app/Info.plist`, and `DefaultUserAgent` in `host-go/engine/engine.go`). The desktop app is **not Wails**: on Mac it is a small Swift menu-bar app (`installers/mac/app/main.swift`, WKWebView) and on Windows a hand-written tray app (`host-go/desktop_windows.go`). Both show the extension's `manager.html`, served by the helper's background service (`host-go/daemon.go`, `anysave-host --daemon`). |
 | Latest GitHub release | **v1.0.5**. 1.2.0 is not published: the owner wants to check everything first. | github.com/sh-tareq/anysave/releases |
 
@@ -294,6 +294,30 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 16 Nov 2026 (later): **Voice Lab on Android.** The "Captions" bottom tab is now **"Studio"** with three tabs:
+  Captions, **Clean up** and **Read aloud**. Clean up: choose a video or audio (or pick from downloads), strength
+  Strong (DPDFNet 48 kHz) / Light (GTCRN 16 kHz) / Basic (FFmpeg only), "Even out the loudness", a 10-second
+  before/after sample, save as the same kind of file (videos keep their picture, copied as is) or MP3/M4A/WAV →
+  `<name> (clean).<ext>`. Read aloud: English = **Kitten TTS micro v0.8** (8 voices, Apache-2.0, 42 MB; Kokoro was
+  ~3.5× slower than real time on the Mi 8, Kitten ~0.9×), Bangla = Piper bn_BD (16 voices), "Your voices" = Pocket
+  copies, and Kokoro for Spanish/French/Hindi/Italian/Portuguese (Brazil)/Chinese (labelled slow); speed, MP3/M4A/WAV,
+  Listen (first ~300 characters, played in the app) and Save (a normal job → Downloads/AnySave/Converted). **Copy a
+  voice** (sheet under "Your voices"): record up to 20 s (asks for the microphone only then; `RECORD_AUDIO` added) or
+  choose a file, name it, tick the consent sentence (stored with the voice; the job refuses without it), then it
+  appears under Your voices; delete with confirmation. Engine: sherpa-onnx v1.13.8's termux builds of
+  `sherpa-onnx-offline-tts` / `-denoiser` bundled as `libsherpa_tts.so` / `libsherpa_denoise.so` with
+  `libonnxruntime.so` and the NDK's `libc++_shared.so` (`scripts/fetch-sherpa-android.sh`, pinned SHA-256s; adds ~25 MB
+  per APK). Models download once into `no_backup/voice/<pack>` with resume and pinned SHA-256s, same URLs as the
+  desktop (Piper uses the pinned Hugging Face revision; the `v1.0.0` path is a 404). Code: `Voice.kt` (packs, voices,
+  run/split/speak/denoise/copy, WAV helpers), `VoiceJobs.kt` (hidden tools `voice-say/-clean/-copy`), `VoiceScreen.kt`
+  (Studio frame, Clean up, Read aloud, Copy sheet). Text and recordings handed to a job sit in `files/voice-handoff`
+  and are deleted when the job succeeds (leftovers after 2 days). Pocket tends to swallow its first word, so pieces
+  start with "... " (fixed "Hello there" → "Oh" on phone and Mac). Tested on the Mi 8 with the R8 release APK, outputs
+  checked with whisper on the Mac: English read aloud (Listen + MP3 save), Bangla save (numbers read in Bangla),
+  strong clean-up of a noisy MP4 (picture kept, words intact) and of an M4A with pauses (noise in the pauses −33 dB →
+  −91 dB), the 10-second sample, copy a voice from a file (pitch 115 Hz vs sample 110 Hz) and reading with it,
+  recording + the "less than 5 seconds of talking" error, delete. **Not tested:** Light and Basic clean-up, Kokoro
+  languages, a real person's recorded voice, long texts/files, cancelling, armeabi-v7a/x86_64, Android 8/9 and 12+.
 - 16 Nov 2026: **Captions on Android** (new bottom tab "Captions", between Convert and Settings). Choose a video or
   audio (or pick from downloads) → language (remembered; Auto-detect too) → "Make captions". It runs as a normal job in
   the download service (cancel from the screen or Downloads; keeps going with the app closed; "Captions are ready"
