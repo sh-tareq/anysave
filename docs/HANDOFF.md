@@ -297,8 +297,16 @@ Key protocol facts:
 - 15 Nov 2026 (later): Android app redesigned to match the manager (see Architecture); popup and video button
   menu restyled with the manager colours; Android/helper show an IP address as the site name. Tested on the Mi 8
   (release build): YouTube download, before-download window + rename, speed limit, pause/resume, multi-select +
-  remove, share-to-AnySave, search, sort, Check SHA-256. Not tested on the phone: dark mode (MIUI ignores the adb
-  switch), Quick Settings tile, auto-download of copied links, Wi-Fi only, schedule, Convert, Retry, refresh link.
+  remove, share-to-AnySave, search, sort, Check SHA-256; then Retry, Refresh expired link (only the missing pieces
+  were fetched, SHA-256 matched), Wi-Fi only (network marked metered with `cmd netpolicy`), schedule (waits, then
+  starts), auto-download of a copied YouTube link, Convert to MP3. Fixed on the way: file errors now say what to do
+  ("The site refused the download (error 403). If the link has expired, use Refresh expired link"; the engine used
+  to report a 403 as "Connection closed before the piece finished"); the before-download window no longer shows an
+  error page's size ("1 KB") and warns when the site answered with an error. Found: MIUI holds back the schedule's
+  alarm while AnySave is restricted in the background (the alarm fired the moment the restriction was lifted);
+  Settings now shows a tip on Xiaomi/Redmi/POCO (or when Android reports the restriction) that opens App info
+  (Autostart, Battery → No restrictions). Not tested on the phone: dark mode (MIUI ignores the adb switch), Quick
+  Settings tile, Convert with trim or resize.
 - 15 Nov 2026: manager page redesigned in an IDM style (see Architecture); helper `info` gives an estimated size
   per quality; "Use my Chrome login & retry" on video login errors; a late update for a removed download no longer
   brings it back as an empty row (extension and helper); Mac window remembers its size, minimum 720×480.

@@ -1,5 +1,6 @@
 package com.anysave.app
 
+import android.app.ActivityManager
 import android.app.StatusBarManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -7,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.graphics.drawable.Icon as AndroidIcon
 import android.os.Build
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -58,6 +60,14 @@ fun SettingsScreen(vm: MainViewModel) {
     val scheduleStart by Settings.scheduleStart.collectAsState()
     val scheduleStop by Settings.scheduleStop.collectAsState()
     val scheduleQueue by Settings.scheduleQueue.collectAsState()
+    // Xiaomi and other phones often restrict sideloaded apps in the background. A restricted app gets no
+    // alarms there, so scheduled downloads would not start on time. Checked again on coming back from settings.
+    var backgroundRestricted by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        backgroundRestricted = Build.VERSION.SDK_INT >= 28 &&
+            ctx.getSystemService(ActivityManager::class.java).isBackgroundRestricted
+        onPauseOrDispose { }
+    }
     val queues by Settings.queues.collectAsState()
     val newQueue by Settings.newQueue.collectAsState()
     var pickSubs by remember { mutableStateOf(false) }
@@ -173,6 +183,28 @@ fun SettingsScreen(vm: MainViewModel) {
             SwitchRow(Icons.Outlined.Schedule, "Only download at set hours",
                 "Outside them downloads wait as Scheduled and start by themselves. Start now on a download skips the wait.",
                 scheduleOn) { Settings.setScheduleOn(it); Schedule.tick(ctx) }
+            // Xiaomi's battery manager restricts sideloaded apps on its own schedule, so it can't be detected reliably.
+            val strictMaker = Build.MANUFACTURER.lowercase() in setOf("xiaomi", "redmi", "poco")
+            if (scheduleOn && (backgroundRestricted || strictMaker)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(AnySaveColors.status.warnSoft)
+                        .clickable { openAppSettings(ctx) }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.BatteryAlert, null, tint = AnySaveColors.status.warn)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (backgroundRestricted) "Your phone limits AnySave in the background"
+                            else "Let AnySave run in the background", fontWeight = FontWeight.SemiBold,
+                            color = AnySaveColors.status.warn)
+                        Text((if (backgroundRestricted) "Scheduled downloads can't start on time until you allow it. "
+                            else "This phone may stop AnySave in the background, so scheduled downloads could start late. ") +
+                            "Tap here, turn on Autostart, then open Battery and choose No restrictions.",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             SettingRow(Icons.Outlined.AccessTime, "From", scheduleStart, null) { pickTime(scheduleStart) { Settings.setScheduleStart(it) } }
             SettingRow(Icons.Outlined.AccessTime, "Until", scheduleStop, null) { pickTime(scheduleStop) { Settings.setScheduleStop(it) } }
             SettingRow(Icons.Outlined.Folder, "The hours apply to",
@@ -459,5 +491,13 @@ private fun SwitchRow(icon: ImageVector, title: String, desc: String, checked: B
             Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** The phone's own page for this app (battery, permissions...). */
+private fun openAppSettings(ctx: Context) {
+    runCatching {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.fromParts("package", ctx.packageName, null)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }

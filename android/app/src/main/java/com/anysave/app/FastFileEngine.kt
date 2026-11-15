@@ -470,6 +470,8 @@ object FastFileEngine {
                         // Too many connections or requests for this server's taste.
                         refused = true
                         retryAfter = conn.getHeaderField("Retry-After")
+                        // Kept so a final failure names the server's real answer (e.g. an expired link's 403).
+                        lastError = IOException("HTTP $code")
                     } else {
                         if (code == 200 && cur > 0L) throw StaleResetException()
                         if (code != 200 && code != 206) throw IOException("HTTP $code")

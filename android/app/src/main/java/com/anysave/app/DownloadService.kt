@@ -201,7 +201,7 @@ class DownloadService : Service() {
                 else -> {
                     // The full technical message goes to the system log (adb logcat -s AnySave), the list shows a plain one.
                     android.util.Log.w("AnySave", "download failed [${job.kind}] ${e.message ?: e}")
-                    val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else (e.message ?: e.toString())
+                    val msg = if (e is YoutubeDLException) Engine.cleanError(e.message) else plainFileError(e.message ?: e.toString())
                     Downloads.update(id) { it.copy(status = JobStatus.ERROR, error = msg, speed = "", eta = "") }
                     // Downloads resume from their partial files with Retry (yt-dlp continues .part files).
                     keepPartial = job.kind != JobKind.CONVERT
@@ -555,6 +555,20 @@ class DownloadService : Service() {
             .setContentIntent(pi)
             .build()
         runCatching { getSystemService(NotificationManager::class.java).notify(job.id.hashCode(), n) }
+    }
+
+    /** The file engine's technical reasons ("HTTP 403") in words that say what to do. */
+    private fun plainFileError(msg: String): String {
+        val code = Regex("""^HTTP (\d{3})$""").find(msg.trim())?.groupValues?.get(1)?.toInt()
+        return when {
+            code == 401 || code == 403 ->
+                "The site refused the download (error $code). If the link has expired, use \"Refresh expired link\"."
+            code == 404 || code == 410 -> "The file isn't on the site any more (error $code)."
+            code == 429 -> "The site is limiting downloads (error 429). Tap Retry in a few minutes."
+            code != null && code >= 500 -> "The site isn't working right now (error $code). Tap Retry later."
+            msg.startsWith("Connection closed before") -> "The connection kept dropping. Tap Retry to continue."
+            else -> msg
+        }
     }
 
     private fun errorNotification(job: Job) {

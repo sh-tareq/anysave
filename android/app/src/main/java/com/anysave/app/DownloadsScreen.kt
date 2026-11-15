@@ -355,12 +355,15 @@ private fun AddDownloadDialog(onLookUp: (String) -> Unit, onClose: () -> Unit) {
 }
 
 /** What a file link turned out to be, shown before it downloads. */
-data class FileOffer(val url: String, val name: String, val mime: String?, val length: Long) {
+data class FileOffer(val url: String, val name: String, val mime: String?, val length: Long, val serverError: Int? = null) {
     companion object {
-        fun of(url: String, p: FileKinds.Probe?) = FileOffer(
-            url, p?.name ?: android.net.Uri.decode(url.substringBefore('?').substringBefore('#').substringAfterLast('/')).ifBlank { "download" },
-            p?.mime, p?.length ?: -1,
-        )
+        fun of(url: String, p: FileKinds.Probe?): FileOffer {
+            val fromUrl = android.net.Uri.decode(url.substringBefore('?').substringBefore('#').substringAfterLast('/')).ifBlank { "download" }
+            // An error answer (e.g. "503 down") says nothing about the file: not its size, type or name.
+            val bad = p != null && p.status >= 400
+            return if (bad) FileOffer(url, fromUrl, null, -1, p!!.status)
+            else FileOffer(url, p?.name ?: fromUrl, p?.mime, p?.length ?: -1)
+        }
     }
 }
 
@@ -381,6 +384,11 @@ fun FileOfferDialog(o: FileOffer, onStart: (String) -> Unit, onClose: () -> Unit
             Column {
                 Text(listOfNotNull(Engine.humanSize(o.length) ?: "Size not given by the site", Engine.siteLabel(o.url)).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                o.serverError?.let { code ->
+                    Spacer(Modifier.height(6.dp))
+                    Text("The site answered with an error ($code), so the download may fail. You can try anyway.",
+                        style = MaterialTheme.typography.bodySmall, color = AnySaveColors.status.warn)
+                }
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Save as") },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
