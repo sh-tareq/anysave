@@ -265,6 +265,23 @@
             <label class="small vl-speed">Speed <input id="vlSpeed" type="range" min="0.7" max="1.5" step="0.05" value="1" /><span id="vlSpeedText">1.0×</span></label>
           </div>
           <div id="vlVoiceNeed" class="vl-need" hidden></div>
+          <div class="vl-row vl-mine-row"><button id="vlCopyOpen" class="btn small">+ Copy a voice</button>
+            <button id="vlForget" class="btn small" hidden>Delete this voice</button></div>
+          <div id="vlCopyBox" class="vl-copy" hidden>
+            <h3>Copy a voice</h3>
+            <p class="small">Record or choose <b>10–20 seconds</b> of one person talking clearly, with no music. The copy can then read
+              any English text in that voice. It stays on this computer.</p>
+            <div class="vl-row">
+              <button id="vlRec" class="btn">● Record</button>
+              <button id="vlCopyPick" class="btn">Choose a recording…</button>
+              <span id="vlSample" class="muted small">Or drop a recording here.</span>
+            </div>
+            <audio id="vlSampleAudio" controls preload="metadata" hidden></audio>
+            <label class="small vl-copy-name">Name <input id="vlCopyName" type="text" maxlength="40" placeholder="My voice" /></label>
+            <label class="check small"><input type="checkbox" id="vlConsent" /> This is my own voice, or I have the person's clear permission to copy it.</label>
+            <div class="vl-row"><button id="vlCopyGo" class="btn primary" disabled>Make this voice</button><button id="vlCopyCancel" class="btn small">Cancel</button></div>
+            <p class="hint">Never use a copied voice to pretend to be someone, or to fool people. Copied voices speak English only for now.</p>
+          </div>
         </div>
         <div class="card">
           <div class="cv-head"><h3>Text</h3>

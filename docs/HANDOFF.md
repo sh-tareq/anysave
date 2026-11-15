@@ -294,6 +294,26 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 15 Nov 2026 (late night): **Copy a voice** in Voice Lab's "Read text aloud" tab (`extension/voice.js`, helper
+  `host-go/clone.go`). Record (up to 20 s, MediaRecorder), choose or drop a recording, name it, tick *"This is my own
+  voice, or I have the person's clear permission to copy it"* (the helper refuses without it and stores that sentence
+  with the voice), then it appears under the language **"Your voices"**, reads text and can be used for English dubbing.
+  Model: Kyutai **Pocket TTS** (CC-BY-4.0, ~100M), sherpa-onnx int8 export (pack `pocket`, 98 MB, pinned SHA-256), run by
+  the same sherpa-onnx 1.13.8 CLI (`--pocket-*`, `--reference-audio`, `--speed`). English only (Kyutai's newer French/
+  German/Spanish/Portuguese/Italian/Dutch models would need our own ONNX export). Samples: 5–20 s kept, cleaned with the
+  strong clean-up when it's installed, silence at the start cut, 24 kHz mono, saved in `<models>/voice/mine/<id>/`
+  (voice.wav + voice.json); delete removes the folder. Rejected: ZipVoice (weights CC-BY-NC, Emilia data), VoxCPM2 and
+  Chatterbox (would need a Python/torch engine). No model clones Bangla. Mac app: `NSMicrophoneUsageDescription` added
+  and the web view grants the microphone only to the helper's 127.0.0.1 page (`requestMediaCapturePermissionFor`).
+  Tested: `TestVoiceCopyForReal` (noisy video → voice in ~1.5 s, noise floor −32 dB → silent, whisper heard the reading
+  word for word; a WebM recording of speech works; a plain tone is rejected with a clear message; no voice without
+  consent; delete can't leave the folder). The page in Chrome for Testing and app mode: drop/choose, consent gate,
+  make, Listen, save MP3, record (with a stand-in microphone playing speech, because headless Chrome's fake microphone
+  hangs on this Mac), delete, reload keeps voices, narrow layout, no page errors. **Not tested:** a real microphone,
+  the in-app download of the `pocket` pack (LuLu firewall blocks test builds; placed from the same pinned file with
+  AnySave's own unpack), the real Mac app window (incl. the microphone prompt; the Swift change only compiled),
+  Windows, Intel Mac. A WebM recording shows its length as "Infinity" in the sample player (Chrome's recorder doesn't
+  write a duration); the voice is still made correctly.
 - 15 Nov 2026 (late night): **Dubbing** — a "Dub into another language" card on the Captions page (`extension/captions.js`,
   helper `host-go/dub.go`). Captions are grouped into sentences (sentence ends, pauses over 1 s, or 220 chars), then
   **translated offline** by LMT-60 (NiuTrans, Apache-2.0, 60 languages) through llama.cpp's `llama-server` (MIT, build

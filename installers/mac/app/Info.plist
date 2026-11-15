@@ -24,6 +24,8 @@
 	<string>120</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>AnySave uses the microphone only when you press Record in Voice Lab, to copy your voice. The recording stays on this Mac.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

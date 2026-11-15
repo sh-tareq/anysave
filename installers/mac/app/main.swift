@@ -11,6 +11,15 @@ struct DaemonInfo: Decodable {
 // The manager page is a web page. A bare web view ignores its pop-up messages, questions,
 // file pickers and "save this file" links, so they are shown here as normal Mac dialogs.
 extension AppDelegate: WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
+    // Voice Lab's Record button: only AnySave's own page (the helper on this Mac) may use the microphone,
+    // and only for sound. macOS still asks the person once (NSMicrophoneUsageDescription).
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let local = origin.host == "127.0.0.1" || origin.host == "localhost"
+        decisionHandler(local && type == .microphone ? .grant : .deny)
+    }
+
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert()

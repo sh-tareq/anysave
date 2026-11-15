@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -214,4 +216,85 @@ func TestPackDownload(t *testing.T) {
 	}
 	ents, _ := os.ReadDir(dir)
 	t.Logf("%s: %d files", dir, len(ents))
+}
+
+// TestPlacePack unpacks an already-downloaded file into a pack folder, as installPack would:
+// ANYSAVE_PLACE_PACK=pocket ANYSAVE_PLACE_FILE=/path/x.tar.bz2 HOME=/scratch go test -run PlacePack
+func TestPlacePack(t *testing.T) {
+	id, src := os.Getenv("ANYSAVE_PLACE_PACK"), os.Getenv("ANYSAVE_PLACE_FILE")
+	if id == "" || src == "" {
+		t.Skip("set ANYSAVE_PLACE_PACK and ANYSAVE_PLACE_FILE")
+	}
+	p, ok := packByID(id)
+	if !ok || len(p.Files) != 1 {
+		t.Fatal("unknown or multi-file pack")
+	}
+	f := p.Files[0]
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(b)
+	if sum := hex.EncodeToString(h[:]); sum != f.SHA256 {
+		t.Fatalf("checksum %s, want %s", sum, f.SHA256)
+	}
+	dir := packDir(id)
+	os.RemoveAll(dir)
+	if err := unpack(src, f.URL, dir, f.Keep); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, ".ready"), nil, 0o644)
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		t.Log(e.Name())
+	}
+}
+
+// TestVoiceCopyForReal makes a copied voice from a recording, reads text with it, then deletes it:
+// ANYSAVE_COPY_TEST=/path/sample.wav ANYSAVE_VOICE_OUT=/dir HOME=/scratch go test -run VoiceCopyForReal
+func TestVoiceCopyForReal(t *testing.T) {
+	src := os.Getenv("ANYSAVE_COPY_TEST")
+	if src == "" {
+		t.Skip("set ANYSAVE_COPY_TEST")
+	}
+	out := os.Getenv("ANYSAVE_VOICE_OUT")
+	work := t.TempDir()
+	s := &cvServer{tmp: work, allowed: map[string]bool{}}
+	j := &cvJob{ctx: context.Background(), spec: cvSpec{Opts: map[string]string{}}, work: work, progress: func(float64) {}}
+	if r := s.voiceCopyOp(context.Background(), map[string]any{"op": "voiceCopy", "path": src, "name": "Test"}, j); r["ok"] == true {
+		t.Fatal("made a voice without consent")
+	}
+	s.allow(src)
+	r := s.voiceCopyOp(context.Background(), map[string]any{"op": "voiceCopy", "path": src, "name": "  Test   voice ", "consent": true}, j)
+	if r["ok"] != true {
+		t.Fatal(r["error"])
+	}
+	id := r["made"].(string)
+	t.Logf("made %s from %.1f s", id, r["secs"])
+	v, ok := voiceByID(id)
+	if !ok || v.Name != "Test voice" || v.Lang != "Your voices" {
+		t.Fatalf("voice %+v %v", v, ok)
+	}
+	stage := func(s string) { t.Log(s) }
+	text := "Hello, this is a copied voice. It can read any English text aloud, right here on this computer, without the internet."
+	res, err := cvRunStaged(context.Background(), nil, cvSpec{Tool: cvSpeak, Format: "mp3", Opts: map[string]string{"voice": id, "text": text, "speed": "1"}}, out, nil, stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mi := probeMedia(res)
+	t.Logf("%s: %.1f s", filepath.Base(res), mi.Duration)
+	if mi.Duration < 4 {
+		t.Error("too short")
+	}
+	if os.Getenv("ANYSAVE_COPY_KEEP") == "" {
+		if r := forgetVoice(id); r["ok"] != true {
+			t.Fatal(r["error"])
+		}
+		if _, ok := voiceByID(id); ok {
+			t.Error("still there after delete")
+		}
+	}
+	if r := forgetVoice("../x"); r["ok"] == true {
+		t.Error("deleted outside the folder")
+	}
 }

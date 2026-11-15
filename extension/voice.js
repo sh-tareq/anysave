@@ -45,7 +45,7 @@
       const r = await cv().op("voices");
       if (!r.ok) return msg(r.error, true);
       st.packs = r.packs;
-      if (!st.voices.length) { st.voices = r.voices; fillVoices(); }
+      setVoices(r.voices);
       drawNeeds();
       const busy = Object.values(r.packs).some((p) => p.done != null && !p.ready && !p.error);
       clearTimeout(stateTimer);
@@ -77,8 +77,10 @@
     const s = STRENGTHS.find((x) => x.id === st.strength);
     needBox($("vlNeed"), s.pack, "the " + s.title.toLowerCase() + " clean-up");
     const v = voice();
-    if (v) needBox($("vlVoiceNeed"), v.pack, v.pack === "bangla" ? "the Bangla voices" : "these voices");
+    if (v) needBox($("vlVoiceNeed"), v.pack, packWhat(v));
+    $("vlForget").hidden = v?.pack !== "pocket";
   }
+  const packWhat = (v) => (v.pack === "bangla" ? "the Bangla voices" : v.pack === "pocket" ? "voice copying" : "these voices");
   async function getPack(pack) {
     try {
       const r = await cv().op("voiceGet", { pack });
@@ -221,9 +223,15 @@
 
   // ---------- read aloud ----------
   const voice = () => st.voices.find((v) => v.id === $("vlVoice").value);
-  function fillVoices() {
+  // setVoices takes a fresh list from the helper (copied voices come and go) and keeps the choice.
+  function setVoices(list, pick) {
+    const same = list.map((v) => v.id).join() === st.voices.map((v) => v.id).join();
+    st.voices = list;
+    if (!same || pick) fillVoices(pick || $("vlVoice").value || saved.voice);
+  }
+  function fillVoices(pick = saved.voice) {
     const langs = [...new Set(st.voices.map((v) => v.lang))];
-    const want = st.voices.find((v) => v.id === saved.voice) || st.voices.find((v) => v.id === "k3");
+    const want = st.voices.find((v) => v.id === pick) || st.voices.find((v) => v.id === "k3");
     $("vlLang").innerHTML = langs.map((l) => `<option${l === want?.lang ? " selected" : ""}>${h(l)}</option>`).join("");
     fillVoiceList(want?.id);
   }
@@ -280,7 +288,7 @@
     const ta = $("vlText");
     let text = ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() || ta.value.trim();
     if (!text) text = v.pack === "bangla" ? "আমি AnySave। আমি আপনার লেখা পড়ে শোনাতে পারি।" : sampleFor(v.lang);
-    if (!needBox($("vlVoiceNeed"), v.pack, v.pack === "bangla" ? "the Bangla voices" : "these voices")) {
+    if (!needBox($("vlVoiceNeed"), v.pack, packWhat(v))) {
       getPack(v.pack);
       return msg("Downloading the voices first. Press Listen again when it's done.");
     }
@@ -330,6 +338,119 @@
     } catch (e) { btn.disabled = false; msg(e.message, true); }
   }
   $("vlSpeakGo").onclick = saveSpeech;
+
+  // ---------- copy a voice ----------
+  // The sample comes from the microphone, a file, or a drop; the helper keeps 5–20 seconds of it.
+  const copy = { file: null, rec: null, chunks: [], timer: null, t0: 0 };
+  function copyReady() { $("vlCopyGo").disabled = !(copy.file && $("vlConsent").checked); }
+  function copyOpen(on) {
+    $("vlCopyBox").hidden = !on;
+    $("vlCopyOpen").hidden = on;
+    if (!on) { stopRec(true); copy.file = null; $("vlSampleAudio").hidden = true; $("vlSampleAudio").removeAttribute("src"); $("vlConsent").checked = false; $("vlSample").textContent = "Or drop a recording here."; copyReady(); }
+  }
+  function setSample(f, note) {
+    copy.file = f;
+    $("vlSample").textContent = note || f.name;
+    const a = $("vlSampleAudio");
+    a.hidden = false;
+    a.src = cv().fileURL(f.path);
+    copyReady();
+  }
+  $("vlCopyOpen").onclick = () => { copyOpen(true); msg(""); };
+  $("vlCopyCancel").onclick = () => copyOpen(false);
+  $("vlConsent").onchange = copyReady;
+  $("vlCopyPick").onclick = async () => {
+    try {
+      const r = await cv().op("pick", { multi: false });
+      if (!r.ok) return msg(r.error, true);
+      const f = r.files?.[0];
+      if (!f) return;
+      if (!MEDIA_EXT.test(f.name)) return msg("Choose a recording or a video (MP3, M4A, WAV, MP4…).", true);
+      setSample(f);
+    } catch (e) { msg(e.message, true); }
+  };
+  async function startRec() {
+    msg("");
+    let stream;
+    const b = $("vlRec");
+    b.disabled = true;
+    $("vlSample").textContent = "Waiting for the microphone… allow it if you're asked.";
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true } }); }
+    catch {
+      $("vlSample").textContent = "Or drop a recording here.";
+      return msg("Couldn't use the microphone. Allow it for AnySave, or choose a recording instead.", true);
+    } finally { b.disabled = false; }
+    copy.chunks = [];
+    const rec = new MediaRecorder(stream);
+    copy.rec = rec;
+    rec.ondataavailable = (e) => { if (e.data.size) copy.chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(copy.timer);
+      $("vlRec").classList.remove("rec");
+      $("vlRec").textContent = "● Record again";
+      if (copy.cancelled) return;
+      const secs = (Date.now() - copy.t0) / 1000;
+      if (secs < 5) return msg("That was too short. Talk for 10–20 seconds.", true);
+      try {
+        const type = rec.mimeType || "audio/webm";
+        const f = new File(copy.chunks, `Recording ${new Date().toLocaleTimeString().replace(/[:\s]/g, "-")}.${/mp4/.test(type) ? "m4a" : "webm"}`, { type });
+        const r = await cv().upload(f);
+        if (!r.ok) return msg(r.error, true);
+        setSample(r.file, `Recorded ${Math.round(secs)} seconds`);
+      } catch (e) { msg(e.message, true); }
+    };
+    copy.cancelled = false;
+    copy.t0 = Date.now();
+    rec.start(500);
+    $("vlRec").classList.add("rec");
+    const tick = () => {
+      const s = Math.floor((Date.now() - copy.t0) / 1000);
+      $("vlRec").textContent = `■ Stop (${s}s)`;
+      $("vlSample").textContent = s < 10 ? "Keep talking… (10–20 seconds is best)" : "Good. Stop when you like.";
+      if (s >= 20) stopRec();
+    };
+    tick();
+    copy.timer = setInterval(tick, 250);
+  }
+  function stopRec(cancel) {
+    if (!copy.rec || copy.rec.state === "inactive") return;
+    copy.cancelled = !!cancel;
+    copy.rec.stop();
+  }
+  $("vlRec").onclick = () => (copy.rec && copy.rec.state === "recording" ? stopRec() : startRec());
+  $("vlCopyGo").onclick = async () => {
+    if (!copy.file || !$("vlConsent").checked) return;
+    const b = $("vlCopyGo");
+    b.disabled = true;
+    b.textContent = "Making the voice…";
+    msg("");
+    try {
+      const r = await cv().op("voiceCopy", { path: copy.file.path, name: $("vlCopyName").value, consent: $("vlConsent").checked });
+      if (!r.ok) return msg(r.error, true);
+      st.packs = r.packs;
+      setVoices(r.voices, r.made);
+      remember();
+      copyOpen(false);
+      $("vlCopyName").value = "";
+      const v = voice();
+      msg(`"${v?.name || "Your voice"}" is ready. Type some English text and press Listen.`);
+      drawNeeds();
+    } catch (e) { msg(e.message, true); }
+    finally { b.textContent = "Make this voice"; copyReady(); }
+  };
+  $("vlForget").onclick = async () => {
+    const v = voice();
+    if (!v || v.pack !== "pocket") return;
+    if (!confirm(`Delete the copied voice "${v.name}"? Its sample is removed from this computer.`)) return;
+    try {
+      const r = await cv().op("voiceForget", { voice: v.id });
+      if (!r.ok) return msg(r.error, true);
+      setVoices(r.voices, "k3");
+      remember();
+      msg(`Deleted "${v.name}".`);
+    } catch (e) { msg(e.message, true); }
+  };
 
   // ---------- tabs, picking, dropping ----------
   function tab(name) {
@@ -392,12 +513,14 @@
     const f = e.dataTransfer.files[0];
     if (TEXT_EXT.test(f.name)) { tab("speak"); return loadText(f.name, await f.text()); }
     if (!MEDIA_EXT.test(f.name)) return msg("Drop a recording or video, or a text or subtitle file to read aloud.", true);
-    tab("clean");
+    const forCopy = st.tab === "speak" && !$("vlCopyBox").hidden;
+    if (!forCopy) tab("clean");
     try {
       msg(`Adding ${f.name}…`);
       const r = await cv().upload(f);
       if (!r.ok) return msg(r.error, true);
       msg("");
+      if (forCopy) return setSample(r.file);
       openFile(r.file);
     } catch (err) { msg(err.message, true); }
   });
@@ -410,6 +533,6 @@
   count();
   drawStrength();
   tab(saved.tab === "speak" ? "speak" : "clean");
-  window.__voice = { st, refresh, fromSubs };
+  window.__voice = { st, refresh, fromSubs, copy };
   if (location.hash === "#voice") window.showVoiceLab();
 })();

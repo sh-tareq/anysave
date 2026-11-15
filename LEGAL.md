@@ -56,6 +56,9 @@ All trademarks belong to their owners.
   the download finishes.
 - Voice Lab and dubbing download their engines, voices and translation model once, when first used (from GitHub and
   Hugging Face). Your recordings, text and translations never leave your computer.
+- **Copied voices** (Voice Lab): the voice sample and the copy are kept only on your computer, in AnySave's models
+  folder, until you delete them. You may only copy your own voice or a voice whose owner has clearly agreed, and you
+  must not use a copied voice to pretend to be someone or to mislead people. You are responsible for how you use it.
 - AnySave connects to GitHub to download and update yt-dlp. The desktop installer also downloads ffmpeg
   (Mac: ffmpeg.martin-riedl.de, Windows: GitHub).
 
@@ -89,6 +92,7 @@ AnySave is built on these open-source projects:
 | eSpeak NG pronunciation data | GPL-3.0 | desktop Voice Lab (read aloud) |
 | DPDFNet (Ceva) | Apache-2.0 | desktop Voice Lab, strong clean-up |
 | GTCRN | MIT | desktop Voice Lab, light clean-up |
+| Pocket TTS (Kyutai), ONNX export by KevinAHM for sherpa-onnx | CC-BY-4.0 (model), MIT (code); © Kyutai, https://huggingface.co/kyutai/pocket-tts. Unchanged, except unneeded sample files are left out | desktop Voice Lab, copy a voice |
 | llama.cpp (ggml-org) | MIT | desktop dubbing, translation (downloaded on first use) |
 | LMT-60 4B / 1.7B translation models (NiuTrans, built on Qwen3 by Alibaba Cloud) | Apache-2.0 | desktop dubbing, translation |
 

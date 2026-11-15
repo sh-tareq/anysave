@@ -549,6 +549,7 @@ type ttsVoice struct {
 	Code   string `json:"code"` // language code: en, es, bn…
 	sid    int
 	code   string // kokoro language
+	ref    string // copied voices: the sample
 }
 
 var kokoroNames = []string{"af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole",
@@ -584,7 +585,7 @@ func ttsVoices() []ttsVoice {
 	for i, sid := range banglaSpeakers {
 		vs = append(vs, ttsVoice{ID: "bn" + strconv.Itoa(sid), Name: "Voice " + strconv.Itoa(i+1), Lang: "Bangla", Pack: "bangla", Code: "bn", sid: sid})
 	}
-	return vs
+	return append(vs, myVoices()...)
 }
 
 func voiceByID(id string) (ttsVoice, bool) {
@@ -599,7 +600,7 @@ func voiceByID(id string) (ttsVoice, bool) {
 // voiceState is what the Voice Lab page shows: which packs are here and the voices.
 func voiceState() map[string]any {
 	packs := map[string]any{}
-	ids := []string{"engine", "clean-strong", "clean-light", "kokoro", "bangla", "llama", "mt-large", "mt-small"}
+	ids := []string{"engine", "clean-strong", "clean-light", "kokoro", "bangla", "pocket", "llama", "mt-large", "mt-small"}
 	voiceMu.Lock()
 	defer voiceMu.Unlock()
 	for _, id := range ids {
@@ -702,6 +703,8 @@ func ttsArgs(v ttsVoice, speed float64, threads int) ([]string, error) {
 	ls := strconv.FormatFloat(1/speed, 'f', 3, 64)
 	a := []string{"--num-threads=" + strconv.Itoa(threads), "--sid=" + strconv.Itoa(v.sid)}
 	switch v.Pack {
+	case "pocket":
+		a = append(a, pocketArgs(v, speed)...)
 	case "kokoro":
 		k := func(n string) string { return filepath.Join(dir, n) }
 		a = append(a, "--kokoro-model="+k("model.int8.onnx"), "--kokoro-voices="+k("voices.bin"),
@@ -1181,6 +1184,8 @@ func (s *cvServer) voiceOp(ctx context.Context, req map[string]any) map[string]a
 	}
 	j := &cvJob{ctx: ctx, spec: cvSpec{Opts: map[string]string{}}, work: dir, progress: func(float64) {}}
 	switch str(req, "op") {
+	case "voiceCopy", "voiceForget":
+		return s.voiceCopyOp(ctx, req, j)
 	case "voiceSay":
 		v, ok := voiceByID(str(req, "voice"))
 		if !ok {
