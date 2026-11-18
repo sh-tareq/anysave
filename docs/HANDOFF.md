@@ -294,6 +294,17 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 19 Nov 2026 (captions started before the talking): Whisper often starts a line in the silence before it (the
+  owner's A8 video: first line at 0:00, speech at 2.84 s). `cv_sync.go` finds the speech in the sound (loudness per
+  20 ms against the recording's own quiet level; no guess when there are no quiet parts, e.g. music) and moves a
+  line/word start that sits in a quiet stretch to 0.05 s before the next speech; a line also leaves 0.5 s after its
+  last sound instead of staying through a long pause. Runs automatically when captions are made (`transcribe.go`, so
+  the saved SRT and Transcripts are right too), when a subtitle file is opened on the Captions page (message +
+  Undo), and from a new **Sync to speech** button (op `captionsSync`). Words timed by length are re-spread over the
+  corrected line. Tests: `cv_sync_test.go`; scratch `pt/sync.js` (A8 + its old SRT → 2.79 s; Undo; already-synced
+  message) and `pt/make.js` (new captions from the real model start at 2.79 s). **Not tested:** videos with music
+  under the speech (by design the sync then changes nothing), Android (unchanged).
+
 - 19 Nov 2026 (owner's report + captions upgrade, Mac app + extension):
   (1) **Fast engine saved some files still compressed.** A site sent a CSV export gzip-compressed in transit
   (`Content-Encoding: gzip`), the browser would unpack it, the engine saved the raw bytes. Now every request asks for

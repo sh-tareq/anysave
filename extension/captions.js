@@ -216,6 +216,7 @@
       msg(r.words ? "" : "These captions have no word timings, so words are timed by their length. Make captions here for exact timing.");
       drawAll();
       persist();
+      syncToSpeech(true); // captions made elsewhere (or by an older AnySave) often start too early
     } catch (e) { msg(e.message, true); }
   }
   async function pick() {
@@ -796,6 +797,62 @@
     msg(`All captions moved ${d > 0 ? "later" : "earlier"} by ${Math.abs(d)} s.`);
   }
 
+  // Sync to speech: the helper finds where the voice is in the sound (cv_sync.go); a line or word
+  // that starts in a quiet stretch is moved to just before the speech that follows (same rules as
+  // when captions are made). A line also leaves half a second after its last sound, not after a long pause.
+  let speech = null;
+  async function speechOf(video) {
+    if (speech?.video === video) return speech.spans;
+    const r = await cv().op("captionsSync", { path: video });
+    if (!r.ok) throw new Error(r.error);
+    speech = { video, spans: r.speech || [] };
+    return speech.spans;
+  }
+  function speechAfter(sp, t, limit) {
+    for (const [a, b] of sp) {
+      if (b <= t) continue;
+      if (a <= t) return t;
+      return a < limit ? a : -1;
+    }
+    return -1;
+  }
+  const syncStart = (sp, s, e) => { const on = speechAfter(sp, s, e - 0.04); return on <= s ? s : Math.max(s, on - 0.05); };
+  function syncEnd(sp, s, e) {
+    let last = -1;
+    for (const [a, b] of sp) { if (a >= e) break; if (b > s) last = Math.min(b, e); }
+    return last > s && e - last > 0.7 ? last + 0.5 : e;
+  }
+  async function syncToSpeech(auto) {
+    if (!st.video || !st.cues.length) return;
+    const btn = $("capSyncGo"), video = st.video.path;
+    btn.disabled = true;
+    if (!auto) msg("Listening for the speech…");
+    try {
+      const sp = await speechOf(video);
+      if (st.video?.path !== video) return;
+      let moved = 0;
+      const next = st.cues.map((c) => {
+        const ws = words(c).map((w) => ({ ...w }));
+        const s = syncStart(sp, c.s, c.e), e = syncEnd(sp, s, c.e);
+        if (s > c.s + 0.15 || e < c.e - 0.3) moved++;
+        if (ws.some((w) => w.e <= s + 0.02)) {
+          // Words timed by length (no real timings) spread over the old, too-early line: spread them over the new one.
+          const od = c.e - c.s || 1;
+          for (const w of ws) { w.s = s + (w.s - c.s) / od * (e - s); w.e = s + (w.e - c.s) / od * (e - s); }
+        } else {
+          for (const w of ws) { w.s = Math.min(Math.max(syncStart(sp, w.s, w.e), s), w.e - 0.02); w.e = Math.min(w.e, e); }
+        }
+        return { ...c, s, e, words: ws };
+      });
+      if (!moved) { if (!auto) msg("The captions already start when the speaking starts."); return; }
+      snapshot();
+      st.cues = next;
+      drawList(); drawTimeline(); persist(); lastKey = ""; tick(true);
+      msg(`${moved} ${moved === 1 ? "line now starts" : "lines now start"} when the speaking starts${auto ? " (fixed automatically; Undo puts the old times back)" : ""}.`);
+    } catch (e) { if (!auto) msg(e.message, true); }
+    finally { btn.disabled = false; }
+  }
+
   // ---------- saving ----------
   function srtTime(t, sep = ",") {
     const ms = Math.round(Math.max(0, t) * 1000);
@@ -1241,6 +1298,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   $("capChunk").onchange = (e) => rechunk(e.target.value);
   $("capReplaceGo").onclick = replaceAll;
   $("capShiftGo").onclick = shiftAll;
+  $("capSyncGo").onclick = () => syncToSpeech(false);
   $("capRemake").onclick = () => {
     if (!confirm("Make the captions again from the speech? Your changes to the text will be replaced.")) return;
     snapshot(); st.cues = []; drawAll();

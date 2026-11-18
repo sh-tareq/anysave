@@ -488,6 +488,10 @@ func actionTranscribe(msg map[string]any) {
 		fail("No speech was found in this file.")
 		return
 	}
+	// Lines begin when the talking does, not in the silence before it (see cv_sync.go).
+	if n := syncCaptions(speechSpans(wav), subs, words); n > 0 {
+		logf("transcribe: %d lines moved to the start of the speech", n)
+	}
 	for i := 0; i+1 < len(subs); i++ { // pieces overlap by a few milliseconds; players dislike that
 		if subs[i].End > subs[i+1].Start {
 			subs[i].End = subs[i+1].Start

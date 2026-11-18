@@ -291,6 +291,8 @@ func (s *cvServer) op(ctx context.Context, req map[string]any) map[string]any {
 	switch str(req, "op") {
 	case "captionsFind", "captionsLoad", "captionsSave":
 		return s.captionOp(req, path)
+	case "captionsSync":
+		return s.captionSync(ctx, path)
 	case "info":
 		return s.info(path)
 	case "sample":
