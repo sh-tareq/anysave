@@ -347,7 +347,7 @@ function rowHtml(j) {
       break;
     case "done":
       status = `<span class="pill ok">Done</span>`;
-      acts = (j.file || j.downloadId ? qa("open", "open", "Open") + qa("reveal", "folder", "Show in folder") : "") + qa("remove", "remove", "Remove from list");
+      acts = (j.file || j.downloadId ? qa("open", "open", "Open") + qa("copyFile", "copy", "Copy file") + qa("reveal", "folder", "Show in folder") : "") + qa("remove", "remove", "Remove from list");
       break;
     case "error":
       status = `<span class="pill err" title="${esc(j.error || "Failed")}">${esc(j.error || "Failed")}</span>` +
@@ -382,6 +382,10 @@ async function act(j, a) {
     case "useChrome": return send({ type: "chooseHandler", id: j.id, handler: "chrome" });
     case "open": return openDownload(j).then((r) => { if (r && !r.ok) toast(r.error || "Couldn't open the file", true); });
     case "reveal": return send({ type: "reveal", id: j.id });
+    case "copyFile": {
+      const r = await send({ type: "copyFile", id: j.id });
+      return r?.ok ? toast(r.asText ? "Copied. Paste it as a file, or into a document as text." : "Copied. Paste it anywhere.") : toast(r?.error || "Couldn't copy the file", true);
+    }
     case "copyLink":
       try { await navigator.clipboard.writeText(j.url); toast("Link copied."); } catch { prompt("The link:", j.url); }
       return;
@@ -493,7 +497,7 @@ function renderDetail(force) {
 
   const B = (a, icon, label, title) => `<button class="btn" data-act="${a}" title="${esc(title || label)}">${svg(icon, 15)}${esc(label)}</button>`;
   let buttons = "";
-  if (j.status === "done" && (j.file || j.downloadId)) buttons += B("open", "open", "Open") + B("reveal", "folder", "Show in folder");
+  if (j.status === "done" && (j.file || j.downloadId)) buttons += B("open", "open", "Open") + B("copyFile", "copy", "Copy", "Copy the file, then paste it anywhere (Finder, Mail, a chat…)") + B("reveal", "folder", "Show in folder");
   if (running && j.kind !== "convert") buttons += B("pause", "pause", "Pause");
   if (paused) buttons += B("resume", "play", "Resume");
   if (j.status === "scheduled") buttons += B("startNow", "play", "Start now");

@@ -167,7 +167,9 @@
           <div class="cv-head"><h3 id="capName" class="cap-name"></h3><button id="capClose" class="btn small">Close video</button></div>
           <div id="capStage" class="cap-stage">
             <video id="capVideo" playsinline preload="metadata"></video>
-            <div id="capOverlay" class="cap-overlay" aria-live="off"></div>
+            <div id="capGuides" class="cap-guides" aria-hidden="true"><i class="gv"></i><i class="gh"></i><b class="safe"></b><s class="phone"></s></div>
+            <div id="capOverlay" class="cap-overlay" aria-live="off" tabindex="0" title="Drag to move · drag a corner to resize · double-click to edit the words"></div>
+            <div id="capFrame" class="cap-frame" aria-hidden="true"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i><i data-h="w"></i><i data-h="e"></i><span class="cap-readout"></span></div>
           </div>
           <div class="cap-transport">
             <button id="capPlayBtn" class="btn small cap-playbtn" aria-label="Play or pause">▶</button>

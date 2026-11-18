@@ -662,6 +662,19 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		}
 		return actionOpen(map[string]any{"file": file})
 
+	case "copyFile":
+		file := str(req, "file")
+		if file == "" {
+			if id := str(req, "id"); id != "" {
+				d.mu.Lock()
+				if j, ok := d.jobs[id]; ok {
+					file = str(j, "file")
+				}
+				d.mu.Unlock()
+			}
+		}
+		return actionCopyFile(map[string]any{"file": file})
+
 	case "reveal", "revealDirect":
 		file := str(req, "file")
 		if file == "" {
@@ -1345,8 +1358,8 @@ func (d *daemonServer) retryJob(id string) {
 		d.startFastFileJob(str(j, "url"), str(j, "fileName"), str(j, "title"), id, str(j, "referrer"), str(j, "expectedSha256"))
 	case "convert":
 		d.startConvertJob(map[string]any{
-			"id":   id,
-			"path": str(j, "url"),
+			"id":    id,
+			"path":  str(j, "url"),
 			"name":  str(j, "title"),
 			"spec":  j["spec"],
 			"paths": j["paths"],

@@ -17,6 +17,11 @@
     mont: { name: "Montserrat Black", file: "Montserrat-Black.ttf", ratio: 1.562, bold: 0, label: "Montserrat", bn: "hind" },
     anton: { name: "Anton", file: "Anton-Regular.ttf", ratio: 1.7334, bold: 0, label: "Anton (tall)", bn: "hind" },
     hind: { name: "Hind Siliguri", file: "HindSiliguri-Bold.ttf", ratio: 1.617, bold: 1, label: "Hind Siliguri", bn: "hind" },
+    poppins: { name: "Poppins ExtraBold", file: "Poppins-ExtraBold.ttf", ratio: 1.762, bold: 0, label: "Poppins", bn: "hind" },
+    bebas: { name: "Bebas Neue", file: "BebasNeue-Regular.ttf", ratio: 1.3, bold: 0, label: "Bebas Neue (tall)", bn: "hind" },
+    bangers: { name: "Bangers", file: "Bangers-Regular.ttf", ratio: 1.757, bold: 0, label: "Bangers (comic)", bn: "hind" },
+    marker: { name: "Permanent Marker", file: "PermanentMarker-Regular.ttf", ratio: 1.4268, bold: 0, label: "Marker (hand-drawn)", bn: "hind" },
+    lobster: { name: "Lobster", file: "Lobster-Regular.ttf", ratio: 1.49, bold: 0, label: "Lobster (script)", bn: "hind" },
     notobn: { name: "Noto Sans Bengali", file: "NotoSansBengali-Bold.ttf", ratio: 1.403, bold: 1, hidden: true },
   };
   const BN_RUN = /([ঀ-৿।॥‌‍]+)/;
@@ -27,8 +32,33 @@
     { id: "boxed", title: "Boxed", desc: "Text on a dark box", s: { font: "noto", size: 4.8, upper: false, color: "#ffffff", outline: 0, outlineColor: "#000000", shadow: false, box: true, boxColor: "#000000", boxOpacity: 70, mode: "none", hl: "#ffd400", pos: "bottom", offset: 8 } },
     { id: "reveal", title: "Word by word", desc: "Words appear as spoken", s: { font: "mont", size: 5.6, upper: false, color: "#ffffff", outline: 12, outlineColor: "#111111", shadow: false, box: false, mode: "reveal", hl: "#ffffff", pos: "bottom", offset: 14 } },
     { id: "bangla", title: "Bangla", desc: "Hind Siliguri, word lights up", s: { font: "hind", size: 5.6, upper: false, color: "#ffffff", outline: 11, outlineColor: "#000000", shadow: true, box: false, mode: "word", hl: "#ffd400", pos: "bottom", offset: 9 } },
+    { id: "comic", title: "Comic", desc: "Bangers, yellow word pops", s: { font: "bangers", size: 7.2, upper: true, color: "#ffffff", outline: 16, outlineColor: "#000000", shadow: true, box: false, mode: "pop", hl: "#ffe14d", pos: "middle", offset: 0, spacing: 4, anim: "pop" } },
+    { id: "neon", title: "Neon", desc: "Glowing outline", s: { font: "poppins", size: 5.4, upper: false, color: "#ffffff", outline: 5, outlineColor: "#00e5ff", shadow: false, box: false, mode: "word", hl: "#ff4fd8", glow: 14, pos: "bottom", offset: 12, anim: "fade" } },
+    { id: "tall", title: "Tall caps", desc: "Bebas Neue, red word", s: { font: "bebas", size: 9, upper: true, color: "#ffffff", outline: 8, outlineColor: "#000000", shadow: true, box: false, mode: "word", hl: "#ff3b3b", spacing: 3, pos: "bottom", offset: 14, anim: "slide" } },
+    { id: "marker", title: "Marker", desc: "Hand-drawn look", s: { font: "marker", size: 6, upper: false, color: "#ffffff", outline: 9, outlineColor: "#000000", shadow: true, box: false, mode: "none", pos: "bottom", offset: 10, anim: "pop" } },
+    { id: "script", title: "Script", desc: "Lobster, soft and warm", s: { font: "lobster", size: 6.4, upper: false, color: "#fff4e0", outline: 8, outlineColor: "#5a1f33", shadow: true, box: false, mode: "none", pos: "bottom", offset: 10, anim: "fade" } },
+    { id: "bubble", title: "Bubble", desc: "Dark text on white", s: { font: "poppins", size: 4.8, upper: false, color: "#111111", outline: 0, outlineColor: "#000000", shadow: false, box: true, boxColor: "#ffffff", boxOpacity: 100, mode: "word", hl: "#e5243b", pos: "bottom", offset: 12, anim: "pop" } },
+    { id: "lower", title: "Lower third", desc: "White on a red bar", s: { font: "poppins", size: 4.2, upper: false, color: "#ffffff", outline: 0, outlineColor: "#000000", shadow: false, box: true, boxColor: "#e5243b", boxOpacity: 100, mode: "none", pos: "bottom", offset: 12, width: 70, anim: "slide" } },
+    { id: "tv", title: "Classic TV", desc: "Yellow, easy to read", s: { font: "noto", size: 4.6, upper: false, color: "#ffe600", outline: 8, outlineColor: "#000000", shadow: true, box: false, mode: "none", pos: "bottom", offset: 6 } },
+    { id: "minimal", title: "Minimal", desc: "Small, soft shadow only", s: { font: "poppins", size: 4.2, upper: false, color: "#ffffff", outline: 0, outlineColor: "#000000", shadow: true, box: false, mode: "none", pos: "bottom", offset: 8, anim: "fade" } },
   ];
-  const STYLE0 = { preset: "clean", boxColor: "#000000", boxOpacity: 70, ...PRESETS[0].s };
+  // Values every style has (presets only list what they change).
+  const BASE = { upper: false, color: "#ffffff", outline: 9, outlineColor: "#000000", shadow: false, box: false, boxColor: "#000000", boxOpacity: 70, mode: "none", hl: "#ffd400", spacing: 0, glow: 0, anim: "none", width: 86 };
+  // Where a preset puts the caption: x is the middle of the text, y the edge named by anchor (both % of the video).
+  const posFrom = (pos, off = 8) => pos === "top" ? { x: 50, y: off, anchor: "top" } : pos === "middle" ? { x: 50, y: 50, anchor: "middle" } : { x: 50, y: 100 - off, anchor: "bottom" };
+  function normalize(s) {
+    s = { ...BASE, ...PRESETS[0].s, preset: "clean", ...(s || {}) };
+    if (!(s.x >= 0 && s.y >= 0 && ["top", "middle", "bottom"].includes(s.anchor))) Object.assign(s, posFrom(s.pos, s.offset));
+    if (!FONTS[s.font] || FONTS[s.font].hidden) s.font = "noto";
+    return s;
+  }
+  // A preset's look; it keeps the caption where the user put it.
+  function applyPreset(cur, p) {
+    const next = normalize({ ...BASE, ...p.s, preset: p.id });
+    if (cur.placed && !p.mine) Object.assign(next, { x: cur.x, y: cur.y, anchor: cur.anchor, width: cur.width, placed: true });
+    return next;
+  }
+  const STYLE0 = normalize({});
   const CHUNKS = [["", "As spoken"], ["1", "1 word"], ["2", "2 words"], ["3", "3 words"], ["4", "4 words"], ["6", "6 words"], ["8", "8 words"]];
   const VIDEO_EXT = /\.(mp4|m4v|mov|webm|mkv|avi|3gp|flv|wmv|ts|mts|m2ts|mpg|mpeg|ogv)$/i;
   const SUBS_EXT = /\.(srt|vtt|ass|ssa)$/i;
@@ -38,7 +68,7 @@
     video: null, // {path, name, size}
     w: 1920, h: 1080, dur: 0,
     lang: "", cues: [], orig: null, chunk: "",
-    style: loadJSON("anysave.cap.style") || { ...STYLE0 },
+    style: normalize(loadJSON("anysave.cap.style")),
     job: null, burnJob: null, sel: -1, follow: true,
     dub: null, // {from, to, model, voice, keep, lines: [{s, e, src, t}]}
   };
@@ -109,16 +139,17 @@
 
   // ---------- undo ----------
   function snapshot() {
-    undo.push(JSON.stringify({ cues: st.cues, chunk: st.chunk }));
+    undo.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style }));
     if (undo.length > 100) undo.shift();
     redo = [];
   }
   function restore(from, to) {
     if (!from.length) return;
-    to.push(JSON.stringify({ cues: st.cues, chunk: st.chunk }));
+    to.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style }));
     const s = JSON.parse(from.pop());
     st.cues = s.cues; st.chunk = s.chunk;
-    drawAll();
+    if (s.style) st.style = normalize(s.style);
+    drawAll(); persist();
   }
   let typingSnap = null; // one undo step per burst of typing
   function snapTyping() {
@@ -157,10 +188,10 @@
     const saved = loadJSON(projectKey());
     if (saved?.cues?.length) {
       Object.assign(st, { lang: saved.lang, cues: saved.cues, orig: saved.orig, chunk: saved.chunk || "", dub: saved.dub || null });
-      if (saved.style) st.style = { ...STYLE0, ...saved.style };
+      if (saved.style) st.style = normalize(saved.style);
       msg("Your edits from last time were brought back.");
     }
-    addFonts().catch(() => {});
+    addFonts().then(() => document.fonts.ready).then(() => { lastKey = ""; tick(true); }).catch(() => {});
     drawAll();
     const v = $("capVideo");
     v.src = cv().fileURL(file.path);
@@ -304,14 +335,18 @@
   }
 
   // The caption on the video, the same way FFmpeg will draw it.
-  function textShadow(r, color, shadow) {
+  // glow: FFmpeg's \\blur (px), drawn here as a CSS blur (radius ≈ 2σ).
+  function textShadow(r, color, shadow, glow = 0) {
     const out = [];
-    if (r > 0) for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8; out.push(`${(Math.cos(a) * r).toFixed(2)}px ${(Math.sin(a) * r).toFixed(2)}px 0 ${color}`); }
+    const b = glow > 0 ? (glow * 2).toFixed(1) + "px" : "0";
+    if (r > 0) for (let i = 0; i < 16; i++) { const a = i * Math.PI / 8; out.push(`${(Math.cos(a) * r).toFixed(2)}px ${(Math.sin(a) * r).toFixed(2)}px ${b} ${color}`); }
+    if (glow > 0) out.push(`0 0 ${b} ${color}`, `0 0 ${b} ${color}`);
     if (shadow) out.push(`${Math.max(1, r * 0.6 + 2).toFixed(1)}px ${Math.max(1, r * 0.6 + 2).toFixed(1)}px 2px rgba(0,0,0,.55)`);
     return out.join(",") || "none";
   }
   const upper = (t) => (st.style.upper ? t.toLocaleUpperCase(st.lang && st.lang !== "auto" ? st.lang : undefined) : t);
   function rgba(hex, op) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${op})`; }
+  // x: the middle of the text; y: its top, middle or bottom (anchor); width: where lines wrap. All % of the video.
   function layoutOverlay() {
     const stage = $("capStage"), ov = $("capOverlay"), s = st.style, F = FONTS[s.font] || FONTS.noto;
     const scale = stage.clientHeight / st.h;
@@ -319,17 +354,23 @@
     ov.style.fontFamily = `"AS ${s.font}", "AS ${F.bn}", sans-serif`;
     ov.style.fontSize = px + "px";
     ov.style.lineHeight = String(F.ratio);
+    ov.style.letterSpacing = (s.spacing || 0) / 100 + "em";
     ov.style.color = s.color;
-    ov.style.top = ov.style.bottom = ov.style.transform = "";
-    if (s.pos === "top") ov.style.top = s.offset + "%";
-    else if (s.pos === "middle") { ov.style.top = "50%"; ov.style.transform = "translateY(-50%)"; }
-    else ov.style.bottom = s.offset + "%";
+    ov.style.left = s.x + "%";
+    ov.style.top = s.y + "%";
+    ov.style.maxWidth = s.width + "%";
+    ov.dataset.anchor = s.anchor;
     ov.classList.toggle("boxed", !!s.box);
     ov.style.setProperty("--box", rgba(s.boxColor || "#000000", (s.boxOpacity ?? 70) / 100));
     ov.style.setProperty("--pad", (px * 0.22).toFixed(1) + "px");
-    ov.style.textShadow = s.box ? "none" : textShadow(s.outline / 100 * px, s.outlineColor, s.shadow);
+    ov.style.setProperty("--slide", (0.03 * stage.clientHeight).toFixed(1) + "px");
+    ov.style.textShadow = s.box ? "none" : textShadow(s.outline / 100 * px, s.outlineColor, s.shadow, (s.glow || 0) / 100 * px);
+    const phone = $("capGuides");
+    phone.classList.toggle("vertical", st.h > st.w);
+    phone.classList.toggle("showphone", st.h > st.w && !!s.phoneZone);
+    syncFrame();
   }
-  let lastKey = "";
+  let lastKey = "", lastCue = -1;
   function cueAt(t) {
     let lo = 0, hi = st.cues.length - 1;
     while (lo <= hi) { const m = (lo + hi) >> 1; if (st.cues[m].e <= t) lo = m + 1; else if (st.cues[m].s > t) hi = m - 1; else return m; }
@@ -344,19 +385,26 @@
       for (let k = 0; k < ws.length; k++) if (ws[k].s <= t) wi = k;
       if (wi < 0 && st.style.mode !== "reveal") wi = 0;
     }
-    const key = `${i}|${wi}|${st.style.mode}`;
+    // While paused (or moving the caption) with nothing on screen, show a faint caption so it can be placed.
+    const ghost = i < 0 && st.cues.length && (v.paused || drag) ? Math.max(0, Math.min(st.cues.length - 1, st.cues.findIndex((c) => c.s > t))) : -1;
+    const key = `${i}|${wi}|${st.style.mode}|${ghost}`;
     if (force || key !== lastKey) {
-      lastKey = key;
+      const newLine = i >= 0 && i !== lastCue && !v.paused && st.style.anim && st.style.anim !== "none";
+      lastKey = key; lastCue = i;
       const ov = $("capOverlay");
-      if (i < 0) ov.innerHTML = "";
+      ov.classList.toggle("ghost", ghost >= 0);
+      ov.classList.toggle("empty", i < 0 && ghost < 0);
+      if (i < 0 && ghost < 0) ov.innerHTML = "";
+      else if (i < 0) ov.innerHTML = `<span class="cap-line">${h(upper(st.cues[ghost].text))}</span>`;
       else {
         const ws = words(st.cues[i]), m = st.style.mode;
-        ov.innerHTML = `<span class="cap-line">${ws.map((w, k) => {
+        ov.innerHTML = `<span class="cap-line${newLine ? " in-" + st.style.anim : ""}">${ws.map((w, k) => {
           const on = m !== "none" && m !== "reveal" && k === wi;
           const hidden = m === "reveal" && k > wi;
           return `<span class="w${on ? " on" : ""}${on && m === "pop" ? " pop" : ""}${hidden ? " hid" : ""}"${on ? ` style="color:${st.style.hl}"` : ""}>${h(upper(w.t))}</span>`;
         }).join(" ")}</span>`;
       }
+      syncFrame();
       document.querySelectorAll("#capList .cap-cue.now").forEach((r) => r.classList.remove("now"));
       if (i >= 0) {
         const row = document.querySelector(`#capList .cap-cue[data-i="${i}"]`);
@@ -403,39 +451,227 @@
   }
 
   // The style panel.
+  const mine = () => (loadJSON("anysave.cap.mine") || []).filter((p) => p && p.id && p.s);
+  // A small sample of a style, for its button.
+  function sample(ps) {
+    const p = normalize({ ...BASE, ...ps }), F = FONTS[p.font] || FONTS.noto, px = 17;
+    const hl = p.mode === "word" || p.mode === "pop";
+    const look = `font-family:'AS ${p.font}','AS ${F.bn}',sans-serif;font-size:${px}px;line-height:${F.ratio};color:${p.color};letter-spacing:${(p.spacing || 0) / 100}em;` +
+      (p.box ? `background:${rgba(p.boxColor, p.boxOpacity / 100)};padding:1px 5px;` : `text-shadow:${textShadow(p.outline / 100 * px, p.outlineColor, p.shadow, (p.glow || 0) / 100 * px)};`) +
+      (p.upper ? "text-transform:uppercase;" : "");
+    return `<span class="pv"><span style="${h(look)}">Say <span style="${hl ? `color:${h(p.hl)}` : ""}">hello</span></span></span>`;
+  }
+  let naming = false;
   function drawStyle() {
     const s = st.style;
     const fontOpts = Object.entries(FONTS).filter(([, f]) => !f.hidden).map(([k, f]) => `<option value="${k}"${k === s.font ? " selected" : ""}>${h(f.label)}</option>`).join("");
-    const seg = (key, opts) => `<span class="chips seg">${opts.map(([v, l]) => `<button class="chip${String(s[key]) === v ? " active" : ""}" data-set="${key}" data-v="${v}">${h(l)}</button>`).join("")}</span>`;
+    const seg = (key, opts, cur = s[key]) => `<span class="chips seg">${opts.map(([v, l]) => `<button class="chip${String(cur) === v ? " active" : ""}" data-set="${key}" data-v="${v}">${h(l)}</button>`).join("")}</span>`;
+    const tile = (p, del) => `<button class="cap-preset${s.preset === p.id ? " on" : ""}" data-preset="${h(p.id)}" title="${h(p.desc || p.title)}">
+        ${sample(p.s)}<b>${h(p.title)}</b>${del ? `<span class="x" data-del="${h(p.id)}" title="Delete this style" role="button" aria-label="Delete ${h(p.title)}">×</span>` : ""}</button>`;
+    const my = mine();
     $("capStyle").innerHTML = `
-      <div class="cap-presets">${PRESETS.map((p) => `<button class="cap-preset${s.preset === p.id ? " on" : ""}" data-preset="${p.id}">
-        <b style="font-family:'AS ${p.s.font}';${p.s.upper ? "text-transform:uppercase;" : ""}">${h(p.title)}</b><span>${h(p.desc)}</span></button>`).join("")}</div>
+      <div class="cap-presets">${PRESETS.map((p) => tile(p)).join("")}</div>
+      ${my.length ? `<div class="cap-sub">Your styles</div><div class="cap-presets">${my.map((p) => tile(p, true)).join("")}</div>` : ""}
+      <div class="cap-mine">${naming
+        ? `<input id="capMineName" class="cv-input" maxlength="30" placeholder="Name this style" /> <button class="btn small primary" data-mine="save">Save</button> <button class="btn small" data-mine="cancel">Cancel</button>`
+        : `<button class="btn small" data-mine="new" title="Keep this look (font, colours, place on the video) to use again">+ Save as my style</button>`}</div>
+      <p class="muted small cap-tip">Drag the caption on the video to move it. Drag a corner to make it bigger or smaller, a side to change where lines wrap. Lines snap to the middle and safe edges; hold Alt (Option) to place freely. Arrow keys nudge it.</p>
       <div class="cap-grid">
         <label>Font <select data-k="font">${fontOpts}</select></label>
-        <label>Size <input type="range" min="2.5" max="11" step="0.1" data-k="size" value="${s.size}" /></label>
-        <label>Where ${seg("pos", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]])}</label>
-        <label>Distance from edge <input type="range" min="0" max="35" step="0.5" data-k="offset" value="${s.offset}"${s.pos === "middle" ? " disabled" : ""} /></label>
+        <label>Size <input type="range" min="2.5" max="14" step="0.1" data-k="size" value="${s.size}" /></label>
+        <label>Quick place ${seg("where", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]], s.anchor)}</label>
+        <label>Line width <input type="range" min="15" max="100" step="1" data-k="width" value="${s.width}" /></label>
         <label>Text colour <input type="color" data-k="color" value="${s.color}" /></label>
         <label class="chk"><input type="checkbox" data-k="upper"${s.upper ? " checked" : ""} /> CAPITAL LETTERS</label>
+        <label>Letter spacing <input type="range" min="-5" max="40" step="1" data-k="spacing" value="${s.spacing || 0}" /></label>
         <label>Background ${seg("box", [["false", "Outline"], ["true", "Box"]])}</label>
         ${s.box ? `<label>Box colour <input type="color" data-k="boxColor" value="${s.boxColor}" /></label>
           <label>Box see-through <input type="range" min="20" max="100" step="5" data-k="boxOpacity" value="${s.boxOpacity}" /></label>`
         : `<label>Outline <input type="range" min="0" max="25" step="0.5" data-k="outline" value="${s.outline}" /></label>
           <label>Outline colour <input type="color" data-k="outlineColor" value="${s.outlineColor}" /></label>
+          <label>Glow <input type="range" min="0" max="30" step="1" data-k="glow" value="${s.glow || 0}" /></label>
           <label class="chk"><input type="checkbox" data-k="shadow"${s.shadow ? " checked" : ""} /> Soft shadow</label>`}
         <label class="wide">Words ${seg("mode", [["none", "Still"], ["word", "Light up"], ["pop", "Pop"], ["reveal", "Appear"]])}</label>
         ${s.mode === "word" || s.mode === "pop" ? `<label>Highlight colour <input type="color" data-k="hl" value="${s.hl}" /></label>` : ""}
+        <label class="wide">Each line ${seg("anim", [["none", "Just shows"], ["fade", "Fades in"], ["pop", "Pops in"], ["slide", "Slides up"]])}</label>
+        ${st.h > st.w ? `<label class="chk wide"><input type="checkbox" data-k="phoneZone"${s.phoneZone ? " checked" : ""} /> Show where short-video apps put their buttons (keep captions out of the shaded parts)</label>` : ""}
       </div>`;
+    if (naming) setTimeout(() => $("capMineName")?.focus(), 0);
     layoutOverlay();
   }
   function setStyle(k, v, redraw) {
     const s = st.style;
-    if (["size", "offset", "outline", "boxOpacity"].includes(k)) v = +v;
+    snapTyping(); // one undo step per burst of changes
+    if (k === "where") {
+      Object.assign(s, posFrom(v, v === "top" ? 8 : 8), { placed: true });
+      drawStyle(); lastKey = ""; tick(true); persist();
+      return;
+    }
+    if (["size", "offset", "outline", "boxOpacity", "spacing", "glow", "width"].includes(k)) v = +v;
     if (v === "true") v = true; else if (v === "false") v = false;
-    s[k] = v; s.preset = "";
+    s[k] = v;
+    if (!["phoneZone", "width"].includes(k)) s.preset = "";
     if (redraw) drawStyle(); else layoutOverlay();
     lastKey = ""; tick(true);
     persist();
+  }
+  function saveMine() {
+    const title = ($("capMineName")?.value || "").trim() || "My style";
+    const { preset, placed, ...look } = st.style;
+    const list = mine();
+    const p = { id: "m" + Date.now().toString(36), title, mine: true, s: look };
+    list.push(p);
+    saveJSON("anysave.cap.mine", list.slice(-24));
+    st.style.preset = p.id;
+    naming = false; drawStyle(); persist();
+  }
+
+  // ---------- moving and resizing the caption on the video ----------
+  let drag = null;
+  const stageBox = () => $("capStage").getBoundingClientRect();
+  // A wrapped line box is as wide as the space it may use; FFmpeg's box hugs the longest line.
+  // So the caption is made exactly as wide as its longest line (measured without the entry animation).
+  function fitWidth(ov) {
+    ov.style.width = "";
+    const line = ov.firstElementChild;
+    if (!line) return;
+    line.style.animationPlayState = "paused";
+    const anim = line.style.animation;
+    line.style.animation = "none";
+    const r = document.createRange();
+    r.selectNodeContents(line);
+    let l = Infinity, rt = -Infinity;
+    for (const b of r.getClientRects()) if (b.width > 0.5) { l = Math.min(l, b.left); rt = Math.max(rt, b.right); }
+    line.style.animation = anim;
+    line.style.animationPlayState = "";
+    if (rt > l) ov.style.width = Math.ceil(rt - l + (st.style.box ? 2 * parseFloat(ov.style.getPropertyValue("--pad") || 0) : 0) + 1) + "px";
+  }
+  // The handles sit on the caption's box.
+  function syncFrame() {
+    const fr = $("capFrame"), ov = $("capOverlay");
+    if (!fr || !ov) return;
+    fitWidth(ov);
+    if (!ov.firstElementChild) { fr.hidden = true; return; }
+    fr.hidden = false;
+    const r = stageBox(), b = ov.getBoundingClientRect();
+    Object.assign(fr.style, { left: b.left - r.left + "px", top: b.top - r.top + "px", width: b.width + "px", height: b.height + "px" });
+  }
+  // The caption box's middle and size, in % of the video.
+  function boxPct() {
+    const r = stageBox(), b = $("capOverlay").getBoundingClientRect();
+    return { cx: (b.left + b.width / 2 - r.left) / r.width * 100, cy: (b.top + b.height / 2 - r.top) / r.height * 100, bw: b.width / r.width * 100, bh: b.height / r.height * 100, r };
+  }
+  function padPct() {
+    return st.style.box ? st.style.size / 100 * 0.22 * 100 : 0; // the box's padding, % of the video height
+  }
+  // Put the box's middle at (cx, cy): the anchor follows the half of the screen it is in, so a
+  // two-line caption at the bottom grows upwards and one at the top grows downwards.
+  function placeAt(cx, cy, bw, bh) {
+    const s = st.style;
+    cx = bw >= 100 ? 50 : Math.min(100 - bw / 2, Math.max(bw / 2, cx));
+    cy = bh >= 100 ? 50 : Math.min(100 - bh / 2, Math.max(bh / 2, cy));
+    const anchor = cy > 60 ? "bottom" : cy < 40 ? "top" : "middle", pad = padPct();
+    s.x = Math.round(cx * 10) / 10;
+    s.anchor = anchor;
+    s.y = Math.round((anchor === "bottom" ? cy + bh / 2 - pad : anchor === "top" ? cy - bh / 2 + pad : cy) * 10) / 10;
+    s.placed = true;
+  }
+  // Snap the box to the middle and the safe edges (title-safe 10% top and bottom, 5% at the sides).
+  function snap(cx, cy, bw, bh, r) {
+    const tx = 8 / r.width * 100, ty = 8 / r.height * 100, hits = [];
+    const phone = st.h > st.w && st.style.phoneZone;
+    const xs = [[50, cx, "gv"], [5 + bw / 2, cx, "safe"], [95 - bw / 2, cx, "safe"]];
+    if (phone) xs.push([86 - bw / 2, cx, "phone"]);
+    const ys = [[50, cy, "gh"], [10 + bh / 2, cy, "safe"], [90 - bh / 2, cy, "safe"]];
+    if (phone) ys.push([78 - bh / 2, cy, "phone"], [12 + bh / 2, cy, "phone"]);
+    const best = (list, th) => list.reduce((a, c) => Math.abs(c[0] - c[1]) < th && (!a || Math.abs(c[0] - c[1]) < Math.abs(a[0] - a[1])) ? c : a, null);
+    const bx = best(xs, tx), by = best(ys, ty);
+    if (bx) { cx = bx[0]; hits.push(bx[2]); }
+    if (by) { cy = by[0]; hits.push(by[2]); }
+    return { cx, cy, hits };
+  }
+  function showGuides(hits) {
+    const g = $("capGuides");
+    g.classList.toggle("on", !!hits);
+    for (const k of ["gv", "gh", "safe", "phone"]) g.querySelector("." + k).classList.toggle("hit", !!hits && hits.includes(k));
+  }
+  function readout(text) {
+    const r = document.querySelector("#capFrame .cap-readout");
+    if (r) { r.textContent = text || ""; r.hidden = !text; }
+  }
+  function startDrag(e) {
+    if (e.button !== 0 || !st.video) return;
+    const handle = e.target.closest("#capFrame [data-h]");
+    if (!handle && !e.target.closest("#capOverlay")) return;
+    if (!$("capOverlay").firstElementChild) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    $("capOverlay").focus({ preventScroll: true });
+    snapshot();
+    const b = boxPct();
+    drag = { mode: handle ? (["w", "e"].includes(handle.dataset.h) ? "width" : "scale") : "move", x0: e.clientX, y0: e.clientY, ...b,
+      size0: st.style.size, moved: false, ccx: b.r.left + b.cx / 100 * b.r.width, ccy: b.r.top + b.cy / 100 * b.r.height };
+    drag.d0 = Math.hypot(e.clientX - drag.ccx, e.clientY - drag.ccy) || 1;
+    $("capStage").classList.add("dragging");
+  }
+  function moveDrag(e) {
+    if (!drag) return;
+    const s = st.style, r = drag.r;
+    if (Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) > 2) drag.moved = true;
+    if (drag.mode === "move") {
+      let cx = drag.cx + (e.clientX - drag.x0) / r.width * 100, cy = drag.cy + (e.clientY - drag.y0) / r.height * 100;
+      let hits = [];
+      if (!e.altKey) ({ cx, cy, hits } = snap(cx, cy, drag.bw, drag.bh, r));
+      placeAt(cx, cy, drag.bw, drag.bh);
+      showGuides(hits);
+      readout(hits.includes("gv") && hits.includes("gh") ? "Centred" : hits.includes("gv") ? "Centred across" : hits.includes("gh") ? "Middle" : hits.length ? "Safe edge" : "");
+    } else if (drag.mode === "scale") {
+      const d = Math.hypot(e.clientX - drag.ccx, e.clientY - drag.ccy);
+      s.size = Math.round(Math.min(14, Math.max(2.5, drag.size0 * d / drag.d0)) * 10) / 10;
+      readout("Size " + s.size);
+    } else {
+      let w = Math.abs(e.clientX - drag.ccx) * 2 / r.width * 100;
+      if (!e.altKey && Math.abs(w - 86) < 2) w = 86;
+      s.width = Math.round(Math.min(100, Math.max(15, w)));
+      readout("Line width " + s.width + "%");
+    }
+    layoutOverlay();
+    lastKey = ""; tick(true);
+  }
+  function endDrag() {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    $("capStage").classList.remove("dragging");
+    showGuides(null); readout("");
+    if (!moved) undo.pop(); // just a click: nothing to undo
+    else { drawStyle(); persist(); }
+    lastKey = ""; tick(true);
+  }
+  // The line that is showing (or the faint one), for double-click editing.
+  function shownCue() {
+    const t = $("capVideo").currentTime || 0, i = cueAt(t);
+    if (i >= 0) return i;
+    return Math.max(0, Math.min(st.cues.length - 1, st.cues.findIndex((c) => c.s > t)));
+  }
+  function nudge(e) {
+    const s = st.style, k = e.key, step = e.shiftKey ? 2.5 : 0.5;
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(k)) {
+      snapTyping();
+      if (k === "ArrowLeft") s.x = Math.max(0, s.x - step);
+      if (k === "ArrowRight") s.x = Math.min(100, s.x + step);
+      if (k === "ArrowUp") s.y = Math.max(0, s.y - step);
+      if (k === "ArrowDown") s.y = Math.min(100, s.y + step);
+      s.x = Math.round(s.x * 10) / 10; s.y = Math.round(s.y * 10) / 10; s.placed = true;
+    } else if (k === "+" || k === "=" || k === "-") {
+      snapTyping();
+      s.size = Math.round(Math.min(14, Math.max(2.5, s.size + (k === "-" ? -0.2 : 0.2))) * 10) / 10;
+    } else if (k === "Enter") {
+      focusRow(shownCue(), e);
+      return;
+    } else return;
+    e.preventDefault();
+    layoutOverlay(); lastKey = ""; tick(true); persist();
   }
 
   // ---------- editing ----------
@@ -586,9 +822,20 @@
     const fs = (f) => Math.round(px * f.ratio * 10) / 10;
     const bord = s.box ? Math.round(px * 0.22 * 10) / 10 : Math.round(s.outline / 100 * px * 10) / 10;
     const shad = !s.box && s.shadow ? Math.round((bord * 0.6 + 2) * 10) / 10 : 0;
-    const an = s.pos === "top" ? 8 : s.pos === "middle" ? 5 : 2;
-    const mv = s.pos === "middle" ? 0 : Math.round(s.offset / 100 * H);
-    const ml = Math.round(W * 0.07);
+    // Placed with \\pos: x is the middle of the text, y its top, middle or bottom (as the preview).
+    // Lines wrap inside the margins, so they set the width.
+    const an = s.anchor === "top" ? 8 : s.anchor === "middle" ? 5 : 2;
+    const ml = Math.round(W * (100 - s.width) / 200);
+    const X = Math.round(s.x / 100 * W), Y = Math.round(s.y / 100 * H);
+    const sp = Math.round((s.spacing || 0) / 100 * px * 10) / 10;
+    const blur = !s.box && s.glow > 0 ? Math.round(s.glow / 100 * px * 10) / 10 : 0;
+    // How each line comes in (only the first moment of a line, not every word change).
+    const dy = Math.round(0.03 * H);
+    const enter = (first) => {
+      const a = first ? s.anim : "none";
+      const at = a === "slide" ? `\\move(${X},${Y + dy},${X},${Y},0,160)\\fad(100,0)` : `\\pos(${X},${Y})`;
+      return `{\\an${an}${at}${a === "fade" ? "\\fad(120,0)" : ""}${a === "pop" ? "\\fscx70\\fscy70\\t(0,140,\\fscx100\\fscy100)" : ""}${blur ? `\\blur${blur}` : ""}}`;
+    };
     // Box: libass's BorderStyle 4 draws one box around the whole caption in BackColour, padded by Outline.
     const outlineC = s.box ? "&HFF000000" : assColor(s.outlineColor);
     const backC = s.box ? assColor(s.boxColor, Math.round((1 - (s.boxOpacity ?? 70) / 100) * 255)) : "&H73000000";
@@ -603,7 +850,7 @@ YCbCr Matrix: None
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${F.name},${fs(F)},${assColor(s.color)},${assColor(s.color)},${outlineC},${backC},${F.bold ? -1 : 0},0,0,0,100,100,0,0,${s.box ? 4 : 1},${bord},${shad},${an},${ml},${ml},${mv},1
+Style: Default,${F.name},${fs(F)},${assColor(s.color)},${assColor(s.color)},${outlineC},${backC},${F.bold ? -1 : 0},0,0,0,100,100,${sp},0,${s.box ? 4 : 1},${bord},${shad},${an},${ml},${ml},0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -615,15 +862,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         const f = BN_RUN.test(p) ? BN : F;
         // Only the letters' and outline's see-through (\\1a, \\3a): \\alpha would also change the box.
         const a = hidden ? "FF" : "00";
-        const tag = `\\fn${f.name}\\fs${fs(f) * (on && s.mode === "pop" ? 1.15 : 1)}\\b${f.bold}\\c${on ? hl : color}\\1a&H${a}&\\3a&H${a}&${s.box ? "" : `\\4a&H${hidden ? "FF" : "73"}&`}`;
+        const tag = `\\fn${f.name}\\fs${fs(f) * (on && s.mode === "pop" ? 1.15 : 1)}\\b${f.bold}\\c${on ? hl : color}\\1a&H${a}&${s.box ? "" : `\\3a&H${a}&\\4a&H${hidden ? "FF" : "73"}&`}`; // in a box the outline stays see-through
         return `{${tag}}${assText(p)}`;
       }).join("");
     };
     const lines = [];
-    const add = (a, b, text) => { if (b - a >= 0.01) lines.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${text}`); };
+    let first = true;
+    const add = (a, b, text) => { if (b - a >= 0.01) { lines.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${enter(first)}${text}`); first = false; } };
     for (const c of st.cues) {
       const ws = words(c);
       if (!ws.length) continue;
+      first = true;
       if (s.mode === "none") { add(c.s, c.e, ws.map((w) => word(w, false, false)).join(" ")); continue; }
       if (s.mode === "reveal" && ws[0].s > c.s) add(c.s, ws[0].s, ws.map((w) => word(w, false, true)).join(" "));
       for (let k = 0; k < ws.length; k++) {
@@ -915,6 +1164,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     seek((e.clientX - r.left) / r.width * (st.dur || 0));
   });
   new ResizeObserver(() => { layoutOverlay(); lastKey = ""; }).observe($("capStage"));
+  const stageEl = $("capStage");
+  stageEl.addEventListener("pointerdown", startDrag);
+  stageEl.addEventListener("pointermove", moveDrag);
+  stageEl.addEventListener("pointerup", endDrag);
+  stageEl.addEventListener("pointercancel", endDrag);
+  $("capOverlay").addEventListener("dblclick", (e) => { if (st.cues.length) focusRow(shownCue(), e); });
+  $("capOverlay").addEventListener("keydown", nudge);
+  // Pinch (or Ctrl + scroll) on the caption changes its size.
+  let wheelSnap = 0;
+  stageEl.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey || !e.target.closest("#capOverlay, #capFrame") || !st.video) return;
+    e.preventDefault();
+    if (Date.now() - wheelSnap > 800) snapshot();
+    wheelSnap = Date.now();
+    st.style.size = Math.round(Math.min(14, Math.max(2.5, st.style.size * Math.exp(-e.deltaY * 0.01))) * 10) / 10;
+    layoutOverlay(); lastKey = ""; tick(true); persist();
+    clearTimeout(stageEl._w); stageEl._w = setTimeout(drawStyle, 300);
+  }, { passive: false });
 
   $("capPick").onclick = pick;
   $("capFromDl").onchange = async (e) => {
@@ -924,15 +1191,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   };
   $("capClose").onclick = () => { v.removeAttribute("src"); v.load(); st.video = null; stopJobWatch(); msg(""); drawAll(); };
   $("capStyle").addEventListener("click", (e) => {
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      e.stopPropagation();
+      saveJSON("anysave.cap.mine", mine().filter((p) => p.id !== del.dataset.del));
+      return drawStyle();
+    }
+    const mb = e.target.closest("[data-mine]");
+    if (mb) {
+      if (mb.dataset.mine === "save") return saveMine();
+      naming = mb.dataset.mine === "new";
+      return drawStyle();
+    }
     const p = e.target.closest("[data-preset]");
     if (p) {
-      const pr = PRESETS.find((x) => x.id === p.dataset.preset);
-      st.style = { ...st.style, ...pr.s, preset: pr.id };
+      const pr = PRESETS.find((x) => x.id === p.dataset.preset) || mine().find((x) => x.id === p.dataset.preset);
+      if (!pr) return;
+      snapshot();
+      st.style = { ...applyPreset(st.style, pr), phoneZone: st.style.phoneZone };
       drawStyle(); lastKey = ""; tick(true); persist();
       return;
     }
     const c = e.target.closest("[data-set]");
     if (c) setStyle(c.dataset.set, c.dataset.v, true);
+  });
+  $("capStyle").addEventListener("keydown", (e) => {
+    if (e.target.id === "capMineName" && e.key === "Enter") saveMine();
+    if (e.target.id === "capMineName" && e.key === "Escape") { naming = false; drawStyle(); }
   });
   $("capStyle").addEventListener("input", (e) => {
     const k = e.target.dataset.k;
@@ -988,7 +1273,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   });
 
   // For tests and the desktop app: the current captions as files.
-  window.__captions = { st, toAss, toSrt, toVtt, sentences, dubSrt };
+  window.__captions = { st, toAss, toSrt, toVtt, sentences, dubSrt, PRESETS, FONTS, normalize, drawAll };
   requestAnimationFrame(loop);
   if (location.hash === "#captions") { cv()?.session().catch(() => {}); window.fillCaptionsPicker(); }
 })();

@@ -32,6 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -841,6 +842,56 @@ func actionOpen(msg map[string]any) map[string]any {
 	return map[string]any{"ok": true}
 }
 
+// Text files up to this size also go on the clipboard as text.
+const copyTextMax = 4 << 20
+
+// actionCopyFile puts a finished download on the clipboard, ready to paste as a file
+// (and, for text and pictures, as their contents). Files Chrome saved can sit anywhere
+// in Downloads, so that whole folder is allowed, and nothing outside it.
+func actionCopyFile(msg map[string]any) map[string]any {
+	p, err := filepath.Abs(str(msg, "file"))
+	if err == nil {
+		if r, e := filepath.EvalSymlinks(p); e == nil {
+			p = r
+		}
+	}
+	allowed := false
+	for _, dir := range []string{downloadDir, userDownloadsDir()} {
+		base, _ := filepath.Abs(dir)
+		if r, e := filepath.EvalSymlinks(base); e == nil {
+			base = r
+		}
+		if base != "" && strings.HasPrefix(p, base+string(filepath.Separator)) {
+			allowed = true
+		}
+	}
+	st, serr := os.Stat(p)
+	if err != nil || !allowed || serr != nil || !st.Mode().IsRegular() {
+		return map[string]any{"ok": false, "error": "File not found. It may have been moved or deleted."}
+	}
+	text, imageType := "", ""
+	ext := strings.ToLower(filepath.Ext(p))
+	switch ext {
+	case ".txt", ".csv", ".tsv", ".json", ".srt", ".vtt", ".md", ".xml", ".html", ".htm", ".log", ".ass", ".yaml", ".yml":
+		if st.Size() <= copyTextMax {
+			if b, e := os.ReadFile(p); e == nil && utf8.Valid(b) {
+				text = strings.TrimPrefix(string(b), "\uFEFF")
+			}
+		}
+	case ".png":
+		imageType = "public.png"
+	case ".jpg", ".jpeg":
+		imageType = "public.jpeg"
+	case ".gif":
+		imageType = "com.compuserve.gif"
+	}
+	if err := copyFileToClipboard(p, text, imageType); err != nil {
+		logf("copyFile %s: %v", p, err)
+		return map[string]any{"ok": false, "error": "Couldn't copy the file"}
+	}
+	return map[string]any{"ok": true, "asText": text != ""}
+}
+
 func actionReveal(msg map[string]any) map[string]any {
 	p, err := filepath.Abs(str(msg, "file"))
 	base, _ := filepath.Abs(downloadDir)
@@ -1016,6 +1067,8 @@ func main() {
 		send(actionReveal(msg))
 	case "open":
 		send(actionOpen(msg))
+	case "copyFile":
+		send(actionCopyFile(msg))
 	case "playlist":
 		send(actionPlaylist(msg))
 	case "probe":

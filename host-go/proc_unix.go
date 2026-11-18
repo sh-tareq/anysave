@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,36 @@ func killTree(cmd *exec.Cmd) {
 
 func revealInFileManager(path string) {
 	exec.Command("open", "-R", path).Run()
+}
+
+// copyFileToClipboard puts the file on the clipboard the way Finder's Copy does, so it
+// pastes as a file into Finder, Mail or a chat. Text files also carry their text and
+// pictures their image, so pasting into a document or spreadsheet gives the contents.
+// ANYSAVE_PASTEBOARD names a private pasteboard (used by tests, so the real clipboard
+// is left alone).
+func copyFileToClipboard(path, text, imageType string) error {
+	script := `ObjC.import('AppKit');
+function run(argv) {
+  var path = argv[0], text = argv[1], imgType = argv[2], name = argv[3];
+  var pb = name ? $.NSPasteboard.pasteboardWithName(name) : $.NSPasteboard.generalPasteboard;
+  pb.clearContents;
+  var item = $.NSPasteboardItem.alloc.init;
+  item.setStringForType($.NSURL.fileURLWithPath(path).absoluteString, 'public.file-url');
+  if (text) item.setStringForType(text, 'public.utf8-plain-text');
+  if (imgType) {
+    var data = $.NSData.dataWithContentsOfFile(path);
+    if (data) item.setDataForType(data, imgType);
+  }
+  return pb.writeObjects($([item])) ? 'ok' : 'failed';
+}`
+	out, err := exec.Command("osascript", "-l", "JavaScript", "-e", script, "--", path, text, imageType, os.Getenv("ANYSAVE_PASTEBOARD")).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if strings.TrimSpace(string(out)) != "ok" {
+		return fmt.Errorf("the clipboard refused the file")
+	}
+	return nil
 }
 
 // openWithDefaultApp opens a file in the app the user picked for its type.

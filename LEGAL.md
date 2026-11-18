@@ -86,6 +86,10 @@ AnySave is built on these open-source projects:
 | PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
 | whisper.cpp and the Whisper models | MIT | desktop (transcription, captions); Android app (Captions: whisper.cpp bundled, model downloaded on first use) |
 | Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper and Android app (caption fonts; licences in `host-go/fonts/licences` and the app's `assets/fonts/licences`) |
+| Poppins ExtraBold, Bebas Neue, Bangers, Lobster | SIL Open Font License 1.1 | desktop helper (more caption fonts; licences in `host-go/fonts/licences`) |
+| Permanent Marker | Apache-2.0 | desktop helper (caption font; licence in `host-go/fonts/licences`) |
+| andybalholm/brotli | MIT | desktop helper (unpacks downloads a server sent compressed) |
+| klauspost/compress | BSD-3-Clause | desktop helper (unpacks downloads a server sent compressed; also used by the archive tools) |
 | sherpa-onnx (k2-fsa) and ONNX Runtime (Microsoft) | Apache-2.0 / MIT | desktop Voice Lab (downloaded on first use); Android app (Studio: bundled) |
 | LLVM libc++ (from the Android NDK) | Apache-2.0 with LLVM exception | Android app (bundled, needed by the voice engine) |
 | Kitten TTS micro v0.8 (KittenML), sherpa-onnx build | Apache-2.0 | Android app, English read aloud (downloaded on first use) |

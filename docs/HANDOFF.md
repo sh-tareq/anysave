@@ -294,6 +294,29 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 19 Nov 2026 (owner's report + captions upgrade, Mac app + extension):
+  (1) **Fast engine saved some files still compressed.** A site sent a CSV export gzip-compressed in transit
+  (`Content-Encoding: gzip`), the browser would unpack it, the engine saved the raw bytes. Now every request asks for
+  `Accept-Encoding: identity`; if a server compresses anyway the file is fetched in one piece and unpacked as it
+  arrives (gzip, deflate, br, zstd: `engine/encoding.go`); anything else goes to Chrome. Test:
+  `engine/encoding_test.go` (fails on the old engine). (2) **Copy** button on finished downloads (popup, manager row
+  and details; also in the Mac app): puts the file on the clipboard like Finder's Copy; text files (≤4 MB) also carry
+  their text, pictures their image (`actionCopyFile` in main.go, `copyFileToClipboard` in proc_unix/proc_windows;
+  limited to the Downloads folder). `ANYSAVE_PASTEBOARD` makes tests use a private pasteboard. Test:
+  `copy_test.go`. (3) **Captions:** drag the caption anywhere on the video (snaps to the centre, the 10%/5% safe
+  edges and, for vertical videos, an optional short-video-app zone; Alt = free), corner handles resize, side handles
+  set the line width, arrow keys nudge, pinch/Ctrl+scroll resizes, double-click edits the line, a faint caption shows
+  when paused between lines; undo covers style changes. Style model is now `x`, `y`, `anchor`, `width` (old
+  `pos/offset` styles are converted by `normalize`); ASS uses `\an`+`\pos` with margins for the wrap width.
+  New: 5 fonts (Poppins ExtraBold, Bebas Neue, Bangers, Permanent Marker, Lobster), 9 new looks (15 in all, shown as
+  live samples), letter spacing, glow (`\blur`), line entry animation (fade/pop/slide), saving your own looks. Fixed
+  on the way: in box mode the burned text got a black outline (`\3a` was set; only showed with light boxes), and the
+  preview box was wider than FFmpeg's (now measured to the longest line). Verified: preview vs FFmpeg frames for 5
+  looks match; burn through the page + helper works; the gzip CSV downloads as plain text through the daemon; Copy in
+  the popup and the manager (private pasteboard). Scratch tests: `pt/cap.js` (19 checks), `pt/burn.js`, `pt/dl.js`,
+  `pt/popup.js`. **Not tested:** Copy on Windows (PowerShell, written only), pasting into real apps by a person,
+  Android captions (unchanged: still the old styles and fixed positions).
+
 - 16 Nov 2026 (audit of the Mac app + extension): all helper Go tests and `go vet` (Mac + Windows) pass; all 13
   Puppeteer test files pass (74 checks, 1 skipped: YouTube hover previews don't play headless); real YouTube info,
   playlist and downloads through the helper; the desktop page (manager served by `--daemon`) loads, refuses requests

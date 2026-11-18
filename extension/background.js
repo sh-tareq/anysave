@@ -960,6 +960,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return native({ action: "reveal", file: msg.file || j?.file });
       }
       case "revealDirect": chrome.downloads.show(msg.downloadId); return { ok: true };
+      case "copyFile": {
+        // Puts the finished file on the clipboard (paste it into Finder, Mail, a chat; text
+        // files and pictures also paste as their contents).
+        const j = (await getJobs())[msg.id];
+        let file = j?.file;
+        if (!file && j?.downloadId) {
+          const [item] = await chrome.downloads.search({ id: j.downloadId });
+          if (item?.state === "complete" && item.exists !== false) file = item.filename;
+        }
+        if (!file) return { ok: false, error: "File not found. It may have been moved or deleted." };
+        return native({ action: "copyFile", file });
+      }
       case "searchTranscripts": {
         const dirs = Array.isArray(msg.dirs) ? msg.dirs.filter((d) => typeof d === "string").slice(0, 50) : [];
         return native({ action: "searchTranscripts", query: String(msg.query || "").slice(0, 200), dirs });

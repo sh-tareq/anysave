@@ -126,6 +126,7 @@ type resumeState struct {
 	LastModified string     `json:"lastModified"`
 	SHA256       string     `json:"sha256"`
 	AcceptRanges bool       `json:"acceptRanges"`
+	Encoding     string     `json:"encoding,omitempty"` // the server compressed the file in transit (gzip, br…)
 	Segments     []*Segment `json:"segments"`
 }
 
@@ -399,6 +400,18 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 		}
 
 		acceptRanges, totalBytes := parseRangeProbe(resp)
+		// Some servers compress the file in transit even when asked not to. The browser
+		// unpacks that; so must we, or a CSV is saved as gzip bytes. Byte ranges and the
+		// size then describe the packed data, so it is fetched in one piece and unpacked
+		// as it arrives.
+		enc := transferEncoding(resp)
+		if enc != "" {
+			if !canUnpack(enc) {
+				firstBody.Close()
+				return nil, &ErrFallbackRecommended{StatusCode: resp.StatusCode, Reason: "server sent the file packed as " + enc}
+			}
+			acceptRanges, totalBytes = false, 0
+		}
 
 		d.state = resumeState{
 			URL:          opts.URL,
@@ -409,6 +422,7 @@ func runDownloadAttempt(ctx context.Context, opts Options, forceFresh bool) (*Re
 			LastModified: lastMod,
 			SHA256:       remoteHash,
 			AcceptRanges: acceptRanges && totalBytes > 0,
+			Encoding:     enc,
 		}
 
 		f, err := os.OpenFile(d.partPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
@@ -784,6 +798,8 @@ func (d *activeDownload) newRequest(ctx context.Context, targetURL string) (*htt
 		return nil, err
 	}
 	req.Header.Set("User-Agent", d.opts.UserAgent)
+	// Ask for the file exactly as stored, so the bytes saved are the bytes of the file.
+	req.Header.Set("Accept-Encoding", "identity")
 	if d.cookieHeader != "" {
 		req.Header.Set("Cookie", d.cookieHeader)
 	}
@@ -1286,6 +1302,17 @@ func (d *activeDownload) downloadSingleStream(ctx context.Context, firstBody io.
 				return fmt.Errorf("HTTP %d", resp.StatusCode)
 			}
 			body = resp.Body
+			if d.state.Encoding == "" {
+				d.state.Encoding = transferEncoding(resp)
+			}
+		}
+		if d.state.Encoding != "" {
+			dec, err := unpacker(body, d.state.Encoding)
+			if err != nil {
+				body.Close()
+				return fmt.Errorf("could not unpack the %s-compressed file: %w", d.state.Encoding, err)
+			}
+			body = dec
 		}
 
 		if _, err := d.partFile.Seek(0, io.SeekStart); err != nil {

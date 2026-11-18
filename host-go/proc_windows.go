@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +15,11 @@ import (
 )
 
 const (
-	createNoWindow                     = 0x08000000
-	jobObjectExtendedLimitInformation  = 9
-	jobObjectLimitKillOnJobClose       = 0x00002000
-	processTerminate                   = 0x0001
-	processSetQuota                    = 0x0100
+	createNoWindow                    = 0x08000000
+	jobObjectExtendedLimitInformation = 9
+	jobObjectLimitKillOnJobClose      = 0x00002000
+	processTerminate                  = 0x0001
+	processSetQuota                   = 0x0100
 )
 
 var (
@@ -166,6 +167,30 @@ func killTree(cmd *exec.Cmd) {
 
 func revealInFileManager(path string) {
 	exec.Command("explorer", "/select,", path).Run()
+}
+
+// copyFileToClipboard puts the file on the clipboard the way Explorer's Copy does; text
+// files also carry their text. Paths and text go in through the environment, never
+// into the script itself.
+func copyFileToClipboard(path, text, imageType string) error {
+	script := `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.DataObject
+$l = New-Object System.Collections.Specialized.StringCollection
+[void]$l.Add($env:ANYSAVE_CLIP_PATH)
+$d.SetFileDropList($l)
+if ($env:ANYSAVE_CLIP_TEXT) { $d.SetText($env:ANYSAVE_CLIP_TEXT) }
+if ($env:ANYSAVE_CLIP_IMAGE) { try { $d.SetImage([System.Drawing.Image]::FromFile($env:ANYSAVE_CLIP_PATH)) } catch {} }
+[System.Windows.Forms.Clipboard]::SetDataObject($d, $true)`
+	c := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command", script)
+	c.Env = append(os.Environ(), "ANYSAVE_CLIP_PATH="+path, "ANYSAVE_CLIP_TEXT="+text)
+	if imageType != "" {
+		c.Env = append(c.Env, "ANYSAVE_CLIP_IMAGE=1")
+	}
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // openWithDefaultApp opens a file in the app the user picked for its type

@@ -725,7 +725,13 @@ function renderJobs(jobs) {
       open.onclick = () => openDownload(j).then((r) => { if (r && !r.ok) alert(r.error || "Couldn't open the file"); });
       const show = Object.assign(document.createElement("button"), { className: "link small", textContent: "Show in folder" });
       show.onclick = () => chrome.runtime.sendMessage({ type: "reveal", id: j.id });
-      act.append(open, show);
+      const copy = Object.assign(document.createElement("button"), { className: "link small", textContent: "Copy", title: "Copy the file, then paste it anywhere (Finder, Mail, a chat…)" });
+      copy.onclick = async () => {
+        const r = await chrome.runtime.sendMessage({ type: "copyFile", id: j.id });
+        if (r?.ok) { copy.textContent = "Copied ✓"; setTimeout(() => { copy.textContent = "Copy"; }, 1600); }
+        else alert(r?.error || "Couldn't copy the file");
+      };
+      act.append(open, copy, show);
       // Drag the row out (to the desktop, a folder, a chat…), or double-click to open.
       li.draggable = true;
       li.classList.add("drag");
