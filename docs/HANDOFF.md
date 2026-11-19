@@ -294,6 +294,22 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 19 Nov 2026 (caption ideas, Mac app + extension, `captions.js` + `cv_captions.go`):
+  **Click a word** on the video → menu: its colour, size (Normal/Big/Huge = `w.c`/`w.z`), "every <word>", back to
+  normal (a drag still moves the caption; double-click still edits). **Colour the key words** (Look panel): numbers
+  (also Bengali digits), ALL-CAPS words, capitalised words mid-sentence, plus an own list; optional bigger.
+  **Speaker colours**: a row button cycles Speaker 1–4 (`c.sp`), 4 editable colours; picked by hand (no offline
+  speaker detection yet). **Own place**: a row button gives one line its own x/y/anchor/width (`c.pos`); drags,
+  width handles and arrow keys then move only that line. **Colour sweep** Words mode: colour fills each word as it is
+  said (preview: clip-path with `--p`; video: `\kf` with SecondaryColour = before, PrimaryColour = after).
+  **Shape** row: Original / 9:16 / 1:1 / 4:5 / 16:9, Crop (with a left–right slider) or Fit with black bars; the
+  burn prepends `crop`/`pad` (`frameFilter`), output named "(captions 9x16)". Order of colour: the word's own >
+  key word > speaker > style. Emoji left out on purpose: FFmpeg's caption drawing (libass) has no colour emoji, so
+  the saved video would not match the preview. Tests: scratch `pt/feat.js` (19 checks incl. a real 9:16 burn →
+  406×720) and preview vs FFmpeg frames (`cmp2/`: word colours, own place, 9:16 crop, 9:16 bars, sweep half-way
+  through a word). **Not tested:** Fit/crop on a portrait source turned into 16:9, a real long video, Android
+  (unchanged).
+
 - 19 Nov 2026 (captions started before the talking): Whisper often starts a line in the silence before it (the
   owner's A8 video: first line at 0:00, speech at 2.84 s). `cv_sync.go` finds the speech in the sound (loudness per
   20 ms against the recording's own quiet level; no guess when there are no quiet parts, e.g. music) and moves a

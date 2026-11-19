@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -395,6 +396,25 @@ func lineEnd() string {
 
 // ---------- burning ----------
 
+// frameRatios are the shapes the Captions page offers (width ÷ height).
+var frameRatios = map[string]float64{"9:16": 9.0 / 16, "1:1": 1, "4:5": 4.0 / 5}
+
+// frameFilter makes the video the chosen shape before the captions are drawn: "crop" keeps the part
+// at cx (0 = left/top, 100 = right/bottom), "fit" adds black bars. Sizes are even, as the page computes.
+func frameFilter(frame, fit string, cx float64) string {
+	a, ok := frameRatios[frame]
+	if !ok {
+		return ""
+	}
+	cx = math.Max(0, math.Min(100, cx)) / 100
+	r := strconv.FormatFloat(a, 'f', 6, 64)
+	if fit == "fit" {
+		return fmt.Sprintf("pad=w='trunc(max(iw,ih*%[1]s)/2+0.5)*2':h='trunc(max(ih,iw/%[1]s)/2+0.5)*2':x='(ow-iw)/2':y='(oh-ih)/2':color=black", r)
+	}
+	c := strconv.FormatFloat(cx, 'f', 4, 64)
+	return fmt.Sprintf("crop=w='trunc(min(iw,ih*%[1]s)/2+0.5)*2':h='trunc(min(ih,iw/%[1]s)/2+0.5)*2':x='(iw-ow)*%[2]s':y='(ih-oh)*%[2]s'", r, c)
+}
+
 // burnCaptions draws the page's styled captions (an ASS file) onto the video with the bundled fonts.
 func (j *cvJob) burnCaptions(video, ass, out string) error {
 	ff, err := ffmpegPath()
@@ -416,6 +436,9 @@ func (j *cvJob) burnCaptions(video, ass, out string) error {
 	esc := strings.NewReplacer(`\`, "/", ":", `\:`, "'", `\'`)
 	vf := fmt.Sprintf("subtitles='%s':fontsdir='%s',scale=trunc(iw/2)*2:trunc(ih/2)*2",
 		esc.Replace(filepath.ToSlash(plain)), esc.Replace(filepath.ToSlash(fonts)))
+	if f := frameFilter(j.spec.opt("frame"), j.spec.opt("fit"), j.spec.optF("cx", 50)); f != "" {
+		vf = f + "," + vf
+	}
 	a := []string{"-i", video, "-map", "0:v:0", "-map", "0:a:0?", "-vf", vf}
 	a = append(a, videoCodec(encoders(ff), "h264", 0, true, "mp4", j.spec.opt("hw") == "1")...)
 	switch mi.ACodec {

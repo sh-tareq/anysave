@@ -44,10 +44,14 @@
   ];
   // Values every style has (presets only list what they change).
   const BASE = { upper: false, color: "#ffffff", outline: 9, outlineColor: "#000000", shadow: false, box: false, boxColor: "#000000", boxOpacity: 70, mode: "none", hl: "#ffd400", spacing: 0, glow: 0, anim: "none", width: 86 };
+  // Settings that are about the words, not the look: a new look keeps them.
+  const SPK0 = ["#ffffff", "#ffd400", "#5ce1ff", "#ff7ab6"];
+  const WORDISH = { auto: false, autoColor: "#ffd400", autoBig: false, autoWords: "", spk: SPK0 };
   // Where a preset puts the caption: x is the middle of the text, y the edge named by anchor (both % of the video).
   const posFrom = (pos, off = 8) => pos === "top" ? { x: 50, y: off, anchor: "top" } : pos === "middle" ? { x: 50, y: 50, anchor: "middle" } : { x: 50, y: 100 - off, anchor: "bottom" };
   function normalize(s) {
-    s = { ...BASE, ...PRESETS[0].s, preset: "clean", ...(s || {}) };
+    s = { ...BASE, ...WORDISH, ...PRESETS[0].s, preset: "clean", ...(s || {}) };
+    if (!Array.isArray(s.spk) || s.spk.length !== 4) s.spk = [...SPK0];
     if (!(s.x >= 0 && s.y >= 0 && ["top", "middle", "bottom"].includes(s.anchor))) Object.assign(s, posFrom(s.pos, s.offset));
     if (!FONTS[s.font] || FONTS[s.font].hidden) s.font = "noto";
     return s;
@@ -56,6 +60,7 @@
   function applyPreset(cur, p) {
     const next = normalize({ ...BASE, ...p.s, preset: p.id });
     if (cur.placed && !p.mine) Object.assign(next, { x: cur.x, y: cur.y, anchor: cur.anchor, width: cur.width, placed: true });
+    if (!p.mine) for (const k of Object.keys(WORDISH)) next[k] = cur[k];
     return next;
   }
   const STYLE0 = normalize({});
@@ -71,6 +76,8 @@
     style: normalize(loadJSON("anysave.cap.style")),
     job: null, burnJob: null, sel: -1, follow: true,
     dub: null, // {from, to, model, voice, keep, lines: [{s, e, src, t}]}
+    vw: 1920, vh: 1080, // the video's own size; w × h is the finished frame (see the shape)
+    frame: { ar: "orig", fit: "crop", cx: 50 },
   };
   let undo = [], redo = [];
 
@@ -82,7 +89,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveJSON("anysave.cap.style", st.style);
-      if (st.video && st.cues.length) saveJSON(projectKey(), { lang: st.lang, cues: st.cues, orig: st.orig, chunk: st.chunk, style: st.style, dub: st.dub, at: Date.now() });
+      if (st.video && st.cues.length) saveJSON(projectKey(), { lang: st.lang, cues: st.cues, orig: st.orig, chunk: st.chunk, style: st.style, dub: st.dub, frame: st.frame, at: Date.now() });
     }, 400);
   }
 
@@ -139,16 +146,17 @@
 
   // ---------- undo ----------
   function snapshot() {
-    undo.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style }));
+    undo.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style, frame: st.frame }));
     if (undo.length > 100) undo.shift();
     redo = [];
   }
   function restore(from, to) {
     if (!from.length) return;
-    to.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style }));
+    to.push(JSON.stringify({ cues: st.cues, chunk: st.chunk, style: st.style, frame: st.frame }));
     const s = JSON.parse(from.pop());
     st.cues = s.cues; st.chunk = s.chunk;
     if (s.style) st.style = normalize(s.style);
+    if (s.frame && JSON.stringify(s.frame) !== JSON.stringify(st.frame)) { st.frame = s.frame; applyFrame(); }
     drawAll(); persist();
   }
   let typingSnap = null; // one undo step per burst of typing
@@ -184,11 +192,13 @@
     stopJobWatch();
     st.video = { path: file.path, name: file.name || file.path.split(/[\\/]/).pop(), size: file.size || 0 };
     st.cues = []; st.orig = null; st.chunk = ""; st.lang = ""; st.sel = -1; st.dub = null; undo = []; redo = [];
+    st.frame = { ar: "orig", fit: "crop", cx: 50 }; closeWordMenu();
     $("capResult").hidden = true;
     const saved = loadJSON(projectKey());
     if (saved?.cues?.length) {
       Object.assign(st, { lang: saved.lang, cues: saved.cues, orig: saved.orig, chunk: saved.chunk || "", dub: saved.dub || null });
       if (saved.style) st.style = normalize(saved.style);
+      if (saved.frame?.ar) st.frame = { ...st.frame, ...saved.frame };
       msg("Your edits from last time were brought back.");
     }
     addFonts().then(() => document.fonts.ready).then(() => { lastKey = ""; tick(true); }).catch(() => {});
@@ -347,9 +357,36 @@
   }
   const upper = (t) => (st.style.upper ? t.toLocaleUpperCase(st.lang && st.lang !== "auto" ? st.lang : undefined) : t);
   function rgba(hex, op) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${op})`; }
+  // ---------- how each word looks ----------
+  // Key words (when on): numbers, words in CAPITALS, names (a capital letter inside a sentence) and the
+  // user's own list. A word's own colour or size (clicked on the video) wins over everything.
+  const bare = (t) => String(t).replace(/^[^\p{L}\p{N}$€£৳₹]+|[^\p{L}\p{N}%]+$/gu, "");
+  function keyFlags(ws) {
+    const s = st.style;
+    if (!s.auto) return [];
+    const extra = new Set(String(s.autoWords || "").toLowerCase().split(/[,;\n]/).map((x) => x.trim()).filter(Boolean));
+    return ws.map((w, k) => {
+      const b = bare(w.t);
+      if (!b) return false;
+      if (extra.has(b.toLowerCase())) return true;
+      if (/[\d০-৯]/.test(b)) return true;
+      if (b.length > 1 && /^\p{Lu}+$/u.test(b)) return true;
+      return k > 0 && /^\p{Lu}/u.test(b) && !/[.?!:।]$/.test(ws[k - 1].t) && b !== "I" && !/^I['’]/.test(b);
+    });
+  }
+  const spkColor = (c) => (c && c.sp >= 0 && c.sp < 4 ? st.style.spk[c.sp] : null);
+  function wordLook(c, w, key) {
+    const s = st.style;
+    return { color: w.c || (key ? s.autoColor : null) || spkColor(c) || s.color, z: w.z || (key && s.autoBig ? 1.2 : 1) };
+  }
+
+  // Where the caption sits: the line's own place (moved on its own) or the shared one.
+  let shownI = -1;
+  const posOf = (i) => (i >= 0 && st.cues[i]?.pos) || st.style;
+
   // x: the middle of the text; y: its top, middle or bottom (anchor); width: where lines wrap. All % of the video.
   function layoutOverlay() {
-    const stage = $("capStage"), ov = $("capOverlay"), s = st.style, F = FONTS[s.font] || FONTS.noto;
+    const stage = $("capStage"), ov = $("capOverlay"), s = st.style, F = FONTS[s.font] || FONTS.noto, P = posOf(shownI);
     const scale = stage.clientHeight / st.h;
     const px = s.size / 100 * st.h * scale;
     ov.style.fontFamily = `"AS ${s.font}", "AS ${F.bn}", sans-serif`;
@@ -357,10 +394,11 @@
     ov.style.lineHeight = String(F.ratio);
     ov.style.letterSpacing = (s.spacing || 0) / 100 + "em";
     ov.style.color = s.color;
-    ov.style.left = s.x + "%";
-    ov.style.top = s.y + "%";
-    ov.style.maxWidth = s.width + "%";
-    ov.dataset.anchor = s.anchor;
+    ov.style.left = P.x + "%";
+    ov.style.top = P.y + "%";
+    ov.style.maxWidth = P.width + "%";
+    ov.dataset.anchor = P.anchor;
+    ov.style.setProperty("--hl", s.hl);
     ov.classList.toggle("boxed", !!s.box);
     ov.style.setProperty("--box", rgba(s.boxColor || "#000000", (s.boxOpacity ?? 70) / 100));
     ov.style.setProperty("--pad", (px * 0.22).toFixed(1) + "px");
@@ -391,21 +429,23 @@
     const key = `${i}|${wi}|${st.style.mode}|${ghost}`;
     if (force || key !== lastKey) {
       const newLine = i >= 0 && i !== lastCue && !v.paused && st.style.anim && st.style.anim !== "none";
-      lastKey = key; lastCue = i;
+      lastKey = key; lastCue = i; shownI = i >= 0 ? i : ghost;
       const ov = $("capOverlay");
       ov.classList.toggle("ghost", ghost >= 0);
       ov.classList.toggle("empty", i < 0 && ghost < 0);
       if (i < 0 && ghost < 0) ov.innerHTML = "";
       else if (i < 0) ov.innerHTML = `<span class="cap-line">${h(upper(st.cues[ghost].text))}</span>`;
       else {
-        const ws = words(st.cues[i]), m = st.style.mode;
+        const c = st.cues[i], ws = words(c), m = st.style.mode, keys = keyFlags(ws);
         ov.innerHTML = `<span class="cap-line${newLine ? " in-" + st.style.anim : ""}">${ws.map((w, k) => {
-          const on = m !== "none" && m !== "reveal" && k === wi;
+          const on = (m === "word" || m === "pop") && k === wi;
           const hidden = m === "reveal" && k > wi;
-          return `<span class="w${on ? " on" : ""}${on && m === "pop" ? " pop" : ""}${hidden ? " hid" : ""}"${on ? ` style="color:${st.style.hl}"` : ""}>${h(upper(w.t))}</span>`;
+          const L = wordLook(c, w, keys[k]), z = L.z * (on && m === "pop" ? 1.15 : 1);
+          const css = `color:${on ? st.style.hl : L.color};${z !== 1 ? `font-size:${z}em;` : ""}`;
+          return `<span class="w${hidden ? " hid" : ""}${m === "sweep" ? " sw" : ""}" data-k="${k}"${m === "sweep" ? ` data-t="${h(upper(w.t))}"` : ""} style="${css}">${h(upper(w.t))}</span>`;
         }).join(" ")}</span>`;
       }
-      syncFrame();
+      layoutOverlay();
       document.querySelectorAll("#capList .cap-cue.now").forEach((r) => r.classList.remove("now"));
       if (i >= 0) {
         const row = document.querySelector(`#capList .cap-cue[data-i="${i}"]`);
@@ -413,6 +453,13 @@
           row.classList.add("now");
           if (st.follow && !v.paused && !row.contains(document.activeElement)) row.scrollIntoView({ block: "nearest" });
         }
+      }
+    }
+    if (i >= 0 && st.style.mode === "sweep") { // the colour runs through each word as it is said
+      const ws = words(st.cues[i]);
+      for (const el of $("capOverlay").querySelectorAll(".w.sw")) {
+        const w = ws[+el.dataset.k];
+        if (w) el.style.setProperty("--p", Math.max(0, Math.min(100, (t - w.s) / Math.max(0.01, w.e - w.s) * 100)).toFixed(1) + "%");
       }
     }
     $("capTime").textContent = `${clock(t, false)} / ${clock(st.dur || v.duration || 0, false)}`;
@@ -425,15 +472,18 @@
   function drawList() {
     const list = $("capList");
     $("capCount").textContent = st.cues.length ? `${st.cues.length} lines` : "";
-    list.innerHTML = st.cues.map((c, i) => `<div class="cap-cue${i === st.sel ? " sel" : ""}" data-i="${i}">
+    list.innerHTML = st.cues.map((c, i) => `<div class="cap-cue${i === st.sel ? " sel" : ""}${c.sp >= 0 ? " has-spk" : ""}" data-i="${i}"${c.sp >= 0 ? ` style="--spk:${st.style.spk[c.sp]}"` : ""}>
       <div class="cap-cue-t">
         <button class="cap-play" data-a="play" title="Play from here" aria-label="Play from here">▶</button>
         <input class="cap-t" data-k="s" value="${clock(c.s)}" aria-label="Start time" />
         <span class="muted">→</span>
         <input class="cap-t" data-k="e" value="${clock(c.e)}" aria-label="End time" />
+        ${c.sp >= 0 ? `<span class="cap-badge" title="Speaker ${c.sp + 1}">Speaker ${c.sp + 1}</span>` : ""}${c.pos ? `<span class="cap-badge" title="This line has its own place on the video">own place</span>` : ""}
         <span class="cap-acts">
           <button data-a="merge" title="Join with the next line"${i + 1 >= st.cues.length ? " disabled" : ""}>Join ↓</button>
           <button data-a="add" title="Add a new line after this one">+ Line</button>
+          <button data-a="spk" class="cap-spk" title="Who is speaking: gives the line that speaker's colour (click again for the next speaker)">${c.sp >= 0 ? `<i style="background:${st.style.spk[c.sp]}"></i>Speaker ${c.sp + 1}` : "Speaker"}</button>
+          <button data-a="own" class="${c.pos ? "on" : ""}" title="${c.pos ? "This line has its own place on the video. Click to put it back with the others." : "Give this line its own place: then dragging it on the video moves only this line"}">${c.pos ? "Own place ✓" : "Own place"}</button>
           <button data-a="del" title="Delete this line">Delete</button>
         </span>
       </div>
@@ -476,7 +526,7 @@
       <div class="cap-mine">${naming
         ? `<input id="capMineName" class="cv-input" maxlength="30" placeholder="Name this style" /> <button class="btn small primary" data-mine="save">Save</button> <button class="btn small" data-mine="cancel">Cancel</button>`
         : `<button class="btn small" data-mine="new" title="Keep this look (font, colours, place on the video) to use again">+ Save as my style</button>`}</div>
-      <p class="muted small cap-tip">Drag the caption on the video to move it. Drag a corner to make it bigger or smaller, a side to change where lines wrap. Lines snap to the middle and safe edges; hold Alt (Option) to place freely. Arrow keys nudge it.</p>
+      <p class="muted small cap-tip">Drag the caption on the video to move it. Drag a corner to make it bigger or smaller, a side to change where lines wrap. Click a word to give it its own colour or size. Lines snap to the middle and safe edges; hold Alt (Option) to place freely. Arrow keys nudge it.</p>
       <div class="cap-grid">
         <label>Font <select data-k="font">${fontOpts}</select></label>
         <label>Size <input type="range" min="2.5" max="14" step="0.1" data-k="size" value="${s.size}" /></label>
@@ -492,8 +542,14 @@
           <label>Outline colour <input type="color" data-k="outlineColor" value="${s.outlineColor}" /></label>
           <label>Glow <input type="range" min="0" max="30" step="1" data-k="glow" value="${s.glow || 0}" /></label>
           <label class="chk"><input type="checkbox" data-k="shadow"${s.shadow ? " checked" : ""} /> Soft shadow</label>`}
-        <label class="wide">Words ${seg("mode", [["none", "Still"], ["word", "Light up"], ["pop", "Pop"], ["reveal", "Appear"]])}</label>
-        ${s.mode === "word" || s.mode === "pop" ? `<label>Highlight colour <input type="color" data-k="hl" value="${s.hl}" /></label>` : ""}
+        <label class="wide">Words ${seg("mode", [["none", "Still"], ["word", "Light up"], ["pop", "Pop"], ["sweep", "Colour sweep"], ["reveal", "Appear"]])}</label>
+        ${["word", "pop", "sweep"].includes(s.mode) ? `<label>${s.mode === "sweep" ? "Sweep colour" : "Highlight colour"} <input type="color" data-k="hl" value="${s.hl}" /></label>` : ""}
+        <label class="chk wide"><input type="checkbox" data-k="auto"${s.auto ? " checked" : ""} /> Colour the key words (numbers, names, CAPITALS)</label>
+        ${s.auto ? `<label>Key word colour <input type="color" data-k="autoColor" value="${s.autoColor}" /></label>
+          <label class="chk"><input type="checkbox" data-k="autoBig"${s.autoBig ? " checked" : ""} /> Make them bigger</label>
+          <label class="wide">Also these words <input type="text" class="cv-input" data-k="autoWords" value="${h(s.autoWords || "")}" placeholder="free, sale, today" /></label>` : ""}
+        <label class="wide">Speaker colours <span class="cap-spks">${s.spk.map((x, i) => `<span>${i + 1} <input type="color" data-k="spk${i}" value="${x}" title="Speaker ${i + 1}" /></span>`).join("")}</span>
+          <span class="muted small">Pick the speaker on each line (the Speaker button in the list).</span></label>
         <label class="wide">Each line ${seg("anim", [["none", "Just shows"], ["fade", "Fades in"], ["pop", "Pops in"], ["slide", "Slides up"]])}</label>
         ${st.h > st.w ? `<label class="chk wide"><input type="checkbox" data-k="phoneZone"${s.phoneZone ? " checked" : ""} /> Show where short-video apps put their buttons (keep captions out of the shaded parts)</label>` : ""}
       </div>`;
@@ -510,8 +566,9 @@
     }
     if (["size", "offset", "outline", "boxOpacity", "spacing", "glow", "width"].includes(k)) v = +v;
     if (v === "true") v = true; else if (v === "false") v = false;
-    s[k] = v;
-    if (!["phoneZone", "width"].includes(k)) s.preset = "";
+    if (/^spk\d$/.test(k)) { s.spk = [...s.spk]; s.spk[+k[3]] = v; drawList(); }
+    else s[k] = v;
+    if (!["phoneZone", "width", "auto", "autoColor", "autoBig", "autoWords"].includes(k) && !k.startsWith("spk")) s.preset = "";
     if (redraw) drawStyle(); else layoutOverlay();
     lastKey = ""; tick(true);
     persist();
@@ -568,7 +625,7 @@
   // Put the box's middle at (cx, cy): the anchor follows the half of the screen it is in, so a
   // two-line caption at the bottom grows upwards and one at the top grows downwards.
   function placeAt(cx, cy, bw, bh) {
-    const s = st.style;
+    const s = posOf(shownI); // the shared place, or this line's own
     cx = bw >= 100 ? 50 : Math.min(100 - bw / 2, Math.max(bw / 2, cx));
     cy = bh >= 100 ? 50 : Math.min(100 - bh / 2, Math.max(bh / 2, cy));
     const anchor = cy > 60 ? "bottom" : cy < 40 ? "top" : "middle", pad = padPct();
@@ -611,7 +668,7 @@
     snapshot();
     const b = boxPct();
     drag = { mode: handle ? (["w", "e"].includes(handle.dataset.h) ? "width" : "scale") : "move", x0: e.clientX, y0: e.clientY, ...b,
-      size0: st.style.size, moved: false, ccx: b.r.left + b.cx / 100 * b.r.width, ccy: b.r.top + b.cy / 100 * b.r.height };
+      size0: st.style.size, moved: false, word: handle ? null : e.target.closest("#capOverlay .w")?.dataset.k, cue: cueAt($("capVideo").currentTime || 0), ccx: b.r.left + b.cx / 100 * b.r.width, ccy: b.r.top + b.cy / 100 * b.r.height };
     drag.d0 = Math.hypot(e.clientX - drag.ccx, e.clientY - drag.ccy) || 1;
     $("capStage").classList.add("dragging");
   }
@@ -633,16 +690,19 @@
     } else {
       let w = Math.abs(e.clientX - drag.ccx) * 2 / r.width * 100;
       if (!e.altKey && Math.abs(w - 86) < 2) w = 86;
-      s.width = Math.round(Math.min(100, Math.max(15, w)));
-      readout("Line width " + s.width + "%");
+      posOf(shownI).width = Math.round(Math.min(100, Math.max(15, w)));
+      readout("Line width " + posOf(shownI).width + "%");
     }
     layoutOverlay();
     lastKey = ""; tick(true);
   }
+  let wordTimer = null;
   function endDrag() {
     if (!drag) return;
-    const moved = drag.moved;
+    const moved = drag.moved, wk = drag.word, wc = drag.cue;
     drag = null;
+    // A click (no drag) on a word opens its menu; a double-click edits the line instead.
+    if (!moved && wk != null && wc >= 0) { clearTimeout(wordTimer); wordTimer = setTimeout(() => openWordMenu(wc, +wk), 260); }
     $("capStage").classList.remove("dragging");
     showGuides(null); readout("");
     if (!moved) undo.pop(); // just a click: nothing to undo
@@ -659,6 +719,7 @@
     const s = st.style, k = e.key, step = e.shiftKey ? 2.5 : 0.5;
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(k)) {
       snapTyping();
+      const s = posOf(shownI);
       if (k === "ArrowLeft") s.x = Math.max(0, s.x - step);
       if (k === "ArrowRight") s.x = Math.min(100, s.x + step);
       if (k === "ArrowUp") s.y = Math.max(0, s.y - step);
@@ -673,6 +734,87 @@
     } else return;
     e.preventDefault();
     layoutOverlay(); lastKey = ""; tick(true); persist();
+  }
+
+  // ---------- the shape of the finished video ----------
+  // Original, or made vertical (9:16), square or 4:5 for phone apps: cropped (choose which part stays)
+  // or fitted with black bars. Captions are placed on the new frame; the helper crops the same way.
+  const RATIOS = { "9:16": 9 / 16, "1:1": 1, "4:5": 4 / 5 };
+  const even = (x) => Math.max(2, Math.round(x / 2) * 2);
+  function frameSize() {
+    const A = RATIOS[st.frame.ar], vw = st.vw, vh = st.vh;
+    if (!A) return [vw, vh];
+    const wide = vw / vh > A;
+    if (st.frame.fit === "fit") return wide ? [even(vw), even(vw / A)] : [even(vh * A), even(vh)];
+    return wide ? [even(vh * A), even(vh)] : [even(vw), even(vw / A)];
+  }
+  function applyFrame() {
+    [st.w, st.h] = frameSize();
+    const stage = $("capStage"), v = $("capVideo"), f = st.frame;
+    stage.style.aspectRatio = `${st.w} / ${st.h}`;
+    stage.style.width = `min(100%, calc(${st.h > st.w ? 66 : 56}vh * ${st.w / st.h}))`;
+    v.style.objectFit = f.ar !== "orig" && f.fit === "crop" ? "cover" : "contain";
+    const wide = st.vw / st.vh > (RATIOS[f.ar] || 0);
+    v.style.objectPosition = f.ar !== "orig" && f.fit === "crop" ? (wide ? `${f.cx}% 50%` : `50% ${f.cx}%`) : "50% 50%";
+    drawShape(); drawStyle(); lastKey = ""; tick(true);
+  }
+  function drawShape() {
+    const f = st.frame, box = $("capShape");
+    if (!box) return;
+    const wide = st.vw / st.vh > (RATIOS[f.ar] || 0);
+    box.innerHTML = `<label>Shape <select id="capAr">${[["orig", "Original"], ["9:16", "Vertical 9:16 (Reels, Shorts, TikTok)"], ["1:1", "Square 1:1"], ["4:5", "Portrait 4:5"]]
+      .map(([v, l]) => `<option value="${v}"${f.ar === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+      ${f.ar !== "orig" ? `<span class="chips seg">${[["crop", "Fill (crop)"], ["fit", "Fit (bars)"]].map(([v, l]) => `<button class="chip${f.fit === v ? " active" : ""}" data-fit="${v}">${l}</button>`).join("")}</span>` : ""}
+      ${f.ar !== "orig" && f.fit === "crop" ? `<label>Keep the ${wide ? "left ↔ right" : "top ↕ bottom"} part <input type="range" id="capCx" min="0" max="100" step="1" value="${f.cx}" /></label>` : ""}
+      <span class="muted small">${st.w} × ${st.h}</span>`;
+  }
+  function setFrame(patch) {
+    snapTyping();
+    st.frame = { ...st.frame, ...patch };
+    applyFrame(); persist();
+  }
+
+  // ---------- one word's own look (click a word on the video) ----------
+  const SWATCH = ["#ffffff", "#ffd400", "#ff3b3b", "#3ce37b", "#5ce1ff", "#ff7ab6", "#a77bff", "#111111"];
+  let wm = null; // {i, k, snapped}
+  function closeWordMenu() { wm = null; const m = $("capWordMenu"); if (m) m.hidden = true; }
+  function openWordMenu(i, k) {
+    const c = st.cues[i], w = c && words(c)[k];
+    if (!w) return;
+    wm = { i, k, snapped: false };
+    drawWordMenu();
+    const m = $("capWordMenu"), el = document.querySelector(`#capOverlay .w[data-k="${k}"]`);
+    const card = m.offsetParent?.getBoundingClientRect(), r = el?.getBoundingClientRect();
+    if (card && r) {
+      m.style.left = Math.max(4, Math.min(card.width - m.offsetWidth - 4, r.left - card.left + r.width / 2 - m.offsetWidth / 2)) + "px";
+      const below = r.bottom - card.top + 8;
+      m.style.top = (below + m.offsetHeight < card.height ? below : Math.max(4, r.top - card.top - m.offsetHeight - 8)) + "px";
+    }
+  }
+  function drawWordMenu() {
+    const m = $("capWordMenu");
+    if (!wm) { m.hidden = true; return; }
+    const c = st.cues[wm.i], w = c && words(c)[wm.k];
+    if (!w) return closeWordMenu();
+    const z = w.z || 1, b = bare(w.t) || w.t;
+    m.hidden = false;
+    m.innerHTML = `<div class="wm-head"><b>${h(upper(w.t))}</b><button class="wm-x" data-w="close" aria-label="Close">×</button></div>
+      <div class="wm-row">${SWATCH.map((x) => `<button class="wm-sw${w.c === x ? " on" : ""}" data-wc="${x}" style="background:${x}" title="${x}"></button>`).join("")}
+        <input type="color" data-wc-pick value="${w.c || st.style.color}" title="Any colour" /></div>
+      <div class="wm-row"><span class="muted small">Size</span><span class="chips seg">${[[1, "Normal"], [1.3, "Big"], [1.6, "Huge"]].map(([v, l]) => `<button class="chip${z === v ? " active" : ""}" data-wz="${v}">${l}</button>`).join("")}</span></div>
+      <label class="wm-all"><input type="checkbox" id="capWordAll" /> Every “${h(b)}” in the captions</label>
+      <div class="wm-row"><button class="btn small" data-w="reset">Back to normal</button><button class="btn small primary" data-w="close">Done</button></div>`;
+  }
+  function setWord(patch) {
+    if (!wm) return;
+    if (!wm.snapped) { snapshot(); wm.snapped = true; }
+    const c = st.cues[wm.i], w = words(c)[wm.k];
+    const all = $("capWordAll")?.checked, key = (bare(w.t) || w.t).toLowerCase();
+    const targets = all ? st.cues.flatMap((x) => words(x).filter((y) => (bare(y.t) || y.t).toLowerCase() === key)) : [w];
+    for (const t of targets) for (const [k, v] of Object.entries(patch)) { if (v == null) delete t[k]; else t[k] = v; }
+    const keepAll = all;
+    persist(); lastKey = ""; tick(true); drawWordMenu();
+    if (keepAll) $("capWordAll").checked = true;
   }
 
   // ---------- editing ----------
@@ -710,6 +852,20 @@
     const c = st.cues[i];
     switch (b.dataset.a) {
       case "play": seek(c.s, true); break;
+      case "spk":
+        snapshot();
+        c.sp = c.sp >= 3 ? undefined : (c.sp >= 0 ? c.sp + 1 : 0);
+        drawList(); persist(); lastKey = ""; tick(true); break;
+      case "own":
+        snapshot();
+        if (c.pos) { delete c.pos; msg("The line is back in the shared place."); }
+        else {
+          const P = st.style;
+          c.pos = { x: P.x, y: P.y, anchor: P.anchor, width: P.width };
+          msg("This line now has its own place: drag it on the video and only this line moves.");
+        }
+        seek(c.s + Math.min(0.2, (c.e - c.s) / 2));
+        drawList(); persist(); lastKey = ""; tick(true); break;
       case "merge": merge(i); break;
       case "del":
         snapshot(); st.cues.splice(i, 1); drawList(); drawTimeline(); persist(); lastKey = ""; break;
@@ -881,14 +1037,14 @@
     const shad = !s.box && s.shadow ? Math.round((bord * 0.6 + 2) * 10) / 10 : 0;
     // Placed with \\pos: x is the middle of the text, y its top, middle or bottom (as the preview).
     // Lines wrap inside the margins, so they set the width.
-    const an = s.anchor === "top" ? 8 : s.anchor === "middle" ? 5 : 2;
-    const ml = Math.round(W * (100 - s.width) / 200);
-    const X = Math.round(s.x / 100 * W), Y = Math.round(s.y / 100 * H);
+    const place = (P) => ({ an: P.anchor === "top" ? 8 : P.anchor === "middle" ? 5 : 2, ml: Math.round(W * (100 - P.width) / 200),
+      X: Math.round(P.x / 100 * W), Y: Math.round(P.y / 100 * H) });
+    const { an, ml } = place(s);
     const sp = Math.round((s.spacing || 0) / 100 * px * 10) / 10;
     const blur = !s.box && s.glow > 0 ? Math.round(s.glow / 100 * px * 10) / 10 : 0;
     // How each line comes in (only the first moment of a line, not every word change).
     const dy = Math.round(0.03 * H);
-    const enter = (first) => {
+    const enter = (first, { an, X, Y }) => {
       const a = first ? s.anim : "none";
       const at = a === "slide" ? `\\move(${X},${Y + dy},${X},${Y},0,160)\\fad(100,0)` : `\\pos(${X},${Y})`;
       return `{\\an${an}${at}${a === "fade" ? "\\fad(120,0)" : ""}${a === "pop" ? "\\fscx70\\fscy70\\t(0,140,\\fscx100\\fscy100)" : ""}${blur ? `\\blur${blur}` : ""}}`;
@@ -913,29 +1069,52 @@ Style: Default,${F.name},${fs(F)},${assColor(s.color)},${assColor(s.color)},${ou
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
     const color = assColor(s.color), hl = assColor(s.hl);
-    const word = (w, on, hidden) => {
+    // One word: its font (Bangla letters use the Bangla font), size and colours. In "Colour sweep" the
+    // fill colour (\\c) runs over the word's own colour (\\2c) while it is said (\\kf).
+    const word = (c, w, key, on, hidden, kara) => {
+      const L = wordLook(c, w, key), z = L.z * (on && s.mode === "pop" ? 1.15 : 1);
+      const base = assColor(L.color);
       const parts = upper(w.t).split(BN_RUN).filter(Boolean);
-      return parts.map((p) => {
+      return parts.map((p, n) => {
         const f = BN_RUN.test(p) ? BN : F;
         // Only the letters' and outline's see-through (\\1a, \\3a): \\alpha would also change the box.
         const a = hidden ? "FF" : "00";
-        const tag = `\\fn${f.name}\\fs${fs(f) * (on && s.mode === "pop" ? 1.15 : 1)}\\b${f.bold}\\c${on ? hl : color}\\1a&H${a}&${s.box ? "" : `\\3a&H${a}&\\4a&H${hidden ? "FF" : "73"}&`}`; // in a box the outline stays see-through
+        const col = s.mode === "sweep" ? `\\c${hl}\\2c${base}` : `\\c${on ? hl : base}`;
+        const tag = `${n === 0 && kara ? kara : ""}\\fn${f.name}\\fs${Math.round(fs(f) * z * 10) / 10}\\b${f.bold}${col}\\1a&H${a}&${s.box ? "" : `\\3a&H${a}&\\4a&H${hidden ? "FF" : "73"}&`}`; // in a box the outline stays see-through
         return `{${tag}}${assText(p)}`;
       }).join("");
     };
     const lines = [];
     let first = true;
-    const add = (a, b, text) => { if (b - a >= 0.01) { lines.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${enter(first)}${text}`); first = false; } };
     for (const c of st.cues) {
       const ws = words(c);
       if (!ws.length) continue;
       first = true;
-      if (s.mode === "none") { add(c.s, c.e, ws.map((w) => word(w, false, false)).join(" ")); continue; }
-      if (s.mode === "reveal" && ws[0].s > c.s) add(c.s, ws[0].s, ws.map((w) => word(w, false, true)).join(" "));
+      const P = place(c.pos || s), keys = keyFlags(ws);
+      const add = (a, b, text) => {
+        if (b - a < 0.01) return;
+        lines.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Default,,${P.ml},${P.ml},0,,${enter(first, P)}${text}`);
+        first = false;
+      };
+      const all = (on, hid) => ws.map((w, x) => word(c, w, keys[x], on === x, hid(x))).join(" ");
+      if (s.mode === "none") { add(c.s, c.e, all(-1, () => false)); continue; }
+      if (s.mode === "sweep") {
+        // One line; each word gets a pause (\\k) up to when it is said, then its sweep (\\kf), in hundredths.
+        let at = c.s;
+        const text = ws.map((w, x) => {
+          const ws0 = Math.max(at, Math.min(w.s, c.e)), we = Math.max(ws0, Math.min(w.e, c.e));
+          const gap = Math.round((ws0 - at) * 100), dur = Math.max(1, Math.round((we - ws0) * 100));
+          at = ws0 + dur / 100;
+          return word(c, w, keys[x], false, false, `${gap > 0 ? `\\k${gap}` : ""}\\kf${dur}`);
+        }).join(" ");
+        add(c.s, c.e, text);
+        continue;
+      }
+      if (s.mode === "reveal" && ws[0].s > c.s) add(c.s, ws[0].s, all(-1, () => true));
       for (let k = 0; k < ws.length; k++) {
         const a = k === 0 && s.mode !== "reveal" ? c.s : Math.max(c.s, ws[k].s);
         const b = k + 1 < ws.length ? Math.max(c.s, ws[k + 1].s) : c.e;
-        add(a, Math.min(b, c.e), ws.map((w, x) => word(w, s.mode !== "reveal" && x === k, s.mode === "reveal" && x > k)).join(" "));
+        add(a, Math.min(b, c.e), all(s.mode !== "reveal" ? k : -1, (x) => s.mode === "reveal" && x > k));
       }
     }
     return head + lines.join("\n") + "\n";
@@ -959,7 +1138,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const a = await cv().op("captionsSave", { path: st.video.path, format: "ass", text: toAss(), temp: true });
       if (!a.ok) throw new Error(a.error);
       const r = await send({ type: "convert", path: st.video.path, paths: [st.video.path, a.file], name: st.video.name,
-        spec: { tool: "captions", format: "mp4", opts: {} }, label: "With captions" });
+        spec: { tool: "captions", format: "mp4", opts: st.frame.ar === "orig" ? {} : { frame: st.frame.ar, fit: st.frame.fit, cx: String(st.frame.cx) } },
+        label: st.frame.ar === "orig" ? "With captions" : `With captions, ${st.frame.ar}` });
       if (!r?.ok) throw new Error(r?.error || "Couldn't start.");
       st.burnJob = r.id;
       const p = $("capProg");
@@ -1203,11 +1383,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // ---------- wiring ----------
   const v = $("capVideo");
   v.addEventListener("loadedmetadata", () => {
-    st.w = v.videoWidth || 1920; st.h = v.videoHeight || 1080; st.dur = v.duration || 0;
-    const stage = $("capStage");
-    stage.style.aspectRatio = `${st.w} / ${st.h}`;
-    stage.style.width = `min(100%, calc(56vh * ${st.w / st.h}))`;
-    drawTimeline(); layoutOverlay(); tick(true);
+    st.vw = v.videoWidth || 1920; st.vh = v.videoHeight || 1080; st.dur = v.duration || 0;
+    applyFrame();
+    drawTimeline();
   });
   v.addEventListener("error", () => {
     if (st.video) msg("This video can't play here, but captions can still be made and burned in. To preview it, convert it to MP4 first.", true);
@@ -1226,8 +1404,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   stageEl.addEventListener("pointermove", moveDrag);
   stageEl.addEventListener("pointerup", endDrag);
   stageEl.addEventListener("pointercancel", endDrag);
-  $("capOverlay").addEventListener("dblclick", (e) => { if (st.cues.length) focusRow(shownCue(), e); });
+  $("capOverlay").addEventListener("dblclick", (e) => { clearTimeout(wordTimer); closeWordMenu(); if (st.cues.length) focusRow(shownCue(), e); });
   $("capOverlay").addEventListener("keydown", nudge);
+  const shapeEl = $("capShape");
+  shapeEl.addEventListener("change", (e) => { if (e.target.id === "capAr") setFrame({ ar: e.target.value }); });
+  shapeEl.addEventListener("input", (e) => {
+    if (e.target.id !== "capCx") return;
+    st.frame.cx = +e.target.value;
+    const wide = st.vw / st.vh > (RATIOS[st.frame.ar] || 0);
+    $("capVideo").style.objectPosition = wide ? `${st.frame.cx}% 50%` : `50% ${st.frame.cx}%`;
+    persist();
+  });
+  shapeEl.addEventListener("click", (e) => { const b = e.target.closest("[data-fit]"); if (b) setFrame({ fit: b.dataset.fit }); });
+  const wmEl = $("capWordMenu");
+  wmEl.addEventListener("click", (e) => {
+    const sw = e.target.closest("[data-wc]"), z = e.target.closest("[data-wz]"), a = e.target.closest("[data-w]");
+    if (sw) setWord({ c: sw.dataset.wc });
+    else if (z) setWord({ z: +z.dataset.wz === 1 ? null : +z.dataset.wz });
+    else if (a?.dataset.w === "reset") setWord({ c: null, z: null });
+    else if (a?.dataset.w === "close") closeWordMenu();
+  });
+  wmEl.addEventListener("input", (e) => { if (e.target.matches("[data-wc-pick]")) setWord({ c: e.target.value }); });
+  document.addEventListener("pointerdown", (e) => { if (wm && !e.target.closest("#capWordMenu, #capOverlay")) closeWordMenu(); });
+  document.addEventListener("keydown", (e) => { if (wm && e.key === "Escape") closeWordMenu(); });
   // Pinch (or Ctrl + scroll) on the caption changes its size.
   let wheelSnap = 0;
   stageEl.addEventListener("wheel", (e) => {
@@ -1279,7 +1478,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   $("capStyle").addEventListener("input", (e) => {
     const k = e.target.dataset.k;
     if (!k) return;
-    setStyle(k, e.target.type === "checkbox" ? e.target.checked : e.target.value, e.target.tagName === "SELECT");
+    setStyle(k, e.target.type === "checkbox" ? e.target.checked : e.target.value, e.target.tagName === "SELECT" || k === "auto");
   });
   const list = $("capList");
   list.addEventListener("click", onListClick);

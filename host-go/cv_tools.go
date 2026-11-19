@@ -291,7 +291,11 @@ func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string
 		if video == "" || ass == "" {
 			return "", cvError("Choose a video and make captions first.")
 		}
-		out := file(baseNoExt(video)+" (captions)", "mp4")
+		name := baseNoExt(video) + " (captions)"
+		if _, ok := frameRatios[spec.opt("frame")]; ok {
+			name = baseNoExt(video) + " (captions " + strings.ReplaceAll(spec.opt("frame"), ":", "x") + ")"
+		}
+		out := file(name, "mp4")
 		return out, j.burnCaptions(video, ass, out)
 	case cvSpeak:
 		if format != "wav" && format != "m4a" {
