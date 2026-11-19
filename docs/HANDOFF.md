@@ -303,6 +303,15 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 19 Nov 2026 (**clear lists / delete**, Mac app + extension; owner: "no way to clear list or delete anything" in
+  the Tools pages): `extension/worklist.js` adds a "Recent work" card to Convert, Captions, Voice Lab and Archives
+  (the finished jobs of that tool; `manager.js` `render()` fires an `anysave-jobs` event). Each row: Open, Show in
+  folder, Move to Trash, Remove from list; the card has "Clear list" (files stay). Transcripts got a Delete button
+  (`.srt` + `.txt` to the Trash, the video stays). Helper op `trashPaths` (`cv_archive_ops.go`) only trashes inside
+  Downloads, Downloads/AnySave or folders the page was given (`showable`), and takes a split set's later parts
+  (`laterParts`). "remove" now also takes `ids` (daemon + background) so clearing many is one save, not one per item.
+  Tested: Puppeteer Mac-app 17/17, extension 7/7, `go test -run TestLaterParts`. Not tested: the real Finder/Recycle
+  Bin move (tests only used files that were already gone), Windows at runtime.
 - 19 Nov 2026 (**Archives**, Mac app + extension; branch `claude/archive-manager-a4dc2c`): a WinRAR-style archive
   manager. New sidebar page **Archives** (`extension/archives.js`, CSS `.ar-*`) with three tabs.
   *Open an archive*: drop, "Choose an archive…", one of your downloads, or the recent list

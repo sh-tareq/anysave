@@ -775,10 +775,16 @@ func (d *daemonServer) handleAction(req map[string]any) map[string]any {
 		d.resumeJob(id)
 		return map[string]any{"ok": true}
 
-	case "remove":
-		id := str(req, "id")
+	case "remove": // one job ("id") or many at once ("ids", e.g. "Clear list" on a Tools page)
 		d.mu.Lock()
-		delete(d.jobs, id)
+		delete(d.jobs, str(req, "id"))
+		if ids, ok := req["ids"].([]any); ok {
+			for _, v := range ids {
+				if id, ok := v.(string); ok {
+					delete(d.jobs, id)
+				}
+			}
+		}
 		d.saveJobsLocked()
 		d.broadcastLocked(false)
 		d.mu.Unlock()

@@ -147,6 +147,7 @@ function showTab(name) {
   if (name === "captions") { window.fillCaptionsPicker?.(); window.AnySaveCv?.session().catch(() => {}); }
   if (name === "voice") window.showVoiceLab?.();
   if (name === "archives") window.showArchives?.();
+  window.drawRecentWork?.();
   if (name === "transcripts") searchTranscripts($("txQuery").value);
   highlightNav();
 }
@@ -239,6 +240,7 @@ function sortJobs(list) {
 }
 
 function render() {
+  document.dispatchEvent(new Event("anysave-jobs")); // the Tools pages' "Recent work" lists
   if (dragging) { redrawAfterDrag = render; return; }
   const all = Object.values(jobs);
   // Counts in the sidebar
@@ -633,7 +635,7 @@ async function removeSelected() {
     ? "Stop this download and remove it from the list?"
     : `Remove ${s.length} downloads from the list? ${unfinished.length} of them ${unfinished.length === 1 ? "is" : "are"} not finished and will stop.\n\nFiles already saved stay on your computer.`)) return;
   for (const j of unfinished) await send({ type: "cancel", id: j.id });
-  for (const j of s) await send({ type: "remove", id: j.id });
+  await send({ type: "remove", ids: s.map((j) => j.id) });
   selected.clear();
   render();
 }
@@ -1207,8 +1209,23 @@ async function searchTranscripts(q) {
     if (r.txt) button("text", "Open the text", () => open(r.txt));
     if (r.video) button("open", "Open the video", () => open(r.video));
     button("folder", "Show in folder", () => send({ type: "reveal", file: r.srt }));
+    button("remove", "Delete this transcript", () => deleteTranscript(r));
     ul.appendChild(li);
   }
+}
+// Delete a transcript: its subtitle and text files go to the Trash (the video stays), and its
+// "Transcribe" item leaves the downloads list.
+async function deleteTranscript(r) {
+  const trash = /Mac/i.test(navigator.platform) ? "Trash" : "Recycle Bin";
+  if (!confirm(`Delete the transcript of "${r.name}"? Its subtitle and text files go to the ${trash} (you can put them back from there). The video stays.`)) return;
+  try {
+    const res = await window.AnySaveCv.op("trashPaths", { paths: [r.srt, r.txt].filter(Boolean) });
+    if (!res.ok) return toast(res.error, true);
+    const same = (p) => p && (p === r.srt || p === r.txt);
+    await send({ type: "remove", ids: Object.values(jobs).filter((j) => j.kind === "transcribe" && same(j.file)).map((j) => j.id) });
+    toast(`Moved to the ${trash}.`);
+    searchTranscripts($("txQuery").value.trim());
+  } catch (e) { toast(e.message, true); }
 }
 $("txSearchForm").addEventListener("submit", (e) => { e.preventDefault(); searchTranscripts($("txQuery").value.trim()); });
 $("txQuery").addEventListener("search", () => { if (!$("txQuery").value) searchTranscripts(""); }); // the x in the box

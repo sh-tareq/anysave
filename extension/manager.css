@@ -695,3 +695,15 @@ select, .trim input, .crawl-form input, .crawl-bar input[type="text"], .grid3 in
 }
 .ar-field .chips.seg { align-self: flex-start; }
 #arMkFormatNote { margin: -4px 2px 12px; }
+
+/* ---------- Recent work (Tools pages) ---------- */
+.card.work { margin-top: 14px; }
+.work-list { list-style: none; margin: 0; padding: 0; }
+.work-list li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; }
+.work-list li:hover { background: var(--hover); }
+.work-nm { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.work-nm b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-nm .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-list .err { color: var(--err); }
+.work-btns { display: flex; gap: 2px; flex: none; }
+.work-more { margin-top: 6px; }

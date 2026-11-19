@@ -277,7 +277,7 @@ func (s *cvServer) op(ctx context.Context, req map[string]any) map[string]any {
 		return map[string]any{"ok": true, "files": files}
 	case "voices", "voiceGet", "voiceSay", "voiceClean", "voiceCopy", "voiceForget":
 		return s.voiceOp(ctx, req)
-	case "arcOpen", "arcPreview", "arcHistory", "arcForget", "arcTrash", "pickFolder", "arcShow":
+	case "arcOpen", "arcPreview", "arcHistory", "arcForget", "arcTrash", "pickFolder", "arcShow", "trashPaths":
 		return s.arcOp(ctx, req)
 	case "allow":
 		// Files from AnySave's own downloads list (they're inside its folder anyway).

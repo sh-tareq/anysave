@@ -270,7 +270,11 @@ if ($d.ShowDialog($f) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::U
 // moveToTrash puts files in the Recycle Bin (so they can be put back).
 func moveToTrash(paths []string) error {
 	for _, p := range paths {
-		script := `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:ANYSAVE_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`
+		fn := "DeleteFile"
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			fn = "DeleteDirectory"
+		}
+		script := `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::` + fn + `($env:ANYSAVE_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`
 		c := exec.Command("powershell", "-NoProfile", "-Command", script)
 		c.Env = append(os.Environ(), "ANYSAVE_TRASH="+p)
 		c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}

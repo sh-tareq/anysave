@@ -957,7 +957,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return { ok: true };
       }
-      case "remove": await mutateJobs((jobs) => { delete jobs[msg.id]; }); return { ok: true };
+      case "remove": // one job (id) or many at once (ids, e.g. "Clear list" on a Tools page)
+        await mutateJobs((jobs) => { delete jobs[msg.id]; for (const id of msg.ids || []) delete jobs[id]; });
+        return { ok: true };
       case "clear":
         await mutateJobs((jobs) => {
           for (const [k, j] of Object.entries(jobs)) if (["done", "error", "cancelled"].includes(j.status)) delete jobs[k];

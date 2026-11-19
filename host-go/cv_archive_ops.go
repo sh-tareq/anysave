@@ -25,6 +25,7 @@ import (
 //	arcTrash    {path}            move an archive (every part of it) to the Trash
 //	pickFolder  {prompt}          choose a folder (where to unpack)
 //	arcShow     {path, how}       open a result folder, or show a result in Finder / Explorer
+//	trashPaths  {paths}           move results (files or folders) to the Trash, from the "Recent work" lists
 
 const (
 	arcMaxList    = 50000    // entries sent to the page
@@ -47,6 +48,8 @@ func (s *cvServer) arcOp(ctx context.Context, req map[string]any) map[string]any
 		return map[string]any{"ok": true, "path": p}
 	case "arcShow":
 		return s.arcShow(str(req, "path"), str(req, "how"))
+	case "trashPaths":
+		return s.trashPaths(req["paths"])
 	case "arcHistory":
 		return map[string]any{"ok": true, "items": arcHistoryList()}
 	case "arcForget":
@@ -304,15 +307,7 @@ func (s *cvServer) arcShow(p, how string) map[string]any {
 	if err != nil {
 		return fail("That isn't there any more. It may have been moved or deleted.")
 	}
-	ok := within(abs, downloadDir) || within(abs, userDownloadsDir())
-	s.mu.Lock()
-	for d := range s.arcDirs {
-		if abs == d || within(abs, d) {
-			ok = true
-		}
-	}
-	s.mu.Unlock()
-	if !ok {
+	if !s.showable(abs) {
 		return fail("AnySave can only show what it unpacked or made here.")
 	}
 	if how == "open" && st.IsDir() {
@@ -344,4 +339,68 @@ func (s *cvServer) arcNear(p string) bool {
 		}
 	}
 	return false
+}
+
+// showable is true for a place the pages may show or remove: AnySave's downloads folder, the Downloads
+// folder, next to an archive or file the user opened, or a folder they chose.
+func (s *cvServer) showable(abs string) bool {
+	if within(abs, downloadDir) || within(abs, userDownloadsDir()) {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for d := range s.arcDirs {
+		if abs == d || within(abs, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// trashPaths moves results to the Trash (they can be put back from there). Paths that are gone are
+// skipped; anything outside the allowed places is refused.
+func (s *cvServer) trashPaths(v any) map[string]any {
+	list, _ := v.([]any)
+	var paths []string
+	for _, x := range list {
+		p, _ := x.(string)
+		abs, err := filepath.Abs(p)
+		if p == "" || err != nil {
+			continue
+		}
+		if _, err := os.Lstat(abs); err != nil {
+			continue // already gone
+		}
+		if !s.showable(abs) {
+			return fail("AnySave can only move its own results to the Trash. " + filepath.Base(abs) + " is somewhere else.")
+		}
+		paths = append(paths, abs)
+		paths = append(paths, laterParts(abs)...)
+	}
+	if len(paths) == 0 {
+		return map[string]any{"ok": true, "count": 0}
+	}
+	if err := moveToTrash(paths); err != nil {
+		return fail("Couldn't move it to the Trash: " + err.Error())
+	}
+	return map[string]any{"ok": true, "count": len(paths)}
+}
+
+// laterParts returns the other parts of a split set when p is its first part ("name.001"): name.002,
+// name.003 and so on, while they exist. A split result is one item in the list, so it goes to the Trash whole.
+func laterParts(p string) []string {
+	ext := filepath.Ext(p)
+	if len(ext) < 4 || strings.Trim(ext[1:], "0") != "1" || strings.Trim(ext[1:], "0123456789") != "" {
+		return nil
+	}
+	stem, width := strings.TrimSuffix(p, ext), len(ext)-1
+	var out []string
+	for i := 2; i < 100000; i++ {
+		n := fmt.Sprintf("%s.%0*d", stem, width, i)
+		if _, err := os.Lstat(n); err != nil {
+			break
+		}
+		out = append(out, n)
+	}
+	return out
 }
