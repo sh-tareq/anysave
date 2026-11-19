@@ -38,6 +38,7 @@ type cvServer struct {
 	mu      sync.Mutex
 	allowed map[string]bool
 	dests   map[string]bool // folders made by renderStart
+	arcDirs map[string]bool // folders the Archives page may show: where opened archives are, and chosen folders
 }
 
 func newCvServer(token string) (*cvServer, error) {
@@ -55,7 +56,7 @@ func newCvServer(token string) (*cvServer, error) {
 			}
 		}
 	}()
-	return &cvServer{token: token, tmp: tmp, allowed: map[string]bool{}, dests: map[string]bool{}}, nil
+	return &cvServer{token: token, tmp: tmp, allowed: map[string]bool{}, dests: map[string]bool{}, arcDirs: map[string]bool{}}, nil
 }
 
 // sweepPreviewDirs deletes preview folders left behind by an AnySave that was closed or killed
@@ -269,12 +270,15 @@ func (s *cvServer) op(ctx context.Context, req map[string]any) map[string]any {
 		for _, p := range paths {
 			if e := s.fileEntry(p); e != nil {
 				s.allow(p)
+				s.arcDir(filepath.Dir(p)) // the Archives page may show what it makes next to a chosen file
 				files = append(files, e)
 			}
 		}
 		return map[string]any{"ok": true, "files": files}
 	case "voices", "voiceGet", "voiceSay", "voiceClean", "voiceCopy", "voiceForget":
 		return s.voiceOp(ctx, req)
+	case "arcOpen", "arcPreview", "arcHistory", "arcForget", "arcTrash", "pickFolder", "arcShow":
+		return s.arcOp(ctx, req)
 	case "allow":
 		// Files from AnySave's own downloads list (they're inside its folder anyway).
 		p, ok := s.readable(str(req, "path"))

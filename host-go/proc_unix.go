@@ -122,3 +122,49 @@ end try`
 }
 
 func hideWindow(cmd *exec.Cmd) {}
+
+// pickFolder shows the macOS "choose folder" dialog. Returns "" if the user cancels.
+func pickFolder(prompt string) (string, error) {
+	script := `try
+	tell current application
+		activate
+		return POSIX path of (choose folder with prompt "` + strings.ReplaceAll(prompt, `"`, "'") + `")
+	end tell
+on error number -128
+	return ""
+end try`
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(strings.TrimSpace(string(out)), "/"), nil
+}
+
+// moveToTrash puts files in the Trash (so they can be put back), via Finder.
+func moveToTrash(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	var items []string
+	for _, p := range paths {
+		items = append(items, `POSIX file "`+strings.ReplaceAll(strings.ReplaceAll(p, `\`, `\\`), `"`, `\"`)+`"`)
+	}
+	script := `tell application "Finder" to delete {` + strings.Join(items, ", ") + `}`
+	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// freeSpace is the free space on the disk that holds dir, or -1 when unknown.
+func freeSpace(dir string) int64 {
+	for d := dir; ; d = filepath.Dir(d) {
+		var st syscall.Statfs_t
+		if syscall.Statfs(d, &st) == nil {
+			return int64(st.Bavail) * int64(st.Bsize)
+		}
+		if d == filepath.Dir(d) {
+			return -1
+		}
+	}
+}

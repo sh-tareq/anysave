@@ -46,6 +46,7 @@
     <button class="nav" data-view="convert"><span class="ni" data-i="convert"></span>Convert</button>
     <button class="nav" data-view="captions"><span class="ni" data-i="captions"></span>Captions</button>
     <button class="nav" data-view="voice"><span class="ni" data-i="voice"></span>Voice Lab</button>
+    <button class="nav" data-view="archives"><span class="ni" data-i="archives"></span>Archives</button>
     <button class="nav" data-view="transcripts"><span class="ni" data-i="transcripts"></span>Transcripts</button>
     <button class="nav" data-view="grab"><span class="ni" data-i="grab"></span>Grab files from a site</button>
     <button class="nav" data-view="settings"><span class="ni" data-i="settings"></span>Settings</button>
@@ -308,6 +309,224 @@
     </div>
   </section>
 
+  <!-- ================= Archives ================= -->
+  <section id="archives" class="view page cv ar" hidden>
+    <h2>Archives</h2>
+    <p class="lead">Look inside, unpack and make ZIP, 7z, RAR, TAR and ISO files. Everything happens on this computer; nothing is uploaded.</p>
+    <div class="chips seg ar-tabs" role="tablist">
+      <button class="chip active" data-artab="open" role="tab">Open an archive</button>
+      <button class="chip" data-artab="make" role="tab">Make an archive</button>
+      <button class="chip" data-artab="split" role="tab">Split or join</button>
+    </div>
+    <div id="arMsg" class="msg" hidden></div>
+
+    <!-- open -->
+    <div id="arOpenPane" class="ar-pane">
+      <div id="arDrop" class="cv-drop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A2 2 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5 6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z"/></svg>
+        <div><b>Drop an archive here</b> <span class="muted">or</span></div>
+        <div class="row">
+          <button id="arPick" class="btn primary">Choose an archive…</button>
+          <select id="arFromDl" aria-label="Pick one of your downloads"><option value="">…or one of your downloads</option></select>
+        </div>
+        <div class="muted small">ZIP, 7z, RAR (also locked and split ones), TAR, GZ, BZ2, XZ, ZST and ISO.</div>
+      </div>
+
+      <div id="arRecentCard" class="card set" hidden>
+        <div class="cv-head"><h3>Recent archives</h3><button id="arRecentClear" class="btn small">Clear the list</button></div>
+        <ul id="arRecent" class="ar-recent"></ul>
+        <label class="setrow switch-row ar-auto"><div><b>Unpack downloaded archives</b><span>When a ZIP, 7z, RAR or TAR download finishes, unpack it next to the file. The archive is kept.</span></div>
+          <input type="checkbox" class="switch" id="arAutoUnpack" /></label>
+      </div>
+
+      <div id="arPw" class="card ar-pw" hidden>
+        <h3 id="arPwTitle">This archive is locked</h3>
+        <p class="small muted" id="arPwText">Type its password to see what's inside.</p>
+        <form id="arPwForm" class="row">
+          <input id="arPwInput" class="cv-input" type="password" autocomplete="off" placeholder="Password" aria-label="Password" />
+          <label class="small chk"><input type="checkbox" id="arPwShow" /> Show</label>
+          <button class="btn primary" type="submit">Open</button>
+          <button class="btn" type="button" id="arPwCancel">Cancel</button>
+        </form>
+      </div>
+
+      <div id="arView" hidden>
+        <div class="card">
+          <div class="cv-head"><h3 id="arName" class="cap-name"></h3><button id="arClose" class="btn small">Close</button></div>
+          <div id="arChips" class="ar-chips"></div>
+          <div id="arSafety" class="ar-safety" hidden></div>
+          <details id="arCommentBox" class="ar-comment" hidden><summary>Comment</summary><pre id="arComment"></pre></details>
+          <div class="ar-toolbar" role="toolbar" aria-label="Archive actions">
+            <button class="btn primary" id="arUnpack" title="Unpack everything with the settings below">Unpack all</button>
+            <button class="btn" id="arUnpackSel" disabled title="Unpack only the ticked files and folders">Unpack selected</button>
+            <button class="btn" id="arTest" title="Read every file and check it isn't damaged. Nothing is saved.">Test</button>
+            <button class="btn" id="arRepair" title="Save what can still be read from a damaged archive">Repair</button>
+            <button class="btn" id="arConvertBtn" title="Make a ZIP or 7z with the same files">Convert</button>
+            <span class="ar-sep"></span>
+            <button class="btn" id="arAdd" title="Add files to this archive">Add files</button>
+            <button class="btn" id="arDelete" disabled title="Delete the ticked items from the archive">Delete</button>
+            <button class="btn" id="arRename" disabled title="Rename the ticked item">Rename</button>
+            <button class="btn" id="arCommentEdit" title="Write or change the archive's comment (ZIP)">Comment</button>
+            <span class="ar-sep"></span>
+            <button class="btn" id="arTrash" title="Move the archive to the Trash (you can put it back from there)">Move to Trash</button>
+          </div>
+          <div id="arEditNote" class="hint" hidden></div>
+          <div id="arConvertBox" class="ar-inline" hidden>
+            <span class="vl-label">Convert to</span>
+            <select id="arConvFormat"><option value="zip">ZIP (opens everywhere)</option><option value="7z">7z (smaller)</option></select>
+            <input id="arConvPw" class="cv-input ar-short" type="password" autocomplete="new-password" placeholder="New password (optional)" aria-label="New password" />
+            <button class="btn primary" id="arConvGo">Convert</button>
+          </div>
+          <div id="arCommentEditBox" class="ar-inline col" hidden>
+            <textarea id="arCommentText" rows="3" maxlength="60000" placeholder="A comment shown when the archive is opened"></textarea>
+            <div class="row"><button class="btn primary" id="arCommentSave">Save comment</button><button class="btn" id="arCommentCancel">Cancel</button></div>
+          </div>
+        </div>
+
+        <div class="card ar-opts">
+          <div class="ar-optgrid">
+            <label class="small">Unpack to
+              <select id="arDest">
+                <option value="next">Next to the archive</option>
+                <option value="downloads">Downloads/AnySave/Unpacked</option>
+                <option value="pick">Choose a folder…</option>
+              </select></label>
+            <label class="small">Folder
+              <select id="arMode">
+                <option value="smart">Smart: no extra folder level</option>
+                <option value="folder">Always in a new folder</option>
+                <option value="here">Straight in, no folder</option>
+              </select></label>
+            <label class="small">If a name is already taken
+              <select id="arPolicy">
+                <option value="rename">Keep both (add a number)</option>
+                <option value="replace">Replace what's there</option>
+                <option value="skip">Keep what's there</option>
+              </select></label>
+          </div>
+          <div class="row ar-checks">
+            <label class="small chk"><input type="checkbox" id="arJunk" /> Also unpack system clutter (__MACOSX, .DS_Store, Thumbs.db)</label>
+            <label class="small chk"><input type="checkbox" id="arRecover" /> Keep going past damaged files</label>
+          </div>
+          <div id="arDestNote" class="hint"></div>
+          <div id="arProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span><button class="btn small" id="arStop">Stop</button></div>
+          <div id="arResult" class="cv-result" hidden></div>
+        </div>
+
+        <div class="ar-browser">
+          <div class="card ar-files">
+            <div class="ar-bar">
+              <nav id="arCrumbs" class="ar-crumbs" aria-label="Folder"></nav>
+              <input id="arSearch" class="cv-input ar-search" type="search" placeholder="Search names" aria-label="Search names inside the archive" />
+            </div>
+            <div class="ar-table" role="table">
+              <div class="ar-row ar-headrow" role="row">
+                <span><input type="checkbox" id="arAll" aria-label="Tick everything shown" /></span>
+                <button data-sort="name">Name</button><button data-sort="size">Size</button><button data-sort="packed">Packed</button><button data-sort="mtime">Changed</button>
+              </div>
+              <div id="arList" class="ar-list"></div>
+            </div>
+            <div id="arCount" class="hint"></div>
+          </div>
+          <div id="arPreview" class="card ar-preview">
+            <div class="muted small">Click a file to take a quick look at it here (text and pictures). Nothing is saved.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- make -->
+    <div id="arMakePane" class="ar-pane" hidden>
+      <div class="cv-main">
+        <div class="card">
+          <div class="cv-head"><h3>What to put in it</h3>
+            <div class="cv-head-actions"><button id="arMkFiles" class="btn small">Add files…</button><button id="arMkFolder" class="btn small">Add a folder…</button></div></div>
+          <ul id="arMkItems" class="cv-files"></ul>
+          <div id="arMkEmpty" class="muted small ar-empty">Add files or a folder, or drop files here.</div>
+        </div>
+        <div class="card">
+          <label class="small ar-field">Name <input id="arMkName" class="cv-input" type="text" maxlength="120" placeholder="My archive" /></label>
+          <div class="ar-field"><span class="small">Kind</span>
+            <div class="chips seg" id="arMkFormat"><button class="chip active" data-f="zip">ZIP</button><button class="chip" data-f="7z">7z</button></div></div>
+          <div id="arMkFormatNote" class="hint"></div>
+          <label class="small ar-field">Compression
+            <select id="arMkLevel">
+              <option value="0">Store (no compression, fastest)</option>
+              <option value="1">Fastest</option>
+              <option value="3">Fast</option>
+              <option value="5" selected>Normal</option>
+              <option value="7">Good</option>
+              <option value="9">Best (slowest)</option>
+            </select></label>
+          <label class="small ar-field"><span>Password <span class="muted">(optional, AES-256)</span></span>
+            <input id="arMkPw" class="cv-input" type="password" autocomplete="new-password" placeholder="No password" /></label>
+          <label class="small ar-field" id="arMkPw2Row" hidden>Type it again
+            <input id="arMkPw2" class="cv-input" type="password" autocomplete="new-password" /></label>
+          <label class="small chk" id="arMkNamesRow" hidden><input type="checkbox" id="arMkNames" checked /> Hide the file names too (the list needs the password)</label>
+          <label class="small chk" id="arMkSolidRow" hidden><input type="checkbox" id="arMkSolid" checked /> Solid (smaller, but taking out one file is slower)</label>
+          <label class="small ar-field">Split into parts
+            <select id="arMkSplit">
+              <option value="0">Don't split</option>
+              <option value="25">25 MB (email)</option>
+              <option value="100">100 MB</option>
+              <option value="700">700 MB (CD)</option>
+              <option value="1000">1 GB</option>
+              <option value="4096">4 GB (FAT32 USB sticks)</option>
+              <option value="4700">4.7 GB (DVD)</option>
+              <option value="custom">Other size…</option>
+            </select></label>
+          <label class="small ar-field" id="arMkSplitRow" hidden>Part size in MB <input id="arMkSplitMb" class="cv-input ar-short" type="number" min="1" step="1" value="50" /></label>
+          <label class="small ar-field"><span>Comment <span class="muted">(optional)</span></span>
+            <textarea id="arMkComment" rows="2" maxlength="60000"></textarea></label>
+          <label class="small ar-field">Save to
+            <select id="arMkDest">
+              <option value="next">Next to the first item</option>
+              <option value="downloads">Downloads/AnySave/Converted</option>
+              <option value="pick">Choose a folder…</option>
+            </select></label>
+          <label class="small chk"><input type="checkbox" id="arMkJunk" /> Also pack system clutter (.DS_Store, Thumbs.db)</label>
+          <button id="arMkGo" class="btn primary big" disabled>Make the archive</button>
+          <div id="arMkProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="arMkResult" class="cv-result" hidden></div>
+          <p class="hint">AnySave can open RAR files but can't make them: RAR's makers don't allow other apps to create RAR. ZIP opens on every computer; 7z is usually smaller.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- split / join -->
+    <div id="arSplitPane" class="ar-pane" hidden>
+      <div class="cv-main">
+        <div class="card">
+          <h3>Split a big file</h3>
+          <p class="small muted">Cut any file into parts (file.001, file.002…), for example to fit a USB stick or an email. Open the .001 part here to join them again.</p>
+          <div class="row"><button id="arSpPick" class="btn">Choose a file…</button><span id="arSpName" class="muted small">No file chosen</span></div>
+          <label class="small ar-field">Part size
+            <select id="arSpSize">
+              <option value="25">25 MB (email)</option>
+              <option value="100" selected>100 MB</option>
+              <option value="700">700 MB (CD)</option>
+              <option value="1000">1 GB</option>
+              <option value="4096">4 GB (FAT32 USB sticks)</option>
+              <option value="4700">4.7 GB (DVD)</option>
+            </select></label>
+          <button id="arSpGo" class="btn primary" disabled>Split</button>
+          <div id="arSpProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="arSpResult" class="cv-result" hidden></div>
+          <p class="hint">The parts are saved next to the file. The file itself is not changed.</p>
+        </div>
+        <div class="card">
+          <h3>Join parts</h3>
+          <p class="small muted">Choose any part: .001, .z01 (split ZIP) or .part1.rar. The other parts must be in the same folder.</p>
+          <div class="row"><button id="arJnPick" class="btn">Choose a part…</button><span id="arJnName" class="muted small">No part chosen</span></div>
+          <button id="arJnGo" class="btn primary" disabled>Join</button>
+          <div id="arJnProg" class="cv-progress" hidden><div class="cv-progress-bar"><i></i></div><span></span></div>
+          <div id="arJnResult" class="cv-result" hidden></div>
+          <p class="hint">A split ZIP becomes one normal ZIP. Split 7z, ZIP and RAR sets can also be opened directly in "Open an archive", without joining.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= Transcripts ================= -->
   <section id="transcripts" class="view page" hidden>
     <h2>Transcripts</h2>
@@ -462,6 +681,12 @@
         <input type="checkbox" class="switch" id="embedCover" /></label>
     </div>
 
+    <div class="card set">
+      <h3>Archives</h3>
+      <label class="setrow switch-row"><div><b>Unpack downloaded archives</b><span>ZIP, 7z, RAR and TAR downloads are unpacked next to the file when they finish. The archive is kept.</span></div>
+        <input type="checkbox" class="switch" id="autoUnpack" /></label>
+    </div>
+
     <div class="card set extension-only">
       <h3>Notifications</h3>
       <label class="setrow switch-row"><div><b>Tell me when a download finishes or fails</b></div>
@@ -546,5 +771,6 @@
 <script src="convert.js"></script>
 <script src="captions.js"></script>
 <script src="voice.js"></script>
+<script src="archives.js"></script>
 </body>
 </html>

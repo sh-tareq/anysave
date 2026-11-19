@@ -8,6 +8,8 @@ require (
 	github.com/ulikunitz/xz v0.5.17
 )
 
+require github.com/nwaples/rardecode/v2 v2.4.6
+
 require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/bodgit/plumbing v1.3.0 // indirect
@@ -25,5 +27,5 @@ require (
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/image v0.47.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/text v0.43.0
 )

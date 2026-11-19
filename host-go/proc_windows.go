@@ -253,3 +253,45 @@ func hideWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }
+
+// pickFolder shows the Windows folder dialog. Returns "" if the user cancels.
+func pickFolder(prompt string) (string, error) {
+	script := `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = "` + strings.ReplaceAll(prompt, `"`, "'") + `"
+$f = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+if ($d.ShowDialog($f) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; Write-Output $d.SelectedPath }`
+	c := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	out, err := c.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// moveToTrash puts files in the Recycle Bin (so they can be put back).
+func moveToTrash(paths []string) error {
+	for _, p := range paths {
+		script := `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:ANYSAVE_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`
+		c := exec.Command("powershell", "-NoProfile", "-Command", script)
+		c.Env = append(os.Environ(), "ANYSAVE_TRASH="+p)
+		c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+		if out, err := c.CombinedOutput(); err != nil {
+			return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+var procGetDiskFreeSpaceExW = syscall.NewLazyDLL("kernel32.dll").NewProc("GetDiskFreeSpaceExW")
+
+// freeSpace is the free space on the disk that holds dir, or -1 when unknown.
+func freeSpace(dir string) int64 {
+	p, err := syscall.UTF16PtrFromString(dir)
+	if err != nil {
+		return -1
+	}
+	var free uint64
+	if r, _, _ := procGetDiskFreeSpaceExW.Call(uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&free)), 0, 0); r == 0 {
+		return -1
+	}
+	return int64(free)
+}

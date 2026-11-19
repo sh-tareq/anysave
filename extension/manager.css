@@ -622,3 +622,76 @@ select, .trim input, .crawl-form input, .crawl-bar input[type="text"], .grid3 in
 .cap-dub-time { font-variant-numeric: tabular-nums; flex: none; }
 .cap-dub-tr { display: flex; gap: 6px; align-items: flex-start; }
 .cap-dub-tr textarea { flex: 1; resize: none; overflow: hidden; min-height: 32px; font: inherit; font-size: 13.5px; line-height: 1.45; padding: 6px 8px; }
+
+/* ---------- Archives ---------- */
+.ar-tabs { display: inline-flex; margin: 0 0 14px; }
+.ar-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ar-chip { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--hover); color: var(--muted); border: 1px solid var(--line); }
+.ar-chip.lock { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.ar-chip.bad { background: var(--err-soft); color: var(--err); border-color: transparent; }
+.ar-safety { margin: 0 0 10px; padding: 9px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 13px; display: grid; gap: 4px; }
+.ar-safety.bad { background: var(--err-soft); color: var(--err); }
+.ar-comment { margin: 0 0 10px; font-size: 12px; }
+.ar-comment summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.ar-comment pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; padding: 8px 10px; background: var(--bg); border-radius: 8px; max-height: 180px; overflow: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ar-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ar-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.ar-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.ar-inline.col { flex-direction: column; align-items: stretch; }
+.ar-inline textarea, .ar-field textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: inherit; background: var(--panel); color: var(--fg); resize: vertical; }
+.ar-short { max-width: 220px; }
+.ar-optgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.ar-optgrid label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; color: var(--muted); }
+.ar-optgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-weight: 400; color: var(--fg); }
+.ar-checks { margin-top: 10px; }
+.ar-pw .cv-input { max-width: 260px; }
+.ar-pw .err { color: var(--err); }
+.ar-note { margin-bottom: 8px; color: var(--fg); }
+.cv-done.bad { color: var(--err); }
+#arResult:has(.cv-done.bad) { background: var(--err-soft); }
+.ar-browser { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.ar-files { padding: 12px 14px; }
+.ar-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.ar-crumbs { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; flex-wrap: wrap; font-size: 13px; }
+.ar-crumbs button { border: 0; background: none; padding: 2px 4px; border-radius: 6px; color: var(--prog); font-weight: 600; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-crumbs button:hover { background: var(--hover); }
+.ar-crumbs span { color: var(--faint); }
+.ar-search { max-width: 220px; }
+.ar-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) 96px 80px 150px; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 7px; font-size: 12.5px; }
+.ar-headrow { font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); border-radius: 0; padding-bottom: 6px; }
+.ar-headrow button { border: 0; background: none; padding: 0; text-align: left; font-weight: 600; color: var(--muted); }
+.ar-headrow button:hover { color: var(--fg); }
+.ar-list { max-height: 460px; overflow: auto; }
+.ar-list .ar-row { cursor: pointer; }
+.ar-list .ar-row:hover { background: var(--hover); }
+.ar-list .ar-row.on { background: var(--sel); }
+.ar-list .ar-row.look { box-shadow: inset 2px 0 0 var(--prog); }
+.ar-nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ar-nm b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-nm.dir b { font-weight: 600; }
+.ar-ic { font-style: normal; flex: none; width: 18px; text-align: center; }
+.ar-flag { flex: none; font-size: 11px; color: var(--muted); }
+.ar-flag.bad { color: var(--err); }
+.ar-empty { padding: 14px 6px; }
+.ar-preview { position: sticky; top: 12px; min-height: 160px; }
+.ar-look-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 8px; }
+.ar-look-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-text { white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 420px; overflow: auto; padding: 10px; border-radius: 8px; background: var(--bg); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ar-img { max-width: 100%; max-height: 420px; border-radius: 8px; display: block; margin: 0 auto; background: repeating-conic-gradient(var(--hover) 0 25%, transparent 0 50%) 50% / 16px 16px; }
+.ar-pdf { width: 100%; height: 420px; border: 0; border-radius: 8px; }
+.ar-preview audio { width: 100%; }
+.ar-recent { list-style: none; margin: 0 0 6px; padding: 0; }
+.ar-recent li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.ar-recent li:hover { background: var(--hover); }
+.ar-auto { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+.ar-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.ar-field select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); max-width: 360px; }
+#arMakePane .cv-files li { cursor: default; }
+@media (max-width: 1000px) {
+  .ar-browser { grid-template-columns: minmax(0, 1fr); }
+  .ar-preview { position: static; }
+  .ar-row { grid-template-columns: 26px minmax(0, 1fr) 80px 0 0; }
+  .ar-row > :nth-child(4), .ar-row > :nth-child(5) { display: none; }
+}
+.ar-field .chips.seg { align-self: flex-start; }
+#arMkFormatNote { margin: -4px 2px 12px; }

@@ -70,8 +70,8 @@
     { id: "pdf-protect", title: "Add a password", desc: "Nobody can open it without the password.", accepts: ["pdf"], max: 1, verb: "Lock" },
     { id: "pdf-unlock", title: "Remove a password", desc: "Needs the password once.", accepts: ["pdf"], max: 1, verb: "Unlock" },
     { id: "doc", title: "Convert a document", desc: "Word, ODT, ebook, Markdown, web page, text or PDF to PDF, text, web page or ebook. Layout is kept simple.", accepts: ["doc", "pdf"], max: 1, verb: "Convert" },
-    { id: "unpack", title: "Unpack", desc: "ZIP, 7z, TAR, GZ, BZ2 and XZ.", accepts: ["archive"], max: 1, verb: "Unpack" },
-    { id: "pack", title: "Pack into an archive", desc: "Put the files in one ZIP or TAR.GZ.", accepts: all, verb: "Pack" },
+    { id: "unpack", title: "Unpack", desc: "ZIP, 7z, RAR, TAR, GZ, BZ2, XZ and ISO.", accepts: ["archive"], max: 1, verb: "Unpack" },
+    { id: "pack", title: "Pack into an archive", desc: "Put the files in one ZIP, 7z or TAR.GZ.", accepts: all, verb: "Pack" },
     { id: "subs", title: "Convert subtitles", desc: "SRT, VTT, ASS or LRC. Fix subtitles that come too early or late.", accepts: ["subs"], max: 1, verb: "Convert" },
     { id: "data", title: "Convert a spreadsheet", desc: "CSV, TSV, JSON and Excel (first sheet).", accepts: ["data"], max: 1, verb: "Convert" },
   ];
@@ -401,11 +401,11 @@
         ] }];
       }
       case "unpack": return [{ group: "Unpack", items: [
-        text("password", "Password (only for a locked 7z)", "", null, () => extOf(st.files[0]?.name) === "7z", { inputType: "password" }),
-        { type: "note", text: "Files go into a new folder in Converted. A single file inside comes out as itself." },
+        text("password", "Password (only for a locked archive)", "", null, null, { inputType: "password" }),
+        { type: "note", text: "Files go into Converted, in a new folder when there's more than one thing inside. For more choices (unpack some files, test, repair) use the Archives page." },
       ] }];
       case "pack": return [{ group: "Archive", items: [
-        chip("format", "Format", [["zip", "ZIP"], ["tar.gz", "TAR.GZ"]], s.format === "zip" ? "ZIP opens everywhere, with no extra app." : "TAR.GZ is common on Linux."),
+        chip("format", "Format", [["zip", "ZIP"], ["7z", "7z"], ["tar.gz", "TAR.GZ"]], s.format === "zip" ? "ZIP opens everywhere, with no extra app." : s.format === "7z" ? "7z is usually smaller. For passwords and parts, use the Archives page." : "TAR.GZ is common on Linux."),
         text("name", "Name", st.files.length === 1 ? st.files[0].name.replace(/\.[^.]+$/, "") : "", null),
       ] }];
       case "subs": return [{ group: "Subtitles", items: [

@@ -81,7 +81,7 @@ var (
 	cvAudioExt   = setOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma", "amr", "aiff", "aif", "alac", "mka", "caf")
 	cvImageExt   = setOf("jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "hif", "avif", "bmp", "tif", "tiff", "ico", "jfif")
 	cvDocExt     = setOf("docx", "odt", "epub", "md", "markdown", "txt", "html", "htm", "xhtml", "rtf")
-	cvArchiveExt = setOf("zip", "7z", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "rar", "cbz")
+	cvArchiveExt = setOf("zip", "7z", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst", "rar", "cbz", "cbr", "cb7", "iso", "001", "z01")
 	cvSubsExt    = setOf("srt", "vtt", "ass", "ssa", "lrc")
 	cvDataExt    = setOf("csv", "tsv", "json", "xlsx")
 )
@@ -173,11 +173,18 @@ func cvRun(ctx context.Context, paths []string, spec cvSpec, outDir string, prog
 
 // cvRunStaged is cvRun that also says what it's doing now ("Downloading…", "Removing noise"…).
 func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string, progress func(float64), stage func(string)) (result string, err error) {
+	return cvRunFull(ctx, paths, spec, outDir, progress, stage, nil)
+}
+
+// cvRunFull is cvRunStaged that can also leave a short note about the result ("Unpacked 12 files…").
+func cvRunFull(ctx context.Context, paths []string, spec cvSpec, outDir string, progress func(float64), stage func(string), note func(string)) (result string, err error) {
 	if len(paths) == 0 && spec.Tool != cvSpeak && spec.Tool != cvTranslate {
 		return "", cvError("Choose a file first.")
 	}
+	folders := spec.Tool == cvPack || spec.Tool == cvArcEdit // archives can hold folders
 	for _, p := range paths {
-		if !isFile(p) {
+		st, err := os.Stat(p)
+		if err != nil || (st.IsDir() && !folders) {
 			return "", cvError("The file " + filepath.Base(p) + " isn't there any more.")
 		}
 	}
@@ -197,7 +204,7 @@ func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string
 	}
 	defer os.RemoveAll(work)
 
-	j := &cvJob{ctx: ctx, spec: spec, work: work, progress: progress, stageFn: stage}
+	j := &cvJob{ctx: ctx, spec: spec, work: work, progress: progress, stageFn: stage, noteFn: note}
 	first := ""
 	if len(paths) > 0 {
 		first = paths[0]
@@ -401,15 +408,30 @@ func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string
 		out := file(base, format)
 		return out, j.doc(first, out, format)
 	case cvUnpack:
-		dir := folder(archiveBase(filepath.Base(first)))
-		res, err := j.unpack(first, dir)
-		if err == nil && res != dir { // one file inside: give the file itself
-			made = res
-		}
-		return res, err
+		return j.unpackArc(first, outDir)
+	case cvArcTest:
+		return j.testArc(first)
+	case cvArcRepair:
+		return j.repairArc(first, outDir)
+	case cvArcConvert:
+		return j.convertArc(first, outDir)
+	case cvArcEdit:
+		j.spec.Opts["add"] = jsonString(paths[1:])
+		return j.editArc(first)
+	case cvArcSplit:
+		return j.splitArc(first)
+	case cvArcJoin:
+		return j.joinArc(first, outDir)
 	case cvPack:
-		if format == "" || format == "7z" {
+		if format != "7z" && format != "tar.gz" {
 			format = "zip"
+		}
+		if d := spec.opt("dest"); d != "" && d != "downloads" {
+			outDir = j.arcDest(first, "")
+			if d == "next" && isPreviewCopy(first) {
+				outDir = filepath.Join(downloadDir, "Converted")
+			}
+			os.MkdirAll(outDir, 0o755)
 		}
 		name := spec.opt("name")
 		if name == "" {
@@ -418,8 +440,13 @@ func cvRunStaged(ctx context.Context, paths []string, spec cvSpec, outDir string
 				name = base
 			}
 		}
+		if format == "tar.gz" {
+			out := file(name, format)
+			return out, j.packTarGz(paths, out)
+		}
 		out := file(name, format)
-		return out, j.pack(paths, out)
+		made = ""
+		return j.packArc(paths, out) // arc removes its own parts if it fails
 	case cvSubs:
 		if format == "" {
 			format = "srt"
@@ -462,6 +489,7 @@ type cvJob struct {
 	work     string
 	progress func(float64)
 	stageFn  func(string)
+	noteFn   func(string)
 }
 
 // stage says what the job is doing now, for the progress line.
@@ -1141,7 +1169,8 @@ func actionConvertAny(msg map[string]any) {
 	if spec.Tool == cvTranslate { // the page reads it back; "Save translated subtitles" makes the real file
 		outDir = translateDir()
 	}
-	res, err := cvRunStaged(ctx, paths, spec, outDir, progress, stage)
+	var notes []string
+	res, err := cvRunFull(ctx, paths, spec, outDir, progress, stage, func(n string) { notes = append(notes, n) })
 	if err != nil {
 		var ce cvError
 		msg := err.Error()
@@ -1153,6 +1182,9 @@ func actionConvertAny(msg map[string]any) {
 		return
 	}
 	resp := map[string]any{"type": "done", "file": res}
+	if len(notes) > 0 {
+		resp["note"] = strings.Join(notes, " ")
+	}
 	if st, err := os.Stat(res); err == nil && st.IsDir() {
 		n := 0
 		filepath.WalkDir(res, func(_ string, d os.DirEntry, _ error) error {

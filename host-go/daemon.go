@@ -225,6 +225,7 @@ func defaultDaemonSettings() map[string]any {
 		"queues":          "", // names of the user's extra queues, comma separated
 		"proxy":           "", // "" = system proxy, "direct", or http://host:port / socks5://host:port
 		"afterDoneAction": "none",
+		"autoUnpack":      false, // unpack downloaded archives next to the file
 	}
 }
 
@@ -343,6 +344,7 @@ func (d *daemonServer) updateJob(id string, patch map[string]any) map[string]any
 	}
 	if prevStatus != "done" && newStatus == "done" {
 		go d.afterAllDone(id)
+		go d.autoUnpack(id)
 	}
 	if newStatus == "starting" && prevStatus != "starting" {
 		d.mu.Lock()
@@ -1092,7 +1094,7 @@ func (d *daemonServer) startConvertJob(req map[string]any) string {
 		"kind":         "convert",
 		"url":          path,
 		"title":        name,
-		"spec":         spec,
+		"spec":         specWithoutPasswords(spec), // jobs.json is a plain file: never keep passwords in it
 		"site":         "Local file",
 		"qualityLabel": label,
 		"paths":        req["paths"],
@@ -1262,6 +1264,9 @@ func (d *daemonServer) startDaemonWorker(id string, payload map[string]any) {
 			}
 			if sha := str(msg, "sha256"); sha != "" {
 				patch["sha256"] = sha
+			}
+			if n := str(msg, "note"); n != "" {
+				patch["note"] = n
 			}
 			if t := str(msg, "txt"); t != "" {
 				patch["txt"] = t
@@ -1476,4 +1481,42 @@ func (d *daemonServer) selfUpdate(req map[string]any) map[string]any {
 func sendLinkToDaemon(rawURL string) error {
 	_, err := daemonAction(map[string]any{"type": "addLink", "url": cleanLink(rawURL)})
 	return err
+}
+
+// specWithoutPasswords is a copy of a convert spec with any password left out.
+func specWithoutPasswords(spec map[string]any) map[string]any {
+	opts, _ := spec["opts"].(map[string]any)
+	if opts == nil {
+		return spec
+	}
+	c := map[string]any{}
+	for k, v := range spec {
+		c[k] = v
+	}
+	o := map[string]any{}
+	for k, v := range opts {
+		if !strings.Contains(strings.ToLower(k), "password") {
+			o[k] = v
+		}
+	}
+	c["opts"] = o
+	return c
+}
+
+var autoUnpackRe = regexp.MustCompile(`(?i)\.(zip|7z|rar|tar|tgz|tbz2|txz|tzst|tar\.(gz|bz2|xz|zst)|001)$`)
+var laterRarPart = regexp.MustCompile(`(?i)\.part0*([2-9]|\d{2,})\.rar$`)
+
+// autoUnpack unpacks a finished archive download next to itself, when "Unpack downloaded archives" is on.
+func (d *daemonServer) autoUnpack(id string) {
+	d.mu.Lock()
+	on, _ := d.settings["autoUnpack"].(bool)
+	j := d.jobs[id]
+	file, kind := str(j, "file"), str(j, "kind")
+	d.mu.Unlock()
+	if !on || file == "" || kind == "convert" || kind == "transcribe" || kind == "subs" ||
+		!autoUnpackRe.MatchString(file) || laterRarPart.MatchString(file) {
+		return
+	}
+	d.startConvertJob(map[string]any{"path": file, "name": filepath.Base(file), "label": "Auto-unpack",
+		"spec": map[string]any{"tool": "unpack", "opts": map[string]any{"dest": "next", "mode": "smart"}}})
 }

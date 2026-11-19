@@ -205,6 +205,15 @@ extension/      Chrome MV3 extension
                   menu from the helper's `info` for the video's own page (found from the post/thumbnail
                   link on YouTube, Facebook, Instagram, TikTok, X); ad libraries and plain video files
                   → "Video file". Tested by pt/t12.js.
+  archives.js     the Archives page (19 Nov 2026): open/browse/search/preview, unpack all or some, test, repair,
+                  convert, change ZIP/7z, make ZIP/7z, split/join. Ops `arcOpen/arcPreview/arcHistory/arcForget/
+                  arcTrash/arcShow/pickFolder` (`host-go/cv_archive_ops.go`); long work is helper jobs (tools
+                  `unpack`, `pack`, `arc-test|repair|convert|edit|split|join`, `host-go/cv_archive.go`).
+host-go/arc/    the archive engine (pure Go, no 7-Zip binary): ZIP (Deflate/Store/bzip2/zstd/xz, AES-256 and
+                ZipCrypto read, AES-256 write, CP437 names, rebuild from local headers), 7z (bodgit read; own
+                writer: LZMA2/Copy, AES-256, hidden names, solid), RAR 1.5–RAR5 read (rardecode), TAR + gz/bz2/xz/
+                zst, single .gz/.bz2/.xz/.zst, ISO (system `bsdtar`), split sets (.001, .z01, .partN.rar),
+                safe extraction (`extract.go`), safety check (`check.go`). Tests: `arc_test.go` + `testdata/`.
 host-go/        native messaging helper (Go, no deps). Actions: info, playlist, download (streams progress),
                 pause/cancel (via messages), convert (ffmpeg), probe, pickFile, fileInfo, reveal, open.
                 Finds yt-dlp, ffmpeg, deno in ./bin next to itself.
@@ -294,6 +303,47 @@ Key protocol facts:
 
 ## 6. Recent history (what was done, newest first)
 
+- 19 Nov 2026 (**Archives**, Mac app + extension; branch `claude/archive-manager-a4dc2c`): a WinRAR-style archive
+  manager. New sidebar page **Archives** (`extension/archives.js`, CSS `.ar-*`) with three tabs.
+  *Open an archive*: drop, "Choose an archive…", one of your downloads, or the recent list
+  (`appDir/archive-history.json`, 30 entries). Shows format chips, a safety banner (zip slip, links, programs,
+  zip-bomb ratio; a real bomb trick is refused), the comment, folders with breadcrumbs, search, sortable columns,
+  ticks, and a quick look (text up to 256 KB, pictures, audio, video, PDF; files up to 32 MB). Unpack all / selected
+  with: where (next to the archive, Downloads/AnySave/Unpacked, chosen folder), folder mode (smart = no extra level,
+  always a folder, straight in), name clashes (keep both, replace, keep what's there), system clutter
+  (`__MACOSX`, `.DS_Store`, `Thumbs.db`, `desktop.ini` left out by default), keep going past damaged files. Result
+  card: Open folder / Show in Finder / Move the archive (all parts) to the Trash. Test, Repair (ZIP rebuilt from
+  local headers; other formats: "save what can be read"), Convert to ZIP/7z (optional new password), Add / Delete /
+  Rename / Comment inside ZIP and 7z (writes `x.anysave-tmp` then swaps it in). Passwords: asked on open when the
+  list is locked, or when unpacking when only the contents are (then the job is retried); never stored
+  (`noPasswords()` in `background.js`, `specWithoutPasswords()` in `daemon.go`).
+  *Make an archive*: files or folders, ZIP or 7z (RAR can't be made: licence; said on the page), level 0–9,
+  AES-256 password (+ hide names and solid for 7z), parts (25 MB … 4 GB FAT32, 4.7 GB DVD, own size), comment, where.
+  *Split or join*: any file into .001 parts; join .001 / .z01 / .partN.rar sets (a split ZIP becomes a normal ZIP).
+  Also: **Unpack here** and **Open in Archives** on finished archive downloads; setting **Unpack downloaded
+  archives** (`autoUnpack`, off by default; Settings page and the Archives page) for both the extension
+  (`maybeAutoUnpack` in `background.js`) and the desktop daemon (`autoUnpack` in `daemon.go`); job results now carry a
+  short `note` ("Unpacked 12 files · skipped 1 unsafe item…"). The Convert page's Unpack/Pack use the same engine
+  (Unpack takes RAR/ISO and any password; Pack adds 7z). Safety: everything unpacks into a hidden
+  `.anysave-unpacking-*` folder first and is moved into place at the end (Cancel or an error leaves nothing),
+  `../` and absolute names are skipped, links/devices never made, sizes checked against the headers, free space
+  checked, O_EXCL creation, 255-byte names. `arcShow` opens only folders (never a file from an archive).
+  Pages may read archives in Downloads, next to an archive or file the user chose, or in a folder they chose
+  (`cvServer.arcDirs`). Licences: rardecode BSD-2, ulikunitz/xz BSD-3, x/text BSD-3, bsdtar from the OS (LEGAL §8).
+  Building 7-Zip itself was not possible (the AI's safety mode blocks building downloaded third-party code), so the
+  7z writer is AnySave's own; it is checked against bsdtar and bodgit.
+  Tests: `go test ./arc/` (every format, real WinRAR/7-Zip files from rarfile/bodgit, wrong passwords, damaged ZIP/7z/RAR,
+  zip slip, RAR symlink traversal, overlap bomb, size lie, full disk, cancel, edits, CP437, long names);
+  scratch `pt/e2e.mjs` (Mac-app mode: scratch daemon, 56 checks: every format, preview, unpack modes and clashes,
+  damaged + repair, header-locked and content-locked RAR with wrong/right password, zip slip, split 7z from part 2,
+  make locked ZIP / hidden-names 7z / 1 MB parts, rename/delete/comment/add, RAR→7z, join, split, auto-unpack of a
+  real download) and `pt/ext.mjs` (extension + native helper, 8 checks incl. auto-unpack through the fast engine).
+  **Not tested:** Move to Trash and Open folder / Show in Finder (they act on the real Finder; the code path up to
+  that call is tested), the file/folder choosers (system dialogs), dropping folders (refused with a message),
+  archives over a few MB (speed measured only in Go tests: 20 MB of text → 7z in 0.44 s), Windows (compiles;
+  `GOOS=windows go vet` passes; Recycle Bin and free space written but not run), Android (unchanged), opening
+  AnySave's AES ZIPs in WinRAR/7-Zip on Windows (checked with macOS bsdtar only).
+
 - 19 Nov 2026 (caption ideas, Mac app + extension, `captions.js` + `cv_captions.go`):
   **Click a word** on the video → menu: its colour, size (Normal/Big/Huge = `w.c`/`w.z`), "every <word>", back to
   normal (a drag still moves the caption; double-click still edits). **Colour the key words** (Look panel): numbers
@@ -348,7 +398,7 @@ Key protocol facts:
   Puppeteer test files pass (74 checks, 1 skipped: YouTube hover previews don't play headless); real YouTube info,
   playlist and downloads through the helper; the desktop page (manager served by `--daemon`) loads, refuses requests
   without the key, and downloads a pasted link. Checked and fine: daemon only on 127.0.0.1 with a random key;
-  open/reveal limited to Downloads/AnySave; `--` before every link given to yt-dlp; archive unpacking refuses `../`
+  open/reveal limited to Downloads/AnySave; `--` before every link given to yt-dlp; archive unpacking refuses `../` (see `host-go/arc/extract.go`)
   and symlinks; text from websites is escaped everywhere it's shown. Fixed: (1) scripts inside web pages may only
   send `info`, `download`, `directDownload`, `clickModifier` to the background (`FROM_PAGES` in background.js);
   (2) a link with a broken `%` code in its name (`report%ZZ.pdf`) crashed the start (`decodeName`); (3) vertical

@@ -24,6 +24,7 @@ function updateJob(id, patch) {
       if (now === "done" || now === "error") queueNotification({ ...jobs[id] });
       // Every kind of download ends here, so "when all downloads finish" works for all of them.
       if (now === "done") setTimeout(() => checkAfterDoneAction(id), 400);
+      if (now === "done") { const done = { ...jobs[id] }; setTimeout(() => maybeAutoUnpack(done), 600); }
     }
     const ids = Object.keys(jobs).sort((a, b) => (jobs[b].createdAt || 0) - (jobs[a].createdAt || 0));
     for (const old of ids.slice(400)) delete jobs[old]; // keep the newest 400
@@ -179,7 +180,8 @@ function runNative(id, payload, onDone) {
     } else if (msg.type === "done") {
       finished = true;
       updateJob(id, { status: "done", percent: 100, file: msg.file, speed: "", eta: "", finishedAt: Date.now(),
-        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined, ...(msg.txt ? { txt: msg.txt } : {}) });
+        fileName: msg.file ? msg.file.split(/[\\/]/).pop() : undefined, ...(msg.txt ? { txt: msg.txt } : {}),
+        ...(msg.note ? { note: String(msg.note).slice(0, 400) } : {}) });
       onDone && onDone(msg);
     } else if (msg.type === "paused") {
       finished = true;
@@ -288,10 +290,27 @@ async function startConvert({ path, paths, name, spec, id, label }) {
   id = id || newId();
   paths = Array.isArray(paths) ? paths.filter((p) => typeof p === "string").slice(0, 500) : [];
   if (!path) path = paths[0];
-  await updateJob(id, { kind: "convert", url: path, paths, title: name, spec, status: "starting", percent: 0, error: null,
+  await updateJob(id, { kind: "convert", url: path, paths, title: name, spec: noPasswords(spec), status: "starting", percent: 0, error: null,
     qualityLabel: String(label || specLabel(spec || {})).slice(0, 120) });
   runNative(id, { action: "convert", path, paths, spec });
   return id;
+}
+// "Unpack downloaded archives": a finished ZIP / 7z / RAR / TAR download is unpacked next to itself.
+const AUTO_UNPACK_RE = /\.(zip|7z|rar|tar|tgz|tbz2|txz|tzst|tar\.(gz|bz2|xz|zst)|001)$/i;
+async function maybeAutoUnpack(j) {
+  if (!j || !j.file || ["convert", "transcribe", "subs"].includes(j.kind) || !AUTO_UNPACK_RE.test(j.file)) return;
+  if (/\.part(?!0*1\.rar$)\d+\.rar$/i.test(j.file)) return; // only the first part of a split RAR
+  if (!(await getSettings()).autoUnpack) return;
+  const name = j.file.split(/[\\/]/).pop();
+  startConvert({ path: j.file, name, spec: { tool: "unpack", opts: { dest: "next", mode: "smart" } }, label: "Auto-unpack" });
+}
+
+// The jobs list is saved to disk: never keep a password in it.
+function noPasswords(spec) {
+  if (!spec || !spec.opts) return spec;
+  const opts = {};
+  for (const [k, v] of Object.entries(spec.opts)) if (!/password/i.test(k)) opts[k] = v;
+  return { ...spec, opts };
 }
 function specLabel(s) {
   const fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
@@ -312,6 +331,7 @@ const DEFAULT_SETTINGS = {
   maxSpeedKbps: 0,
   maxConcurrent: 3,
   afterDoneAction: "none",
+  autoUnpack: false,   // unpack downloaded archives (ZIP, 7z, RAR…) next to the file, then keep the archive
   videoOverlay: true,
   notifications: true, // tell the user when a download finishes or fails
   subLangs: "",        // subtitles to put inside videos, e.g. "en" or "en,fr"

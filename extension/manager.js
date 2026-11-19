@@ -48,6 +48,7 @@ const P = {
   close: "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
   open: "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z",
   folder: "M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z",
+  archives: "M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A2 2 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5 6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z",
   convert: "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
   voice: "M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5.3-3a5.3 5.3 0 0 1-10.6 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-1.7z",
   captions: "M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H5V6h14v12zM7 15h4v-2H7v2zm6 0h4v-2h-4v2zm-6-4h10V9H7v2z",
@@ -136,7 +137,7 @@ const needsLogin = (j) => j.status === "error" && j.kind === "video" && IN_EXTEN
   /log ?in|sign ?in|cookies|private|members|age|confirm your|not available|unavailable|registered users/i.test(j.error || "");
 
 // ---------- views ----------
-const VIEWS = ["downloads", "convert", "captions", "voice", "transcripts", "grab", "settings"];
+const VIEWS = ["downloads", "convert", "captions", "voice", "archives", "transcripts", "grab", "settings"];
 function showTab(name) {
   if (!VIEWS.includes(name)) name = "downloads";
   view = name;
@@ -145,6 +146,7 @@ function showTab(name) {
   if (name === "convert") window.fillDownloadsPicker?.(); // convert.js may still be loading
   if (name === "captions") { window.fillCaptionsPicker?.(); window.AnySaveCv?.session().catch(() => {}); }
   if (name === "voice") window.showVoiceLab?.();
+  if (name === "archives") window.showArchives?.();
   if (name === "transcripts") searchTranscripts($("txQuery").value);
   highlightNav();
 }
@@ -368,6 +370,8 @@ function rowHtml(j) {
     <div class="c-act"><span class="when">${esc(ago(j.status === "done" ? j.finishedAt || created(j) : created(j)))}</span><span class="qa">${acts}</span></div>`;
 }
 
+const ARCHIVE_RE = /\.(zip|7z|rar|tar|tgz|tbz2|txz|tzst|gz|bz2|xz|zst|iso|cbz|cbr|cb7|001)$/i;
+
 // One action on one download (row buttons, details buttons, toolbar).
 async function act(j, a) {
   switch (a) {
@@ -395,6 +399,8 @@ async function act(j, a) {
     case "convert": showTab("convert"); return window.choose?.({ path: j.file, name: j.fileName || j.title });
     case "captions": return window.openCaptions?.(j.kind === "transcribe" && j.url ? j.url : j.file);
     case "voice": return window.openVoiceLab?.(j.file);
+    case "archive": return window.openArchive?.(j.file);
+    case "unpack": return window.unpackDownload?.(j);
     case "embedSubs": case "burnSubs": {
       const name = String(j.url).split(/[\\/]/).pop();
       const r = await send({ type: "subs", video: j.url, srt: j.file, lang: j.lang, mode: a === "embedSubs" ? "embed" : "burn", name });
@@ -516,6 +522,10 @@ function renderDetail(force) {
       buttons += B("convert", "convert", "Convert");
       if (cat === "Videos") buttons += B("captions", "captions", "Edit captions", "Make, fix and style captions, then save them or draw them on the video");
       buttons += B("voice", "voice", "Clean up voice", "Take out background noise and even out the loudness (Voice Lab)");
+    }
+    if (ARCHIVE_RE.test(j.file)) {
+      buttons += B("unpack", "Archives", "Unpack here", "Unpack next to the file, without an extra folder level");
+      buttons += B("archive", "folder", "Open in Archives", "Look inside, unpack some files, test or repair it");
     }
     if (j.kind !== "transcribe") buttons += B("verify", "verify", "Check SHA-256", "Check against a SHA-256 checksum");
   }
@@ -1062,6 +1072,7 @@ function applySettingsUI(settings = {}) {
   if ($("embedChapters")) $("embedChapters").checked = settings.embedChapters !== false;
   if ($("notifications")) $("notifications").checked = settings.notifications !== false;
   if ($("embedCover")) $("embedCover").checked = !!settings.embedCover;
+  for (const id of ["autoUnpack", "arAutoUnpack"]) if ($(id)) $(id).checked = !!settings.autoUnpack;
   render();
 }
 // A value set elsewhere that isn't in the list (e.g. 3000 KB/s) still shows.
@@ -1089,6 +1100,8 @@ setting("videoOverlay", "videoOverlay", (t) => t.checked);
 setting("notifications", "notifications", (t) => t.checked);
 setting("embedChapters", "embedChapters", (t) => t.checked);
 setting("embedCover", "embedCover", (t) => t.checked);
+setting("autoUnpack", "autoUnpack", (t) => t.checked);
+setting("arAutoUnpack", "autoUnpack", (t) => t.checked);
 // Subtitle languages: Bangla, English and the other most-used languages.
 const SUB_LANGS = [["en", "English"], ["bn", "বাংলা (Bangla)"], ["hi", "हिन्दी (Hindi)"], ["ur", "اردو (Urdu)"], ["ar", "العربية (Arabic)"],
   ["es", "Español"], ["fr", "Français"], ["de", "Deutsch"], ["pt", "Português"], ["ru", "Русский"], ["tr", "Türkçe"],

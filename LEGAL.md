@@ -82,7 +82,11 @@ AnySave is built on these open-source projects:
 | Coil | Apache-2.0 | Android app |
 | Go standard library | BSD-3-Clause | desktop helper |
 | pdfcpu | Apache-2.0 | desktop helper (PDF tools) |
-| bodgit/sevenzip | BSD-3-Clause | desktop helper (7z) |
+| bodgit/sevenzip | BSD-3-Clause | desktop helper (reads 7z archives) |
+| nwaples/rardecode | BSD-2-Clause | desktop helper (reads RAR archives; AnySave never makes RAR files) |
+| ulikunitz/xz | BSD-3-Clause | desktop helper (XZ, LZMA and LZMA2: reads .xz/.tar.xz, packs 7z archives) |
+| golang.org/x/text | BSD-3-Clause | desktop helper (old ZIP file names in the DOS code page) |
+| bsdtar / libarchive (part of macOS and Windows 10/11) | BSD-2-Clause | desktop helper reads ISO disc images with the system's own copy; not shipped with AnySave |
 | PDF.js | Apache-2.0 | extension and desktop (PDF previews) |
 | whisper.cpp and the Whisper models | MIT | desktop (transcription, captions); Android app (Captions: whisper.cpp bundled, model downloaded on first use) |
 | Noto Sans, Noto Sans Bengali, Montserrat, Anton, Hind Siliguri | SIL Open Font License 1.1 | desktop helper and Android app (caption fonts; licences in `host-go/fonts/licences` and the app's `assets/fonts/licences`) |
